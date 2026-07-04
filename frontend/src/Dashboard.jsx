@@ -37,6 +37,15 @@ function Dashboard({ token, user, onLogout }) {
   const [offices, setOffices] = useState([]);
   const [consolidationYear, setConsolidationYear] = useState(new Date().getFullYear() + 1);
 
+  // Signatory state
+  const [submittedBy, setSubmittedBy] = useState("");
+  const [submittedByDesignation, setSubmittedByDesignation] = useState("");
+  const [preparedBy, setPreparedBy] = useState("");
+  const [preparedByDesignation, setPreparedByDesignation] = useState("");
+  const [aipReference, setAipReference] = useState("");
+  const [responsibilityCenterNo, setResponsibilityCenterNo] = useState("");
+  const [officeCodeFromPR, setOfficeCodeFromPR] = useState("");
+
   // Registration state
   const [newUsername, setNewUsername] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -415,7 +424,35 @@ function Dashboard({ token, user, onLogout }) {
     offices: "Manage Offices",
     users: "Manage Users",
   };
-
+  const handleUpdateSignatory = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch("http://localhost:8000/api/offices/signatory", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          submitted_by: submittedBy,
+          submitted_by_designation: submittedByDesignation,
+          prepared_by: preparedBy,
+          prepared_by_designation: preparedByDesignation,
+          aip_reference: aipReference,
+          responsibility_center_no: responsibilityCenterNo,
+          office_code_from_pr: officeCodeFromPR,
+          office_id: user.office_id,
+        }),
+      });
+      if (res.ok) {
+        showNotification("Signatory information updated successfully!");
+      } else {
+        showNotification("Failed to update signatory information", "danger");
+      }
+    } catch (err) {
+      showNotification("Network error occurred", "danger");
+    }
+  };
   return (
     <div className="dashboard-container">
       <aside className="sidebar">
@@ -902,7 +939,157 @@ function Dashboard({ token, user, onLogout }) {
 
             </div>
           )}
+          {activeTab === "signatory" && user.role === "end_user" && (
+            <div className="dashboard-card" style={{ maxWidth: "900px", margin: "0 auto" }}>
+              <h2 className="card-title">Signatory Information</h2>
+              <p className="page-subtitle" style={{ marginBottom: "1.5rem" }}>
+                Update signatory details and reference numbers for your PPMP documents
+              </p>
+              
+              <form onSubmit={handleUpdateSignatory} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.25rem" }}>
+                {/* Submitted By Section */}
+                <div className="form-group" style={{ gridColumn: "span 2" }}>
+                  <h3 style={{ fontSize: "1rem", fontWeight: "600", color: "var(--text-primary)", marginBottom: "1rem", borderBottom: "2px solid var(--primary-color)", paddingBottom: "0.5rem" }}>
+                    Submission Details
+                  </h3>
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label" htmlFor="submittedBy">
+                    <i className="fas fa-user" style={{ marginRight: "8px" }}></i>
+                    Submitted By
+                  </label>
+                  <input
+                    id="submittedBy"
+                    type="text"
+                    className="form-input"
+                    placeholder="Full Name"
+                    value={submittedBy}
+                    onChange={(e) => setSubmittedBy(e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label" htmlFor="submittedByDesignation">
+                    <i className="fas fa-id-badge" style={{ marginRight: "8px" }}></i>
+                    Designation
+                  </label>
+                  <input
+                    id="submittedByDesignation"
+                    type="text"
+                    className="form-input"
+                    placeholder="Position/Title"
+                    value={submittedByDesignation}
+                    onChange={(e) => setSubmittedByDesignation(e.target.value)}
+                    required
+                  />
+                </div>
 
+                {/* Prepared By Section */}
+                <div className="form-group" style={{ gridColumn: "span 2" }}>
+                  <h3 style={{ fontSize: "1rem", fontWeight: "600", color: "var(--text-primary)", marginBottom: "1rem", borderBottom: "2px solid var(--primary-color)", paddingBottom: "0.5rem", marginTop: "1rem" }}>
+                    Preparation Details
+                  </h3>
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label" htmlFor="preparedBy">
+                    <i className="fas fa-user-edit" style={{ marginRight: "8px" }}></i>
+                    Prepared By
+                  </label>
+                  <input
+                    id="preparedBy"
+                    type="text"
+                    className="form-input"
+                    placeholder="Full Name"
+                    value={preparedBy}
+                    onChange={(e) => setPreparedBy(e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label" htmlFor="preparedByDesignation">
+                    <i className="fas fa-id-badge" style={{ marginRight: "8px" }}></i>
+                    Designation
+                  </label>
+                  <input
+                    id="preparedByDesignation"
+                    type="text"
+                    className="form-input"
+                    placeholder="Position/Title"
+                    value={preparedByDesignation}
+                    onChange={(e) => setPreparedByDesignation(e.target.value)}
+                    required
+                  />
+                </div>
+
+                {/* Reference Numbers Section */}
+                <div className="form-group" style={{ gridColumn: "span 2" }}>
+                  <h3 style={{ fontSize: "1rem", fontWeight: "600", color: "var(--text-primary)", marginBottom: "1rem", borderBottom: "2px solid var(--primary-color)", paddingBottom: "0.5rem", marginTop: "1rem" }}>
+                    Reference Information
+                  </h3>
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label" htmlFor="aipReference">
+                    <i className="fas fa-hashtag" style={{ marginRight: "8px" }}></i>
+                    AIP Reference #
+                  </label>
+                  <input
+                    id="aipReference"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g., AIP-2025-001"
+                    value={aipReference}
+                    onChange={(e) => setAipReference(e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label" htmlFor="responsibilityCenterNo">
+                    <i className="fas fa-building" style={{ marginRight: "8px" }}></i>
+                    Responsibility Center #
+                  </label>
+                  <input
+                    id="responsibilityCenterNo"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g., RC-001"
+                    value={responsibilityCenterNo}
+                    onChange={(e) => setResponsibilityCenterNo(e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label" htmlFor="officeCodeFromPR">
+                    <i className="fas fa-code" style={{ marginRight: "8px" }}></i>
+                    Office Code (from PR)
+                  </label>
+                  <input
+                    id="officeCodeFromPR"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g., CMO, CHO, GSO"
+                    value={officeCodeFromPR}
+                    onChange={(e) => setOfficeCodeFromPR(e.target.value)}
+                    required
+                  />
+                </div>
+
+                {/* Submit Button */}
+                <div style={{ gridColumn: "span 2", marginTop: "1rem" }}>
+                  <button type="submit" className="btn" style={{ width: "100%", padding: "14px" }}>
+                    <i className="fas fa-save" style={{ marginRight: "8px" }}></i>
+                    Update Signatory Information
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
           {activeTab === "offices" && user.role === "bac_admin" && (
             <div className="grid-2-wide">
               <div className="dashboard-card">

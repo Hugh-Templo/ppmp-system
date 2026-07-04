@@ -45,7 +45,9 @@ function Login({ onLogin }) {
           </div>
           <h1 className="login-title">PPMP CONSOLIDATION</h1>
           <p className="login-subtitle">
-            Ormoc City Hall PPMP-APP Consolidation System (RA 12009)
+            Ormoc City Hall PPMP-APP Consolidation System     
+            <br />
+            (RA 12009)
           </p>
         </div>
 

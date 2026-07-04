@@ -2,9 +2,9 @@
 
 :root {
   /* Login palette */
-  --login-primary: #1e3c72;
-  --login-secondary: #2a5298;
-  --login-accent: #3498db;
+  --login-primary: #081f5c;
+  --login-secondary: #4d6fd4;
+  --login-accent: #6b8ee8;
 
   /* Admin neumorphic palette */
   --neuro-bg: #e6e9ef;
