@@ -8,13 +8,18 @@ from app.auth import (
     verify_password,
     create_access_token,
     get_current_user,
+    check_role,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @router.post("/register")
-def register(user_data: User, session: Session = Depends(get_session)):
+def register(user_data: User, current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+    # Only BAC admins can register users
+    if current_user.role != "bac_admin":
+        raise HTTPException(status_code=403, detail="Access denied: Only BAC administrators can register users")
+
     existing_user = session.exec(
         select(User).where(User.username == user_data.username)
     ).first()
@@ -47,6 +52,26 @@ def register(user_data: User, session: Session = Depends(get_session)):
     session.commit()
     session.refresh(new_user)
     return {"message": "User created successfully", "username": new_user.username}
+
+
+@router.get("/users")
+def list_users(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    users = session.exec(select(User)).all()
+    return [
+        {
+            "id": u.id,
+            "username": u.username,
+            "email": u.email,
+            "role": u.role,
+            "office_id": u.office_id,
+            "is_active": u.is_active,
+            "created_at": u.created_at,
+        }
+        for u in users
+    ]
 
 
 @router.post("/token")

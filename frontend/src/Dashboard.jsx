@@ -4,12 +4,12 @@ function Dashboard({ token, user, onLogout }) {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [ppmps, setPpmps] = useState([]);
   const [selectedPpmp, setSelectedPpmp] = useState(null);
-  
+
   // End-User state
   const [newPpmpTitle, setNewPpmpTitle] = useState("");
   const [newPpmpYear, setNewPpmpYear] = useState(new Date().getFullYear() + 1);
   const [newPpmpType, setNewPpmpType] = useState("Indicative");
-  
+
   // Item Form state
   const [itemDesc, setItemDesc] = useState("");
   const [itemCat, setItemCat] = useState("Office Supplies");
@@ -37,6 +37,15 @@ function Dashboard({ token, user, onLogout }) {
   const [offices, setOffices] = useState([]);
   const [consolidationYear, setConsolidationYear] = useState(new Date().getFullYear() + 1);
 
+  // Registration state
+  const [newUsername, setNewUsername] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [newUserRole, setNewUserRole] = useState("end_user");
+  const [newUserOfficeId, setNewUserOfficeId] = useState("");
+  const [registeredUsers, setRegisteredUsers] = useState([]);
+
   const [notification, setNotification] = useState({ message: "", type: "" });
 
   const showNotification = (message, type = "success") => {
@@ -56,8 +65,15 @@ function Dashboard({ token, user, onLogout }) {
     } else if (user.role === "bac_admin") {
       fetchApps();
       fetchOffices();
+      fetchUsers();
     }
   };
+
+  useEffect(() => {
+    if (user.role === "bac_admin" && activeTab === "users") {
+      fetchUsers();
+    }
+  }, [activeTab, user.role]);
 
   // --- API FETCHERS ---
 
@@ -115,6 +131,26 @@ function Dashboard({ token, user, onLogout }) {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch("http://localhost:8000/api/auth/users", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRegisteredUsers(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const getOfficeLabel = (officeId) => {
+    if (!officeId) return "—";
+    const office = offices.find((o) => o.id === officeId);
+    return office ? `${office.name} (${office.code})` : `Office #${officeId}`;
   };
 
   const handleSelectPpmp = async (ppmpId) => {
@@ -291,6 +327,47 @@ function Dashboard({ token, user, onLogout }) {
     }
   };
 
+  const handleRegisterUser = async (e) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      showNotification("Passwords do not match", "danger");
+      return;
+    }
+
+    try {
+      const res = await fetch("http://localhost:8000/api/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          username: newUsername,
+          email: newEmail,
+          hashed_password: newPassword,
+          role: newUserRole,
+          office_id: newUserRole === "end_user" ? parseInt(newUserOfficeId) : null,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        showNotification("User registered successfully!");
+        setNewUsername("");
+        setNewEmail("");
+        setNewPassword("");
+        setConfirmPassword("");
+        setNewUserRole("end_user");
+        setNewUserOfficeId("");
+        fetchUsers();
+      } else {
+        showNotification(data.detail || "Registration failed", "danger");
+      }
+    } catch (err) {
+      showNotification("Network error. Make sure the FastAPI backend is running.", "danger");
+    }
+  };
+
   const handleConsolidate = async (e) => {
     e.preventDefault();
     try {
@@ -324,55 +401,120 @@ function Dashboard({ token, user, onLogout }) {
     }
   };
 
+  const formatRole = (role) => {
+    const labels = {
+      bac_admin: "BAC Administrator",
+      budget_office: "Budget Office",
+      end_user: "End User",
+    };
+    return labels[role] || role.replace(/_/g, " ");
+  };
+
+  const pageTitles = {
+    dashboard: "Dashboard",
+    offices: "Manage Offices",
+    users: "Manage Users",
+  };
+
   return (
     <div className="dashboard-container">
-      <nav className="navbar">
-        <div className="navbar-brand">PPMP to APP Consolidation</div>
-        <div className="navbar-user">
-          <span className="user-tag">
-            {user.username} | Role: {user.role.toUpperCase()}
-          </span>
-          <button className="btn-logout" onClick={onLogout}>
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <div className="sidebar-logo">
+            <img src="/Ormoc_City.png" alt="Ormoc City" />
+          </div>
+          <h2 className="sidebar-title">PPMP System</h2>
+          <p className="sidebar-subtitle">RA 12009 Consolidation</p>
+        </div>
+
+        <nav className="sidebar-nav">
+          <div className="nav-section">
+            <div className="nav-section-title">Navigation</div>
+            <button
+              type="button"
+              className={`nav-link ${activeTab === "dashboard" ? "active" : ""}`}
+              onClick={() => { setActiveTab("dashboard"); setSelectedPpmp(null); setSelectedApp(null); }}
+            >
+              <i className="fas fa-th-large" aria-hidden="true"></i>
+              Dashboard
+            </button>
+            {user.role === "end_user" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "view_ppmps" ? "active" : ""}`}
+                onClick={() => { setActiveTab("view_ppmps"); setSelectedPpmp(null); setSelectedApp(null); }}
+              >
+                <i className="fas fa-th-large" aria-hidden="true"></i>
+                View PPMPs
+              </button>
+            )}
+            {user.role === "end_user" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "signatory" ? "active" : ""}`}
+                onClick={() => { setActiveTab("signatory"); setSelectedPpmp(null); setSelectedApp(null); }}
+              >
+                <i className="fas fa-th-large" aria-hidden="true"></i>
+                Signatory
+              </button>
+            )}
+            {user.role === "bac_admin" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "offices" ? "active" : ""}`}
+                onClick={() => { setActiveTab("offices"); }}
+              >
+                <i className="fas fa-building" aria-hidden="true"></i>
+                Manage Offices
+              </button>
+            )}
+            {user.role === "bac_admin" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "users" ? "active" : ""}`}
+                onClick={() => { setActiveTab("users"); }}
+              >
+                <i className="fas fa-users" aria-hidden="true"></i>
+                Manage Users
+              </button>
+            )}
+          </div>
+        </nav>
+
+        <div className="sidebar-footer">
+          <div className="sidebar-user-info">
+            <div className="user-avatar-small">{user.username.charAt(0).toUpperCase()}</div>
+            <div>
+              <div className="user-name">{user.username}</div>
+              <div className="user-role">{formatRole(user.role)}</div>
+            </div>
+          </div>
+          <button type="button" className="logout-btn" onClick={onLogout}>
+            <i className="fas fa-sign-out-alt" aria-hidden="true"></i>
             Logout
           </button>
         </div>
-      </nav>
+      </aside>
 
-      {notification.message && (
-        <div className={`alert alert-${notification.type}`} style={{ margin: "20px" }}>
-          {notification.message}
-        </div>
-      )}
-
-      <div className="main-content" style={{ display: "grid", gridTemplateColumns: "250px 1fr", gap: "20px" }}>
-        
-        {/* Navigation Sidebar */}
-        <div className="sidebar" style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          <button 
-            className={`btn ${activeTab === "dashboard" ? "" : "btn-secondary"}`}
-            onClick={() => { setActiveTab("dashboard"); setSelectedPpmp(null); setSelectedApp(null); }}
-          >
-            Dashboard
-          </button>
-          
-          {user.role === "bac_admin" && (
-            <button 
-              className={`btn ${activeTab === "offices" ? "" : "btn-secondary"}`}
-              onClick={() => { setActiveTab("offices"); }}
-            >
-              Manage Offices
-            </button>
-          )}
+      <main className="main-content">
+        <div className="page-header">
+          <h1 className="page-title">{pageTitles[activeTab] || "Dashboard"}</h1>
+          <p className="page-subtitle">Ormoc City Government PPMP-APP Consolidation System</p>
         </div>
 
-        {/* Content Workspace */}
+        {notification.message && (
+          <div className={`alert alert-${notification.type}`}>
+            {notification.message}
+          </div>
+        )}
+
         <div className="workspace">
-          
+
           {activeTab === "dashboard" && (
             <div>
               {/* --- END-USER VIEW --- */}
               {user.role === "end_user" && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+                <div className="grid-2">
                   <div>
                     <div className="dashboard-card">
                       <h2 className="card-title">Create PPMP</h2>
@@ -443,11 +585,11 @@ function Dashboard({ token, user, onLogout }) {
                     {selectedPpmp ? (
                       <div className="dashboard-card">
                         <h2 className="card-title">{selectedPpmp.ppmp.title} Items ({selectedPpmp.ppmp.status})</h2>
-                        
+
                         {/* Submit PPMP if in Draft or Returned */}
                         {(selectedPpmp.ppmp.status === "Draft" || selectedPpmp.ppmp.status === "Returned") && (
-                          <button 
-                            className="btn btn-success" 
+                          <button
+                            className="btn btn-success"
                             style={{ marginBottom: "15px", width: "100%" }}
                             onClick={() => handleSubmitPpmp(selectedPpmp.ppmp.id)}
                           >
@@ -485,7 +627,7 @@ function Dashboard({ token, user, onLogout }) {
                                   <td>{item.q1_qty}/{item.q2_qty}/{item.q3_qty}/{item.q4_qty}</td>
                                   <td>
                                     {selectedPpmp.ppmp.status !== "Approved" && selectedPpmp.ppmp.status !== "Pending Budget Review" && (
-                                      <button className="btn-logout" onClick={() => handleDeletePpmpItem(item.id)}>Remove</button>
+                                      <button type="button" className="btn btn-danger btn-sm" onClick={() => handleDeletePpmpItem(item.id)}>Remove</button>
                                     )}
                                   </td>
                                 </tr>
@@ -547,7 +689,7 @@ function Dashboard({ token, user, onLogout }) {
                               <option value="SVP">Small Value Procurement</option>
                               <option value="Competitive Bidding">Competitive Bidding</option>
                             </select>
-                            
+
                             <h4 style={{ gridColumn: "span 2", margin: "5px 0" }}>Milestone Distribution (Qty)</h4>
                             <input type="number" placeholder="Q1 Qty" className="form-input" value={q1} onChange={(e) => setQ1(e.target.value)} />
                             <input type="number" placeholder="Q2 Qty" className="form-input" value={q2} onChange={(e) => setQ2(e.target.value)} />
@@ -569,7 +711,7 @@ function Dashboard({ token, user, onLogout }) {
 
               {/* --- BUDGET OFFICE VIEW --- */}
               {user.role === "budget_office" && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: "20px" }}>
+                <div className="grid-2-wide">
                   <div className="dashboard-card">
                     <h2 className="card-title">Pending PPMPs for Audit</h2>
                     <table className="custom-table">
@@ -606,14 +748,14 @@ function Dashboard({ token, user, onLogout }) {
                     {selectedPpmp && auditDetails ? (
                       <div className="dashboard-card">
                         <h2 className="card-title">Audit Workspace: {selectedPpmp.ppmp.title}</h2>
-                        
+
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", margin: "15px 0" }}>
                           <div>
-                            <strong>Department Code:</strong> {auditDetails.office_name}<br/>
+                            <strong>Department Code:</strong> {auditDetails.office_name}<br />
                             <strong>Allocation:</strong> ₱{auditDetails.office_budget_allocation.toLocaleString()}
                           </div>
                           <div>
-                            <strong>Total PPMP Requested:</strong> ₱{auditDetails.total_ppmp_cost.toLocaleString()}<br/>
+                            <strong>Total PPMP Requested:</strong> ₱{auditDetails.total_ppmp_cost.toLocaleString()}<br />
                             <strong>Remaining Balance:</strong> ₱{auditDetails.remaining_budget.toLocaleString()}
                           </div>
                           <div style={{ gridColumn: "span 2", fontWeight: "bold" }}>
@@ -657,7 +799,7 @@ function Dashboard({ token, user, onLogout }) {
                           <button className="btn btn-success" onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "approve")}>
                             Approve PPMP
                           </button>
-                          <button className="btn-logout" style={{ padding: "12px 24px" }} onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "return")}>
+                          <button type="button" className="btn btn-danger" onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "return")}>
                             Return for Revision
                           </button>
                         </div>
@@ -673,7 +815,7 @@ function Dashboard({ token, user, onLogout }) {
 
               {/* --- BAC ADMIN VIEW --- */}
               {user.role === "bac_admin" && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+                <div className="grid-2">
                   <div>
                     <div className="dashboard-card">
                       <h2 className="card-title">APP Consolidation</h2>
@@ -762,7 +904,7 @@ function Dashboard({ token, user, onLogout }) {
           )}
 
           {activeTab === "offices" && user.role === "bac_admin" && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: "20px" }}>
+            <div className="grid-2-wide">
               <div className="dashboard-card">
                 <h2 className="card-title">Add Department/Office</h2>
                 <form onSubmit={handleCreateOffice} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -818,9 +960,115 @@ function Dashboard({ token, user, onLogout }) {
             </div>
           )}
 
-        </div>
+          {activeTab === "users" && user.role === "bac_admin" && (
+            <div className="grid-2-wide">
+              <div className="dashboard-card">
+                <h2 className="card-title">Register New User</h2>
+                <form onSubmit={handleRegisterUser} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  <input
+                    type="text"
+                    placeholder="Username"
+                    className="form-input"
+                    value={newUsername}
+                    onChange={(e) => setNewUsername(e.target.value)}
+                    required
+                  />
+                  <input
+                    type="email"
+                    placeholder="Email Address"
+                    className="form-input"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    required
+                  />
+                  <input
+                    type="password"
+                    placeholder="Password"
+                    className="form-input"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                  />
+                  <input
+                    type="password"
+                    placeholder="Confirm Password"
+                    className="form-input"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                  />
+                  <select
+                    className="form-input"
+                    value={newUserRole}
+                    onChange={(e) => setNewUserRole(e.target.value)}
+                  >
+                    <option value="end_user">End-User (Office Representative)</option>
+                    <option value="budget_office">Budget Office Officer</option>
+                    <option value="bac_admin">BAC Secretariat / Admin</option>
+                  </select>
+                  {newUserRole === "end_user" && (
+                    <select
+                      className="form-input"
+                      value={newUserOfficeId}
+                      onChange={(e) => setNewUserOfficeId(e.target.value)}
+                      required
+                    >
+                      <option value="">Select Office</option>
+                      {offices.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.name} ({o.code})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button type="submit" className="btn">Register User</button>
+                </form>
+              </div>
 
-      </div>
+              <div className="dashboard-card">
+                <h2 className="card-title">Registered Users</h2>
+                <div className="table-wrapper">
+                  <table className="custom-table">
+                    <thead>
+                      <tr>
+                        <th>Username</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Office</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {registeredUsers.length === 0 ? (
+                        <tr>
+                          <td colSpan="6">No users registered yet.</td>
+                        </tr>
+                      ) : (
+                        registeredUsers.map((u) => (
+                          <tr key={u.id}>
+                            <td>{u.username}</td>
+                            <td>{u.email}</td>
+                            <td>{formatRole(u.role)}</td>
+                            <td>{getOfficeLabel(u.office_id)}</td>
+                            <td>
+                              <span className={`badge ${u.is_active ? "badge-success" : "badge-secondary"}`}>
+                                {u.is_active ? "Active" : "Inactive"}
+                              </span>
+                            </td>
+                            <td>{new Date(u.created_at).toLocaleDateString()}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </main>
     </div>
   );
 }
