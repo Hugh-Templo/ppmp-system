@@ -37,24 +37,44 @@ function Login({ onLogin }) {
   };
 
   return (
-    <div className="login-container">
-      <div className="login-card">
-        <div className="login-header">
-          <div className="login-logo">
+    <div className="split-login-container">
+      {/* Left Pane: Visual branding with silhouette */}
+      <div className="login-left-pane">
+        <div className="dev-silhouette-container">
+          <img 
+            src="/dev.png" 
+            alt="Developer Silhouette" 
+            className="dev-silhouette" 
+          />
+        </div>
+        
+        <div className="login-left-content">
+          <div className="login-left-logo">
             <img src="/Ormoc_City.png" alt="Ormoc City" />
           </div>
-          <h1 className="login-title">PPMP CONSOLIDATION</h1>
-          <p className="login-subtitle">
-            Ormoc City Hall PPMP-APP Consolidation System     
+          <h1 className="login-left-title">
+            PPMP <br />
+            CONSOLIDATION
+          </h1>
+          <p className="login-left-subtitle">
+            Ormoc City Hall PPMP-APP Consolidation System
             <br />
-            (RA 12009)
+            RA 12009 Compliance Module
           </p>
         </div>
+      </div>
 
-        <div className="login-body">
+      {/* Right Pane: Login Form Area */}
+      <div className="login-right-pane">
+        <div className="login-form-wrapper">
+          <div className="login-form-header">
+            <h2 className="login-form-title">Portal Sign In</h2>
+            <p className="login-form-subtitle">Enter your official credentials to access the system</p>
+          </div>
+
           {error && <div className="alert alert-danger">{error}</div>}
 
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} className="form-stack">
             <div className="form-group">
               <label className="form-label" htmlFor="username">
                 Username
@@ -65,7 +85,8 @@ function Login({ onLogin }) {
                 className="form-input"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter your username"
+                placeholder="e.g. jdoe_ormoc"
+                autoComplete="username"
                 required
               />
             </div>
@@ -80,15 +101,22 @@ function Login({ onLogin }) {
                 className="form-input"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
+                placeholder="••••••••"
+                autoComplete="current-password"
                 required
               />
             </div>
 
             <button type="submit" className="btn-login" disabled={loading}>
-              {loading ? "Please wait..." : "Sign In"}
+              {loading ? "Authenticating..." : "Access System"}
             </button>
           </form>
+
+          <div className="mt-20" style={{ textAlign: 'center' }}>
+            <p className="login-form-subtitle" style={{ fontSize: '0.85rem' }}>
+              &copy; {new Date().getFullYear()} Ormoc City Government. All rights reserved.
+            </p>
+          </div>
         </div>
       </div>
     </div>
