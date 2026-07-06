@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
-from typing import List
+from typing import List, Optional
+from datetime import datetime
 from app.database import get_session
-from app.models import User, APP, APPRow, Office, PPMP, PPMPItem
+from app.models import User, APP, APPRow, Office, PPMP, PPMPItem, IndicativePPMP, FinalPPMP
 from app.auth import check_role, get_current_user
 
 router = APIRouter(prefix="/api/bac", tags=["bac"])
@@ -37,18 +38,18 @@ def consolidate_ppmps(
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
     """
-    Consolidate all 'Approved' PPMPs for the specified fiscal year into a single APP.
+    Consolidate all 'Approved' indicative PPMPs for the specified fiscal year into a single APP.
     If an APP already exists for that year, it updates it.
     """
-    # 1. Fetch all approved PPMPs for this year
-    approved_ppmps = session.exec(
-        select(PPMP).where(PPMP.fiscal_year == fiscal_year, PPMP.status == "Approved")
+    # 1. Fetch all approved indicative PPMPs for this year
+    approved_indicative_ppmps = session.exec(
+        select(IndicativePPMP).where(IndicativePPMP.fiscal_year == fiscal_year, IndicativePPMP.posting_status == "Approved")
     ).all()
     
-    if not approved_ppmps:
+    if not approved_indicative_ppmps:
         raise HTTPException(
             status_code=400, 
-            detail=f"No approved PPMPs found for fiscal year {fiscal_year} to consolidate"
+            detail=f"No approved indicative PPMPs found for fiscal year {fiscal_year} to consolidate"
         )
         
     # 2. Find or create the APP entity
@@ -66,7 +67,7 @@ def consolidate_ppmps(
         session.refresh(app)
 
     # 3. Consolidate items grouped by description, category, is_cse, unit_cost, procurement_mode
-    ppmp_ids = [p.id for p in approved_ppmps]
+    ppmp_ids = [p.id for p in approved_indicative_ppmps]
     all_items = session.exec(
         select(PPMPItem).where(PPMPItem.ppmp_id.in_(ppmp_ids))
     ).all()
@@ -120,6 +121,73 @@ def consolidate_ppmps(
     session.commit()
     session.refresh(app)
     return app
+
+
+@router.post("/indicative/ppmps/{ppmp_id}/approve")
+def approve_indicative_ppmp(
+    ppmp_id: int,
+    remarks: str = "",
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """Approve an indicative PPMP for consolidation."""
+    ppmp = session.get(IndicativePPMP, ppmp_id)
+    if not ppmp:
+        raise HTTPException(status_code=404, detail="Indicative PPMP not found")
+    
+    # Validate that PPMP is in Posted status
+    if ppmp.posting_status != "Posted":
+        raise HTTPException(status_code=400, detail="Only Posted PPMPs can be approved")
+    
+    # Update posting status
+    ppmp.posting_status = "Approved"
+    ppmp.approved_at = datetime.utcnow()
+    ppmp.approved_by = current_user.id
+    
+    session.add(ppmp)
+    session.commit()
+    session.refresh(ppmp)
+    
+    return {
+        "message": "Indicative PPMP approved successfully",
+        "status": ppmp.posting_status,
+        "approved_at": ppmp.approved_at,
+        "remarks": remarks
+    }
+
+
+@router.post("/indicative/ppmps/{ppmp_id}/reject")
+def reject_indicative_ppmp(
+    ppmp_id: int,
+    remarks: str = "",
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """Reject an indicative PPMP (return to budget office for revision)."""
+    ppmp = session.get(IndicativePPMP, ppmp_id)
+    if not ppmp:
+        raise HTTPException(status_code=404, detail="Indicative PPMP not found")
+    
+    # Validate that PPMP is in Posted status
+    if ppmp.posting_status != "Posted":
+        raise HTTPException(status_code=400, detail="Only Posted PPMPs can be rejected")
+    
+    # Update posting status
+    ppmp.posting_status = "Rejected"
+    ppmp.rejected_at = datetime.utcnow()
+    ppmp.rejected_by = current_user.id
+    ppmp.rejection_remarks = remarks
+    
+    session.add(ppmp)
+    session.commit()
+    session.refresh(ppmp)
+    
+    return {
+        "message": "Indicative PPMP rejected successfully",
+        "status": ppmp.posting_status,
+        "rejected_at": ppmp.rejected_at,
+        "remarks": remarks
+    }
 
 
 @router.get("/apps", response_model=List[APP])

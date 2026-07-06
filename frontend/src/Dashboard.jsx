@@ -25,6 +25,7 @@ function Dashboard({ token, user, onLogout }) {
 
   // Budget Office state
   const [pendingPpmps, setPendingPpmps] = useState([]);
+  const [indicativePpmps, setIndicativePpmps] = useState([]);
   const [auditDetails, setAuditDetails] = useState(null);
   const [remarks, setRemarks] = useState("");
 
@@ -36,6 +37,13 @@ function Dashboard({ token, user, onLogout }) {
   const [newOfficeBudget, setNewOfficeBudget] = useState(0);
   const [offices, setOffices] = useState([]);
   const [consolidationYear, setConsolidationYear] = useState(new Date().getFullYear() + 1);
+  const [dbmClassification, setDbmClassification] = useState([]);
+
+  // DBM Classification form state
+  const [newDbmCode, setNewDbmCode] = useState("");
+  const [newDbmProjectTitle, setNewDbmProjectTitle] = useState("");
+  const [newDbmClassification, setNewDbmClassification] = useState("");
+  const [newDbmDescription, setNewDbmDescription] = useState("");
 
   // Signatory state
   const [submittedBy, setSubmittedBy] = useState("");
@@ -71,16 +79,41 @@ function Dashboard({ token, user, onLogout }) {
       fetchOfficePpmps();
     } else if (user.role === "budget_office") {
       fetchPendingPpmps();
+      fetchIndicativePpmps();
+      fetchOffices();
     } else if (user.role === "bac_admin") {
       fetchApps();
       fetchOffices();
       fetchUsers();
+      fetchDbmClassification();
+      fetchPendingPpmps();
+      fetchIndicativePpmps();
     }
   };
 
   useEffect(() => {
     if (user.role === "bac_admin" && activeTab === "users") {
       fetchUsers();
+    }
+  }, [activeTab, user.role]);
+
+  useEffect(() => {
+    if (user.role === "budget_office" && activeTab === "indicative") {
+      fetchIndicativePpmps();
+      fetchOffices();
+    }
+  }, [activeTab, user.role]);
+
+  useEffect(() => {
+    if (user.role === "bac_admin" && activeTab === "audit") {
+      fetchPendingPpmps();
+      fetchIndicativePpmps();
+    }
+  }, [activeTab, user.role]);
+
+  useEffect(() => {
+    if (user.role === "bac_admin" && activeTab === "dbm") {
+      fetchDbmClassification();
     }
   }, [activeTab, user.role]);
 
@@ -108,6 +141,23 @@ function Dashboard({ token, user, onLogout }) {
       if (res.ok) {
         const data = await res.json();
         setPendingPpmps(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchIndicativePpmps = async () => {
+    try {
+      const url = user.role === "budget_office"
+        ? "http://localhost:8000/api/budget/indicative"
+        : "http://localhost:8000/api/budget/indicative/pending";
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIndicativePpmps(data);
       }
     } catch (err) {
       console.error(err);
@@ -156,6 +206,53 @@ function Dashboard({ token, user, onLogout }) {
     }
   };
 
+  const fetchDbmClassification = async () => {
+    try {
+      const res = await fetch("http://localhost:8000/api/dbm/classifications", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDbmClassification(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleAddDbmClassification = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch("http://localhost:8000/api/dbm/classifications", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          code: newDbmCode,
+          project_title: newDbmProjectTitle,
+          classification: newDbmClassification,
+          description: newDbmDescription,
+        }),
+      });
+      if (res.ok) {
+        showNotification("DBM classification added successfully!");
+        setNewDbmCode("");
+        setNewDbmProjectTitle("");
+        setNewDbmClassification("");
+        setNewDbmDescription("");
+        fetchDbmClassification();
+      } else {
+        const errData = await res.json();
+        showNotification(errData.detail || "Failed to add DBM classification", "danger");
+      }
+    } catch (err) {
+      showNotification("Failed to add DBM classification", "danger");
+      console.error(err);
+    }
+  };
+
   const getOfficeLabel = (officeId) => {
     if (!officeId) return "—";
     const office = offices.find((o) => o.id === officeId);
@@ -170,7 +267,7 @@ function Dashboard({ token, user, onLogout }) {
       if (res.ok) {
         const data = await res.json();
         setSelectedPpmp(data);
-        if (user.role === "budget_office") {
+        if (user.role === "budget_office" || user.role === "bac_admin") {
           loadAudit(ppmpId);
         }
       }
@@ -309,6 +406,66 @@ function Dashboard({ token, user, onLogout }) {
     }
   };
 
+  const handlePostIndicativePpmp = async (ppmpId) => {
+    try {
+      const res = await fetch(`http://localhost:8000/api/budget/indicative/ppmps/${ppmpId}/post`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        showNotification("Indicative PPMP posted successfully!");
+        fetchIndicativePpmps();
+      }
+    } catch (err) {
+      showNotification("Failed to post indicative PPMP", "danger");
+    }
+  };
+
+  const handleUnpostIndicativePpmp = async (ppmpId) => {
+    try {
+      const res = await fetch(`http://localhost:8000/api/budget/indicative/ppmps/${ppmpId}/unpost`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        showNotification("Indicative PPMP unposted successfully!");
+        fetchIndicativePpmps();
+      }
+    } catch (err) {
+      showNotification("Failed to unpost indicative PPMP", "danger");
+    }
+  };
+
+  const handleApproveIndicativePpmp = async (ppmpId) => {
+    try {
+      const res = await fetch(`http://localhost:8000/api/bac/indicative/ppmps/${ppmpId}/approve`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        showNotification("Indicative PPMP approved successfully!");
+        fetchIndicativePpmps();
+      }
+    } catch (err) {
+      showNotification("Failed to approve indicative PPMP", "danger");
+    }
+  };
+
+  const handleRejectIndicativePpmp = async (ppmpId) => {
+    try {
+      const res = await fetch(`http://localhost:8000/api/bac/indicative/ppmps/${ppmpId}/reject`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        showNotification("Indicative PPMP rejected successfully!");
+        fetchIndicativePpmps();
+      }
+    } catch (err) {
+      showNotification("Failed to reject indicative PPMP", "danger");
+    }
+  };
+
   const handleCreateOffice = async (e) => {
     e.preventDefault();
     try {
@@ -421,8 +578,11 @@ function Dashboard({ token, user, onLogout }) {
 
   const pageTitles = {
     dashboard: "Dashboard",
+    indicative: "Indicative PPMP Management",
     offices: "Manage Offices",
     users: "Manage Users",
+    dbm: "DBM Classification",
+    audit: "Pending PPMP Review",
   };
   const handleUpdateSignatory = async (e) => {
     e.preventDefault();
@@ -475,6 +635,16 @@ function Dashboard({ token, user, onLogout }) {
               <i className="fas fa-th-large" aria-hidden="true"></i>
               Dashboard
             </button>
+            {user.role === "budget_office" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "indicative" ? "active" : ""}`}
+                onClick={() => { setActiveTab("indicative"); setSelectedPpmp(null); setAuditDetails(null); }}
+              >
+                <i className="fas fa-file-invoice" aria-hidden="true"></i>
+                Indicative PPMP
+              </button>
+            )}
             {user.role === "end_user" && (
               <button
                 type="button"
@@ -513,6 +683,26 @@ function Dashboard({ token, user, onLogout }) {
               >
                 <i className="fas fa-users" aria-hidden="true"></i>
                 Manage Users
+              </button>
+            )}
+            {user.role === "bac_admin" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "dbm" ? "active" : ""}`}
+                onClick={() => { setActiveTab("dbm"); }}
+              >
+                <i className="fas fa-file-alt" aria-hidden="true"></i>
+                DBM Classification
+              </button>
+            )}
+            {user.role === "bac_admin" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "audit" ? "active" : ""}`}
+                onClick={() => { setActiveTab("audit"); setSelectedPpmp(null); setAuditDetails(null); }}
+              >
+                <i className="fas fa-clipboard-check" aria-hidden="true"></i>
+                Pending PPMP Review
               </button>
             )}
           </div>
@@ -594,7 +784,7 @@ function Dashboard({ token, user, onLogout }) {
                         <tbody>
                           {ppmps.length === 0 ? (
                             <tr>
-                              <td colSpan="4">No PPMPs created yet.</td>
+                              <td colSpan="5">No PPMPs created yet.</td>
                             </tr>
                           ) : (
                             ppmps.map((p) => (
@@ -602,9 +792,16 @@ function Dashboard({ token, user, onLogout }) {
                                 <td>{p.title}</td>
                                 <td>{p.fiscal_year}</td>
                                 <td>
-                                  <span className={`badge ${p.status === "Approved" ? "badge-success" : p.status === "Pending Budget Review" ? "badge-warning" : "badge-secondary"}`}>
+                                  <span className={`badge ${p.status === "Approved" ? "badge-success" : p.status === "Pending Budget Review" ? "badge-warning" : p.status === "Returned" ? "badge-danger" : "badge-secondary"}`}>
                                     {p.status}
                                   </span>
+                                </td>
+                                <td>
+                                  {p.status === "Returned" && p.remarks && (
+                                    <div style={{ fontSize: "12px", color: "#d32f2f", marginTop: "5px" }}>
+                                      <strong>Remarks:</strong> {p.remarks}
+                                    </div>
+                                  )}
                                 </td>
                                 <td>
                                   <button className="btn" onClick={() => handleSelectPpmp(p.id)}>View/Edit</button>
@@ -632,6 +829,16 @@ function Dashboard({ token, user, onLogout }) {
                           >
                             Submit to Budget Office
                           </button>
+                        )}
+
+                        {/* Display remarks if PPMP was returned for revision */}
+                        {selectedPpmp.ppmp.status === "Returned" && selectedPpmp.ppmp.remarks && (
+                          <div className="dashboard-card" style={{ backgroundColor: "#fff3f3", borderLeft: "4px solid #d32f2f", marginTop: "20px" }}>
+                            <h3 style={{ color: "#d32f2f", marginBottom: "10px" }}>Revision Required</h3>
+                            <p><strong>Budget Office Remarks:</strong></p>
+                            <p style={{ fontSize: "14px", lineHeight: "1.5" }}>{selectedPpmp.ppmp.remarks}</p>
+                            <p style={{ fontSize: "12px", color: "#666", marginTop: "10px" }}>Please address these comments before resubmitting your PPMP.</p>
+                          </div>
                         )}
 
                         <table className="custom-table" style={{ fontSize: "12px" }}>
@@ -746,7 +953,7 @@ function Dashboard({ token, user, onLogout }) {
                 </div>
               )}
 
-              {/* --- BUDGET OFFICE VIEW --- */}
+              {/* --- BUDGET OFFICE PPMP AUDIT (Dashboard) --- */}
               {user.role === "budget_office" && (
                 <div className="grid-2-wide">
                   <div className="dashboard-card">
@@ -768,7 +975,7 @@ function Dashboard({ token, user, onLogout }) {
                         ) : (
                           pendingPpmps.map((p) => (
                             <tr key={p.id}>
-                              <td>{p.office_id}</td>
+                              <td>{getOfficeLabel(p.office_id)}</td>
                               <td>{p.title}</td>
                               <td>{p.fiscal_year}</td>
                               <td>
@@ -824,22 +1031,26 @@ function Dashboard({ token, user, onLogout }) {
                           </tbody>
                         </table>
 
-                        <textarea
-                          className="form-input"
-                          placeholder="Review Remarks..."
-                          value={remarks}
-                          onChange={(e) => setRemarks(e.target.value)}
-                          style={{ minHeight: "80px", marginBottom: "15px" }}
-                        />
+                        {user.role === "budget_office" && (
+                          <>
+                            <textarea
+                              className="form-input"
+                              placeholder="Review Remarks..."
+                              value={remarks}
+                              onChange={(e) => setRemarks(e.target.value)}
+                              style={{ minHeight: "80px", marginBottom: "15px" }}
+                            />
 
-                        <div style={{ display: "flex", gap: "10px" }}>
-                          <button className="btn btn-success" onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "approve")}>
-                            Approve PPMP
-                          </button>
-                          <button type="button" className="btn btn-danger" onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "return")}>
-                            Return for Revision
-                          </button>
-                        </div>
+                            <div style={{ display: "flex", gap: "10px" }}>
+                              <button className="btn btn-success" onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "approve")}>
+                                Approve PPMP
+                              </button>
+                              <button type="button" className="btn btn-danger" onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "return")}>
+                                Return for Revision
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     ) : (
                       <div className="dashboard-card" style={{ textAlign: "center", color: "var(--text-muted)" }}>
@@ -937,155 +1148,285 @@ function Dashboard({ token, user, onLogout }) {
                 </div>
               )}
 
+
+
+            </div>
+          )}
+          {activeTab === "audit" && user.role === "bac_admin" && (
+            <div className="grid-2-wide">
+              <div className="dashboard-card">
+                <h2 className="card-title">Pending PPMPs for Audit</h2>
+                <table className="custom-table">
+                  <thead>
+                    <tr>
+                      <th>Office</th>
+                      <th>Title</th>
+                      <th>Year</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingPpmps.length === 0 ? (
+                      <tr>
+                        <td colSpan="4">No pending PPMPs for review.</td>
+                      </tr>
+                    ) : (
+                      pendingPpmps.map((p) => (
+                        <tr key={p.id}>
+                          <td>{getOfficeLabel(p.office_id)}</td>
+                          <td>{p.title}</td>
+                          <td>{p.fiscal_year}</td>
+                          <td>
+                            <button className="btn" onClick={() => handleSelectPpmp(p.id)}>Audit</button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div>
+                {selectedPpmp && auditDetails ? (
+                  <div className="dashboard-card">
+                    <h2 className="card-title">Audit Workspace: {selectedPpmp.ppmp.title}</h2>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", margin: "15px 0" }}>
+                      <div>
+                        <strong>Department Code:</strong> {auditDetails.office_name}<br />
+                        <strong>Allocation:</strong> ₱{auditDetails.office_budget_allocation.toLocaleString()}
+                      </div>
+                      <div>
+                        <strong>Total PPMP Requested:</strong> ₱{auditDetails.total_ppmp_cost.toLocaleString()}<br />
+                        <strong>Remaining Balance:</strong> ₱{auditDetails.remaining_budget.toLocaleString()}
+                      </div>
+                      <div style={{ gridColumn: "span 2", fontWeight: "bold" }}>
+                        Status: <span style={{ color: auditDetails.is_within_budget ? "green" : "red" }}>
+                          {auditDetails.is_within_budget ? "WITHIN BUDGET LIMIT" : "EXCEEDED BUDGET LIMIT"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <h3>Requested Items List</h3>
+                    <table className="custom-table" style={{ fontSize: "12px", marginBottom: "20px" }}>
+                      <thead>
+                        <tr>
+                          <th>Description</th>
+                          <th>Qty</th>
+                          <th>Unit Cost</th>
+                          <th>Subtotal</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedPpmp.items.map((item) => (
+                          <tr key={item.id}>
+                            <td>{item.description}</td>
+                            <td>{item.quantity}</td>
+                            <td>₱{item.unit_cost.toLocaleString()}</td>
+                            <td>₱{item.estimated_budget.toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="dashboard-card" style={{ textAlign: "center", color: "var(--text-muted)" }}>
+                    Select a PPMP to review budget details.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {activeTab === "indicative" && user.role === "budget_office" && (
+            <div className="dashboard-card">
+              <h2 className="card-title">Indicative PPMP Management</h2>
+              <p className="page-subtitle" style={{ marginBottom: "1rem" }}>
+                Manage indicative PPMPs for RA 12009 compliance
+              </p>
+              <table className="custom-table">
+                <thead>
+                  <tr>
+                    <th>Office</th>
+                    <th>Title</th>
+                    <th>Year</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {indicativePpmps.length === 0 ? (
+                    <tr>
+                      <td colSpan="5">No indicative PPMPs available for posting.</td>
+                    </tr>
+                  ) : (
+                    indicativePpmps.map((p) => (
+                      <tr key={p.id}>
+                        <td>{getOfficeLabel(p.office_id)}</td>
+                        <td>{p.title}</td>
+                        <td>{p.fiscal_year}</td>
+                        <td>
+                          <span className={`badge ${p.posting_status === "Draft" ? "badge-secondary" : p.posting_status === "Posted" ? "badge-warning" : p.posting_status === "Approved" ? "badge-success" : "badge-danger"}`}>
+                            {p.posting_status}
+                          </span>
+                        </td>
+                        <td>
+                          {p.posting_status === "Draft" && (
+                            <button className="btn" onClick={() => handlePostIndicativePpmp(p.id)}>Post</button>
+                          )}
+                          {p.posting_status === "Posted" && (
+                            <button className="btn btn-danger" onClick={() => handleUnpostIndicativePpmp(p.id)}>Unpost</button>
+                          )}
+                          {p.posting_status !== "Draft" && p.posting_status !== "Posted" && (
+                            <span className="badge badge-secondary">{p.posting_status}</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           )}
           {activeTab === "signatory" && user.role === "end_user" && (
-            <div className="dashboard-card" style={{ maxWidth: "900px", margin: "0 auto" }}>
-              <h2 className="card-title">Signatory Information</h2>
-              <p className="page-subtitle" style={{ marginBottom: "1.5rem" }}>
-                Update signatory details and reference numbers for your PPMP documents
-              </p>
-              
-              <form onSubmit={handleUpdateSignatory} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.25rem" }}>
-                {/* Submitted By Section */}
-                <div className="form-group" style={{ gridColumn: "span 2" }}>
-                  <h3 style={{ fontSize: "1rem", fontWeight: "600", color: "var(--text-primary)", marginBottom: "1rem", borderBottom: "2px solid var(--primary-color)", paddingBottom: "0.5rem" }}>
-                    Submission Details
-                  </h3>
-                </div>
-                
-                <div className="form-group">
-                  <label className="form-label" htmlFor="submittedBy">
-                    <i className="fas fa-user" style={{ marginRight: "8px" }}></i>
-                    Submitted By
-                  </label>
-                  <input
-                    id="submittedBy"
-                    type="text"
-                    className="form-input"
-                    placeholder="Full Name"
-                    value={submittedBy}
-                    onChange={(e) => setSubmittedBy(e.target.value)}
-                    required
-                  />
-                </div>
-                
-                <div className="form-group">
-                  <label className="form-label" htmlFor="submittedByDesignation">
-                    <i className="fas fa-id-badge" style={{ marginRight: "8px" }}></i>
-                    Designation
-                  </label>
-                  <input
-                    id="submittedByDesignation"
-                    type="text"
-                    className="form-input"
-                    placeholder="Position/Title"
-                    value={submittedByDesignation}
-                    onChange={(e) => setSubmittedByDesignation(e.target.value)}
-                    required
-                  />
-                </div>
+            <div className="signatory-section">
+              <div className="signatory-section-header">
+                <h2 className="signatory-section-title">Signatory Information</h2>
+                <p className="signatory-section-subtitle">
+                  Update signatory details and reference numbers for your PPMP documents
+                </p>
+              </div>
 
-                {/* Prepared By Section */}
-                <div className="form-group" style={{ gridColumn: "span 2" }}>
-                  <h3 style={{ fontSize: "1rem", fontWeight: "600", color: "var(--text-primary)", marginBottom: "1rem", borderBottom: "2px solid var(--primary-color)", paddingBottom: "0.5rem", marginTop: "1rem" }}>
-                    Preparation Details
-                  </h3>
-                </div>
-                
-                <div className="form-group">
-                  <label className="form-label" htmlFor="preparedBy">
-                    <i className="fas fa-user-edit" style={{ marginRight: "8px" }}></i>
-                    Prepared By
-                  </label>
-                  <input
-                    id="preparedBy"
-                    type="text"
-                    className="form-input"
-                    placeholder="Full Name"
-                    value={preparedBy}
-                    onChange={(e) => setPreparedBy(e.target.value)}
-                    required
-                  />
-                </div>
-                
-                <div className="form-group">
-                  <label className="form-label" htmlFor="preparedByDesignation">
-                    <i className="fas fa-id-badge" style={{ marginRight: "8px" }}></i>
-                    Designation
-                  </label>
-                  <input
-                    id="preparedByDesignation"
-                    type="text"
-                    className="form-input"
-                    placeholder="Position/Title"
-                    value={preparedByDesignation}
-                    onChange={(e) => setPreparedByDesignation(e.target.value)}
-                    required
-                  />
-                </div>
+              <form onSubmit={handleUpdateSignatory} className="signatory-form">
+                <div className="signatory-form-grid-horizontal">
+                  {/* Submitted By Section */}
+                  <div className="signatory-section-group">
+                    <h3 className="signatory-section-group-title">Submission Details</h3>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="submittedBy">
+                        <i className="fas fa-user" style={{ marginRight: "8px" }}></i>
+                        Submitted By
+                      </label>
+                      <input
+                        id="submittedBy"
+                        type="text"
+                        className="form-input"
+                        placeholder="Full Name"
+                        value={submittedBy}
+                        onChange={(e) => setSubmittedBy(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="submittedByDesignation">
+                        <i className="fas fa-id-badge" style={{ marginRight: "8px" }}></i>
+                        Designation
+                      </label>
+                      <input
+                        id="submittedByDesignation"
+                        type="text"
+                        className="form-input"
+                        placeholder="Position/Title"
+                        value={submittedByDesignation}
+                        onChange={(e) => setSubmittedByDesignation(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
 
-                {/* Reference Numbers Section */}
-                <div className="form-group" style={{ gridColumn: "span 2" }}>
-                  <h3 style={{ fontSize: "1rem", fontWeight: "600", color: "var(--text-primary)", marginBottom: "1rem", borderBottom: "2px solid var(--primary-color)", paddingBottom: "0.5rem", marginTop: "1rem" }}>
-                    Reference Information
-                  </h3>
-                </div>
-                
-                <div className="form-group">
-                  <label className="form-label" htmlFor="aipReference">
-                    <i className="fas fa-hashtag" style={{ marginRight: "8px" }}></i>
-                    AIP Reference #
-                  </label>
-                  <input
-                    id="aipReference"
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g., AIP-2025-001"
-                    value={aipReference}
-                    onChange={(e) => setAipReference(e.target.value)}
-                    required
-                  />
-                </div>
-                
-                <div className="form-group">
-                  <label className="form-label" htmlFor="responsibilityCenterNo">
-                    <i className="fas fa-building" style={{ marginRight: "8px" }}></i>
-                    Responsibility Center #
-                  </label>
-                  <input
-                    id="responsibilityCenterNo"
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g., RC-001"
-                    value={responsibilityCenterNo}
-                    onChange={(e) => setResponsibilityCenterNo(e.target.value)}
-                    required
-                  />
-                </div>
-                
-                <div className="form-group">
-                  <label className="form-label" htmlFor="officeCodeFromPR">
-                    <i className="fas fa-code" style={{ marginRight: "8px" }}></i>
-                    Office Code (from PR)
-                  </label>
-                  <input
-                    id="officeCodeFromPR"
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g., CMO, CHO, GSO"
-                    value={officeCodeFromPR}
-                    onChange={(e) => setOfficeCodeFromPR(e.target.value)}
-                    required
-                  />
-                </div>
+                  {/* Prepared By Section */}
+                  <div className="signatory-section-group">
+                    <h3 className="signatory-section-group-title">Preparation Details</h3>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="preparedBy">
+                        <i className="fas fa-user-edit" style={{ marginRight: "8px" }}></i>
+                        Prepared By
+                      </label>
+                      <input
+                        id="preparedBy"
+                        type="text"
+                        className="form-input"
+                        placeholder="Full Name"
+                        value={preparedBy}
+                        onChange={(e) => setPreparedBy(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="preparedByDesignation">
+                        <i className="fas fa-id-badge" style={{ marginRight: "8px" }}></i>
+                        Designation
+                      </label>
+                      <input
+                        id="preparedByDesignation"
+                        type="text"
+                        className="form-input"
+                        placeholder="Position/Title"
+                        value={preparedByDesignation}
+                        onChange={(e) => setPreparedByDesignation(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
 
-                {/* Submit Button */}
-                <div style={{ gridColumn: "span 2", marginTop: "1rem" }}>
-                  <button type="submit" className="btn" style={{ width: "100%", padding: "14px" }}>
-                    <i className="fas fa-save" style={{ marginRight: "8px" }}></i>
-                    Update Signatory Information
-                  </button>
+                  {/* Reference Numbers Section */}
+                  <div className="signatory-section-group">
+                    <h3 className="signatory-section-group-title">Reference Information</h3>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="aipReference">
+                        <i className="fas fa-hashtag" style={{ marginRight: "8px" }}></i>
+                        AIP Reference #
+                      </label>
+                      <input
+                        id="aipReference"
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g., AIP-2025-001"
+                        value={aipReference}
+                        onChange={(e) => setAipReference(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="responsibilityCenterNo">
+                        <i className="fas fa-building" style={{ marginRight: "8px" }}></i>
+                        Responsibility Center #
+                      </label>
+                      <input
+                        id="responsibilityCenterNo"
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g., RC-001"
+                        value={responsibilityCenterNo}
+                        onChange={(e) => setResponsibilityCenterNo(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="officeCodeFromPR">
+                        <i className="fas fa-code" style={{ marginRight: "8px" }}></i>
+                        Office Code (from PR)
+                      </label>
+                      <input
+                        id="officeCodeFromPR"
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g., CMO, CHO, GSO"
+                        value={officeCodeFromPR}
+                        onChange={(e) => setOfficeCodeFromPR(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Submit Button */}
+                  <div className="signatory-section-group">
+                    <div className="signatory-submit-row">
+                      <button type="submit" className="btn signatory-submit-btn">
+                        <i className="fas fa-save"></i>
+                        Update Signatory Information
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </form>
             </div>
@@ -1253,8 +1594,156 @@ function Dashboard({ token, user, onLogout }) {
               </div>
             </div>
           )}
+          {activeTab === "dbm" && user.role === "bac_admin" && (
+            <div className="dashboard-card">
+              <h2 className="card-title">DBM Classification</h2>
 
+              {/* Add DBM Classification Form */}
+              <div className="dashboard-card" style={{ marginBottom: "20px" }}>
+                <h3 className="card-title">Add New DBM Classification</h3>
+                <form onSubmit={handleAddDbmClassification} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  <input
+                    type="text"
+                    placeholder="Code (e.g., 101)"
+                    className="form-input"
+                    value={newDbmCode}
+                    onChange={(e) => setNewDbmCode(e.target.value)}
+                    required
+                  />
+                  <input
+                    type="text"
+                    placeholder="Project Title"
+                    className="form-input"
+                    value={newDbmProjectTitle}
+                    onChange={(e) => setNewDbmProjectTitle(e.target.value)}
+                    required
+                  />
+                  <input
+                    type="text"
+                    placeholder="Classification"
+                    className="form-input"
+                    value={newDbmClassification}
+                    onChange={(e) => setNewDbmClassification(e.target.value)}
+                    required
+                  />
+
+                  <button type="submit" className="btn">Add Classification</button>
+                </form>
+              </div>
+
+              {/* DBM Classification Table */}
+              <div className="table-wrapper">
+                <table className="custom-table">
+                  <thead>
+                    <tr>
+                      <th>Code</th>
+                      <th>Project Title</th>
+                      <th>Classification</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dbmClassification.length === 0 ? (
+                      <tr>
+                        <td colSpan="4">No DBM classifications found.</td>
+                      </tr>
+                    ) : (
+                      dbmClassification.map((c) => (
+                        <tr key={c.id}>
+                          <td>{c.code}</td>
+                          <td>{c.project_title}</td>
+                          <td>{c.classification}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {activeTab === "audit" && user.role === "bac_admin" && (
+            <div className="dashboard-card" style={{ marginTop: "1.5rem" }}>
+              <h2 className="card-title">Pending Indicative PPMPs for Approval</h2>
+              <p className="page-subtitle" style={{ marginBottom: "1rem" }}>
+                Review and approve indicative PPMPs posted by budget office
+              </p>
+              <table className="custom-table">
+                <thead>
+                  <tr>
+                    <th>Office</th>
+                    <th>Title</th>
+                    <th>Year</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {indicativePpmps.length === 0 ? (
+                    <tr>
+                      <td colSpan="5">No indicative PPMPs pending approval.</td>
+                    </tr>
+                  ) : (
+                    indicativePpmps.map((p) => (
+                      <tr key={p.id}>
+                        <td>{getOfficeLabel(p.office_id)}</td>
+                        <td>{p.title}</td>
+                        <td>{p.fiscal_year}</td>
+                        <td>
+                          <span className="badge badge-warning">Posted</span>
+                        </td>
+                        <td>
+                          <button className="btn btn-success" onClick={() => handleApproveIndicativePpmp(p.id)}>Approve</button>
+                          <button className="btn btn-danger" style={{ marginLeft: "10px" }} onClick={() => handleRejectIndicativePpmp(p.id)}>Reject</button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
+
+        {activeTab === "indicative" && user.role === "budget_office" && (
+          <footer className="workspace-footer">
+            <div className="workspace-footer-inner workspace-footer-budget">
+              <h2 className="workspace-footer-title">RA 12009 Compliance Guide</h2>
+              <div className="workspace-footer-content">
+                <h3>Key Requirements</h3>
+                <ul>
+                  <li><strong>Market Scoping:</strong> End-users must perform market research before drafting PPMPs</li>
+                  <li><strong>Life-Cycle Costing:</strong> Include operating, maintenance, and disposal costs</li>
+                  <li><strong>Digital Integration:</strong> All PPMPs must be submitted electronically</li>
+                  <li><strong>Transitory Period:</strong> Three-year transition period for full compliance</li>
+                </ul>
+                <p className="workspace-footer-note">
+                  <i className="fas fa-info-circle" aria-hidden="true"></i>
+                  Refer to RA 12009 Section 4 for detailed implementation guidelines
+                </p>
+              </div>
+            </div>
+          </footer>
+        )}
+
+        {activeTab === "audit" && user.role === "bac_admin" && (
+          <footer className="workspace-footer">
+            <div className="workspace-footer-inner">
+              <h2 className="workspace-footer-title">RA 12009 Approval Guidelines</h2>
+              <div className="workspace-footer-content">
+                <h3>Review Checklist</h3>
+                <ul>
+                  <li><strong>Market Scoping:</strong> Verify market research documentation is complete</li>
+                  <li><strong>Budget Alignment:</strong> Confirm total requested amount is within office allocation</li>
+                  <li><strong>Life-Cycle Costing:</strong> Check if operating/maintenance costs are included</li>
+                  <li><strong>Digital Compliance:</strong> Ensure all required electronic forms are submitted</li>
+                </ul>
+                <p className="workspace-footer-note">
+                  <i className="fas fa-info-circle" aria-hidden="true"></i>
+                  Approved PPMPs will be available for consolidation in the APP process
+                </p>
+              </div>
+            </div>
+          </footer>
+        )}
       </main>
     </div>
   );

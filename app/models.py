@@ -38,7 +38,7 @@ class User(SQLModel, table=True):
 
 class PPMP(SQLModel, table=True):
     """
-    Project Procurement Management Plan.
+    Base Project Procurement Management Plan model.
     Status transitions: Draft -> Pending Budget Review -> Approved -> Returned
     """
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -49,10 +49,63 @@ class PPMP(SQLModel, table=True):
     type: str = Field(default="Indicative")  # "Indicative" or "Final"
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    remarks: Optional[str] = Field(default=None)  # Remarks from budget office when returning for revision
 
     # Relationships
     office: Office = Relationship(back_populates="ppmps")
     items: List["PPMPItem"] = Relationship(back_populates="ppmp")
+
+
+class IndicativePPMP(SQLModel, table=True):
+    """
+    Indicative PPMP for RA 12009 compliance.
+    Status transitions: Draft -> Posted -> Approved/Rejected
+    """
+    __tablename__ = "indicative_ppmp"
+    
+    # Base PPMP fields (copied from PPMP)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    fiscal_year: int = Field(index=True)
+    office_id: int = Field(foreign_key="office.id")
+    status: str = Field(default="Draft")  # "Draft", "Pending Budget Review", "Approved", "Returned"
+    type: str = Field(default="Indicative")  # "Indicative" or "Final"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    # RA 12009 specific fields
+    posting_status: str = Field(default="Draft")  # "Draft", "Posted", "Approved", "Rejected"
+    posted_at: Optional[datetime] = Field(default=None)
+    posted_by: Optional[int] = Field(default=None)  # User ID of budget office staff
+    market_scoping_docs: Optional[str] = Field(default=None)  # URL or reference to market scoping documentation
+    life_cycle_costing: Optional[float] = Field(default=0.0)  # Additional life-cycle costs
+    rejection_remarks: Optional[str] = Field(default=None)  # Remarks for rejected PPMPs
+    rejected_at: Optional[datetime] = Field(default=None)
+    rejected_by: Optional[int] = Field(default=None)  # User ID of BAC admin who rejected
+
+
+class FinalPPMP(SQLModel, table=True):
+    """
+    Final PPMP for RA 12009 compliance.
+    Status transitions: Draft -> Submitted -> Approved/Rejected
+    """
+    __tablename__ = "final_ppmp"
+    
+    # Base PPMP fields (copied from PPMP)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    fiscal_year: int = Field(index=True)
+    office_id: int = Field(foreign_key="office.id")
+    status: str = Field(default="Draft")  # "Draft", "Pending Budget Review", "Approved", "Returned"
+    type: str = Field(default="Final")  # "Indicative" or "Final"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    # RA 12009 specific fields
+    approval_status: str = Field(default="Draft")  # "Draft", "Submitted", "Approved", "Rejected"
+    approved_at: Optional[datetime] = Field(default=None)
+    approved_by: Optional[int] = Field(default=None)  # User ID of HoPE or designated official
+    verification_notes: Optional[str] = Field(default=None)  # Notes from verification process
 
 
 class PPMPItem(SQLModel, table=True):
@@ -126,6 +179,17 @@ class ProcessedRow(SQLModel, table=True):
     source_file: str
     row_data: str
     imported_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class DBMClassification(SQLModel, table=True):
+    """
+    DBM Classification codes for PS-DBM compliance.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    code: str = Field(unique=True)  # e.g., "101", "202", "303"
+    project_title: str
+    classification: str  # e.g., "Common-Use Supplies and Equipment (CSE)", "Specialized Equipment"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class SyncLog(SQLModel, table=True):

@@ -10,6 +10,7 @@ from app.routers.auth import router as auth_router
 from app.routers.offices import router as offices_router
 from app.routers.budget import router as budget_router
 from app.routers.bac import router as bac_router
+from app.routers.dbm import router as dbm_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,3 +57,4 @@ app.include_router(auth_router)
 app.include_router(offices_router)
 app.include_router(budget_router)
 app.include_router(bac_router)
+app.include_router(dbm_router)

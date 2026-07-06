@@ -3,6 +3,7 @@ import React, { useState } from "react";
 function Login({ onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -16,13 +17,18 @@ function Login({ onLogin }) {
       formData.append("username", username);
       formData.append("password", password);
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
       const response = await fetch("http://localhost:8000/api/auth/token", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: formData,
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       const data = await response.json();
       if (response.ok) {
@@ -31,9 +37,14 @@ function Login({ onLogin }) {
         setError(data.detail || "Incorrect username or password");
       }
     } catch (err) {
-      setError("Network error. Make sure the FastAPI backend is running.");
+      if (err.name === "AbortError") {
+        setError("Request timed out. Restart the backend server and try again.");
+      } else {
+        setError("Network error. Make sure the FastAPI backend is running.");
+      }
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (
@@ -42,6 +53,11 @@ function Login({ onLogin }) {
       <div className="login-left-pane">
         <div className="dev-silhouette-container">
           <img 
+            src="/Ormoc_City.png" 
+            alt="Background Logo" 
+            className="bg-logo" 
+          />
+          <img 
             src="/dev.png" 
             alt="Developer Silhouette" 
             className="dev-silhouette" 
@@ -49,9 +65,6 @@ function Login({ onLogin }) {
         </div>
         
         <div className="login-left-content">
-          <div className="login-left-logo">
-            <img src="/Ormoc_City.png" alt="Ormoc City" />
-          </div>
           <h1 className="login-left-title">
             PPMP <br />
             CONSOLIDATION
@@ -61,6 +74,11 @@ function Login({ onLogin }) {
             <br />
             RA 12009 Compliance Module
           </p>
+          <div className="login-left-hashtags">
+            <span>#GoDigital</span>
+            <span>#Paperless</span>
+            <span>#Fast</span>
+          </div>
         </div>
       </div>
 
@@ -85,7 +103,7 @@ function Login({ onLogin }) {
                 className="form-input"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="e.g. jdoe_ormoc"
+                placeholder="Your Office"
                 autoComplete="username"
                 required
               />
@@ -95,16 +113,38 @@ function Login({ onLogin }) {
               <label className="form-label" htmlFor="password">
                 Password
               </label>
-              <input
-                id="password"
-                type="password"
-                className="form-input"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                autoComplete="current-password"
-                required
-              />
+              <div className="password-input-wrapper">
+                <input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  className="form-input"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  required
+                />
+                <button
+                  type="button"
+                  className="password-toggle-btn"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  tabIndex={-1}
+                >
+                  {showPassword ? (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                      <line x1="1" y1="1" x2="23" y2="23" />
+                    </svg>
+                  ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  )}
+                </button>
+              </div>
             </div>
 
             <button type="submit" className="btn-login" disabled={loading}>
