@@ -1,0 +1,13 @@
+var CONFIG = {
+  OFFICE_REGISTRY_ID: 'REPLACE_WITH_REGISTRY_SHEET_ID',
+  SUBMISSION_STATUS_ID: 'REPLACE_WITH_SUBMISSION_STATUS_SHEET_ID',
+  FISCAL_YEAR: 2027,
+  TABS: {
+    HEADER: 'PPMP_Header',
+    ITEMS: 'PPMP_Items',
+    SIGNATORY: 'Signatory',
+    AUDIT: 'Audit_Log'
+  },
+  CATEGORIES: ['Office Supplies', 'IT Equipment', 'Catering', 'Services'],
+  PROCUREMENT_MODES: ['Shopping', 'SVP', 'Competitive Bidding']
+};

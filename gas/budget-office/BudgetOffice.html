@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <div class="header">
+    <h1>Indicative PPMP — Budget Office</h1>
+    <p>Audit, approve, and post indicative PPMPs from all offices</p>
+  </div>
+
+  <div class="nav">
+    <button class="active" id="navDashboard" onclick="showView('dashboard')">Audit Dashboard</button>
+    <button id="navReview" onclick="showView('review')" class="hidden">Review PPMP</button>
+  </div>
+
+  <div class="container">
+    <div id="loading" class="loading">Loading submissions...</div>
+
+    <!-- Dashboard -->
+    <div id="view-dashboard" class="hidden">
+      <div class="stats" id="summaryStats"></div>
+      <div class="card">
+        <h2>All Office Submissions — FY <span id="fyLabel"></span></h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Office</th><th>Status</th><th>Posting</th><th>Total Budget</th>
+              <th>Submitted</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="submissionsTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Review -->
+    <div id="view-review" class="hidden">
+      <span class="back-link" onclick="showView('dashboard')">← Back to Dashboard</span>
+      <div class="card">
+        <h2 id="reviewTitle">Review PPMP</h2>
+        <div class="audit-box" id="auditBox"></div>
+        <div id="overBudgetWarning" class="hidden" style="color:#c62828;margin-bottom:1rem;font-weight:600;"></div>
+      </div>
+      <div class="card">
+        <h2>Line Items</h2>
+        <table>
+          <thead>
+            <tr><th>#</th><th>Description</th><th>Category</th><th>Qty</th><th>Unit Cost</th><th>Est. Budget</th><th>Mode</th></tr>
+          </thead>
+          <tbody id="reviewItems"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>Signatory</h2>
+        <div id="reviewSignatory"></div>
+      </div>
+      <div class="card" id="actionCard">
+        <h2>Actions</h2>
+        <div id="returnSection">
+          <label>Remarks (required for return)</label>
+          <textarea id="returnRemarks" placeholder="Explain what needs to be revised..."></textarea>
+        </div>
+        <div class="actions">
+          <button class="btn btn-warning" id="btnReturn" onclick="returnForRevision()">Return for Revision</button>
+          <button class="btn btn-success" id="btnApprove" onclick="approvePpmp()">Approve</button>
+          <button class="btn btn-primary" id="btnPost" onclick="postIndicative()">Post to BAC</button>
+          <button class="btn btn-secondary" id="btnUnpost" onclick="unpostIndicative()">Unpost</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var dashboardData = null;
+    var currentOffice = null;
+    var reviewData = null;
+
+    window.onload = function() {
+      google.script.run.withSuccessHandler(renderDashboard).withFailureHandler(showError).getAuditDashboard();
+    };
+
+    function showError(err) {
+      document.getElementById('loading').innerHTML = '<p style="color:#c62828">' + err.message + '</p>';
+    }
+
+    function renderDashboard(data) {
+      dashboardData = data;
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('view-dashboard').classList.remove('hidden');
+      document.getElementById('fyLabel').textContent = data.submissions[0] ? data.submissions[0].fiscal_year : '—';
+
+      var s = data.summary;
+      document.getElementById('summaryStats').innerHTML =
+        statCard(s.total, 'Total Offices') +
+        statCard(s.pending, 'Pending Review') +
+        statCard(s.approved, 'Approved') +
+        statCard(s.returned, 'Returned') +
+        statCard(s.posted, 'Posted to BAC');
+
+      document.getElementById('submissionsTable').innerHTML = data.submissions.map(function(sub) {
+        return '<tr class="clickable" onclick="openReview(\'' + sub.office_code + '\')">' +
+          '<td><strong>' + esc(sub.office_code) + '</strong><br><small>' + esc(sub.office_name) + '</small></td>' +
+          '<td>' + badge(sub.status) + '</td>' +
+          '<td>' + badge(sub.posting_status, 'posting') + '</td>' +
+          '<td>' + formatMoney(sub.total_estimated_budget) + '</td>' +
+          '<td>' + (sub.submitted_at || '—') + '</td>' +
+          '<td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openReview(\'' + sub.office_code + '\')">Review</button></td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    function statCard(num, label) {
+      return '<div class="stat"><div class="num">' + num + '</div><div class="lbl">' + label + '</div></div>';
+    }
+
+    function openReview(officeCode) {
+      currentOffice = officeCode;
+      document.getElementById('loading').classList.remove('hidden');
+      document.getElementById('view-dashboard').classList.add('hidden');
+      document.getElementById('view-review').classList.add('hidden');
+      google.script.run.withSuccessHandler(renderReview).withFailureHandler(showError).getPpmpDetail(officeCode);
+    }
+
+    function renderReview(data) {
+      reviewData = data;
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('view-review').classList.remove('hidden');
+      document.getElementById('navReview').classList.remove('hidden');
+
+      var h = data.header;
+      document.getElementById('reviewTitle').textContent = h.office_name + ' (' + h.office_code + ') — ' + h.status;
+
+      document.getElementById('auditBox').innerHTML =
+        '<div class="audit-item"><strong>Total Budget</strong><br>' + formatMoney(data.audit.total) + '</div>' +
+        '<div class="audit-item"><strong>Allocation</strong><br>' + formatMoney(data.audit.allocation) + '</div>' +
+        '<div class="audit-item"><strong>Utilization</strong><br>' + data.audit.utilization_pct.toFixed(1) + '%</div>' +
+        '<div class="audit-item"><strong>Status</strong><br>' + badge(h.status) + ' ' + badge(h.posting_status, 'posting') + '</div>';
+
+      var warn = document.getElementById('overBudgetWarning');
+      if (data.audit.over_budget) {
+        warn.textContent = '⚠ Over budget by ' + formatMoney(data.audit.total - data.audit.allocation);
+        warn.classList.remove('hidden');
+      } else {
+        warn.classList.add('hidden');
+      }
+
+      document.getElementById('reviewItems').innerHTML = data.items.map(function(item, i) {
+        return '<tr><td>' + (i+1) + '</td><td>' + esc(item.description) + '</td><td>' + esc(item.category) +
+          '</td><td>' + item.quantity + '</td><td>' + formatMoney(item.unit_cost) + '</td><td>' + formatMoney(item.estimated_budget) +
+          '</td><td>' + esc(item.procurement_mode) + '</td></tr>';
+      }).join('') || '<tr><td colspan="7">No items</td></tr>';
+
+      var sig = data.signatory;
+      document.getElementById('reviewSignatory').innerHTML =
+        '<p><strong>Submitted by:</strong> ' + esc(sig.submitted_by || '—') + ' (' + esc(sig.submitted_by_designation || '') + ')</p>' +
+        '<p><strong>Prepared by:</strong> ' + esc(sig.prepared_by || '—') + ' (' + esc(sig.prepared_by_designation || '') + ')</p>' +
+        '<p><strong>AIP Ref:</strong> ' + esc(sig.aip_reference || '—') + ' | <strong>RC #:</strong> ' + esc(sig.responsibility_center_no || '—') + '</p>';
+
+      document.getElementById('btnReturn').disabled = h.status === 'Approved';
+      document.getElementById('btnApprove').disabled = h.status !== 'Pending Budget Review';
+      document.getElementById('btnPost').disabled = h.status !== 'Approved' || h.posting_status === 'Posted';
+      document.getElementById('btnUnpost').disabled = h.posting_status !== 'Posted';
+    }
+
+    function returnForRevision() {
+      var remarks = document.getElementById('returnRemarks').value;
+      if (!remarks.trim()) { alert('Remarks are required.'); return; }
+      if (!confirm('Return this PPMP for revision? The end user will be able to edit again.')) return;
+      google.script.run.withSuccessHandler(renderReview).withFailureHandler(showError)
+        .returnForRevision(currentOffice, remarks);
+    }
+
+    function approvePpmp() {
+      if (!confirm('Approve this PPMP? The end user will NOT be able to edit it again.')) return;
+      google.script.run.withSuccessHandler(function(data) {
+        renderReview(data);
+        google.script.run.withSuccessHandler(renderDashboard).getAuditDashboard();
+      }).withFailureHandler(showError).approvePpmp(currentOffice);
+    }
+
+    function postIndicative() {
+      if (!confirm('Post this indicative PPMP to BAC for review?')) return;
+      google.script.run.withSuccessHandler(function(data) {
+        renderReview(data);
+        google.script.run.withSuccessHandler(renderDashboard).getAuditDashboard();
+      }).withFailureHandler(showError).postIndicative(currentOffice);
+    }
+
+    function unpostIndicative() {
+      if (!confirm('Unpost from BAC queue? (Approved PPMPs remain locked for end users.)')) return;
+      google.script.run.withSuccessHandler(function(data) {
+        renderReview(data);
+        google.script.run.withSuccessHandler(renderDashboard).getAuditDashboard();
+      }).withFailureHandler(showError).unpostIndicative(currentOffice);
+    }
+
+    function showView(name) {
+      document.getElementById('view-dashboard').classList.toggle('hidden', name !== 'dashboard');
+      document.getElementById('view-review').classList.toggle('hidden', name !== 'review');
+      document.getElementById('navDashboard').classList.toggle('active', name === 'dashboard');
+      document.getElementById('navReview').classList.toggle('active', name === 'review');
+      if (name === 'dashboard') {
+        google.script.run.withSuccessHandler(renderDashboard).withFailureHandler(showError).getAuditDashboard();
+      }
+    }
+
+    function badge(status, type) {
+      var cls = 'badge-draft';
+      if (status === 'Pending Budget Review') cls = 'badge-pending';
+      else if (status === 'Approved') cls = 'badge-approved';
+      else if (status === 'Returned') cls = 'badge-returned';
+      else if (status === 'Posted') cls = 'badge-posted';
+      return '<span class="badge ' + cls + '">' + esc(status) + '</span>';
+    }
+
+    function formatMoney(n) { return '₱' + Number(n || 0).toLocaleString('en-PH', {minimumFractionDigits: 2}); }
+    function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  </script>
+</body>
+</html>

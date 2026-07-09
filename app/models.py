@@ -82,6 +82,10 @@ class IndicativePPMP(SQLModel, table=True):
     rejection_remarks: Optional[str] = Field(default=None)  # Remarks for rejected PPMPs
     rejected_at: Optional[datetime] = Field(default=None)
     rejected_by: Optional[int] = Field(default=None)  # User ID of BAC admin who rejected
+    approved_at: Optional[datetime] = Field(default=None)
+    approved_by: Optional[int] = Field(default=None)  # User ID of BAC admin who approved
+    remarks: Optional[str] = Field(default=None)  # Budget office feedback
+    spreadsheet_id: Optional[str] = Field(default=None, index=True)  # Google Sheet ID for sync
 
 
 class FinalPPMP(SQLModel, table=True):
@@ -113,7 +117,9 @@ class PPMPItem(SQLModel, table=True):
     Detailed line items inside a PPMP.
     """
     id: Optional[int] = Field(default=None, primary_key=True)
-    ppmp_id: int = Field(foreign_key="ppmp.id")
+    ppmp_id: Optional[int] = Field(default=None, foreign_key="ppmp.id")
+    indicative_ppmp_id: Optional[int] = Field(default=None, foreign_key="indicative_ppmp.id")
+    sheet_row_id: Optional[int] = Field(default=None)  # row_id from Google Sheet for upsert
     description: str
     category: str  # e.g., "Office Supplies", "IT Equipment", "Catering"
     is_cse: bool = Field(default=False)  # Common-Use Supplies and Equipment (CSE) via PS-DBM

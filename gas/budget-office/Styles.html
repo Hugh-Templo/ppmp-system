@@ -1,0 +1,48 @@
+<style>
+  :root {
+    --primary: #1b5e3b; --primary-dark: #14472d; --accent: #2e7d52;
+    --bg: #f4f7f5; --card: #fff; --border: #d8e3dc;
+    --danger: #c62828; --warning: #e65100; --success: #2e7d32;
+    --text: #1a2e22; --muted: #5a6f62;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: var(--bg); color: var(--text); }
+  .header { background: var(--primary); color: #fff; padding: 1rem 1.5rem; }
+  .header h1 { font-size: 1.25rem; }
+  .header p { font-size: 0.875rem; opacity: 0.9; }
+  .nav { display: flex; gap: 0.5rem; padding: 0.75rem 1.5rem; background: #fff; border-bottom: 1px solid var(--border); }
+  .nav button { padding: 0.5rem 1rem; border: 1px solid var(--border); background: #fff; border-radius: 6px; cursor: pointer; }
+  .nav button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .container { max-width: 1200px; margin: 1.5rem auto; padding: 0 1rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem; }
+  .card h2 { font-size: 1.1rem; margin-bottom: 1rem; color: var(--primary); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+  .stat { background: #f0f7f2; padding: 1rem; border-radius: 8px; text-align: center; }
+  .stat .num { font-size: 1.5rem; font-weight: 700; color: var(--primary); }
+  .stat .lbl { font-size: 0.75rem; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+  th, td { padding: 0.6rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+  th { background: #f0f7f2; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover { background: #f0f7f2; }
+  .btn { padding: 0.5rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.875rem; font-weight: 600; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-warning { background: var(--warning); color: #fff; }
+  .btn-success { background: var(--success); color: #fff; }
+  .btn-secondary { background: #757575; color: #fff; }
+  .btn-sm { padding: 0.3rem 0.6rem; font-size: 0.75rem; }
+  .actions { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
+  .hidden { display: none !important; }
+  .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 10px; font-size: 0.7rem; font-weight: 600; }
+  .badge-pending { background: #fce4ec; color: #c2185b; }
+  .badge-approved { background: #e8f5e9; color: var(--success); }
+  .badge-returned { background: #fff3e0; color: var(--warning); }
+  .badge-draft { background: #e3f2fd; color: #1565c0; }
+  .badge-posted { background: #ede7f6; color: #4527a0; }
+  .over-budget { color: var(--danger); font-weight: 700; }
+  .audit-box { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+  .audit-item { background: #f9fbe7; padding: 0.75rem; border-radius: 8px; }
+  textarea { width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; min-height: 80px; }
+  .back-link { color: var(--primary); cursor: pointer; margin-bottom: 1rem; display: inline-block; }
+  .loading { text-align: center; padding: 3rem; color: var(--muted); }
+</style>

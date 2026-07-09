@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>Indicative PPMP — End User</h1>
+      <div class="office" id="officeLabel">Loading...</div>
+    </div>
+    <div id="statusBadge"></div>
+  </div>
+
+  <div class="nav">
+    <button class="active" onclick="showTab('dashboard')">Dashboard</button>
+    <button onclick="showTab('items')">PPMP Items</button>
+    <button onclick="showTab('signatory')">Signatory</button>
+  </div>
+
+  <div class="container">
+    <div id="loading" class="loading">Loading PPMP data...</div>
+    <div id="lockBanner" class="lock-banner hidden"></div>
+    <div id="remarksBox" class="remarks-box hidden"></div>
+
+    <!-- Dashboard -->
+    <div id="tab-dashboard" class="hidden">
+      <div class="stats">
+        <div class="stat">
+          <div class="label">Status</div>
+          <div class="value" id="statStatus">—</div>
+        </div>
+        <div class="stat">
+          <div class="label">Total Budget</div>
+          <div class="value" id="statTotal">₱0</div>
+        </div>
+        <div class="stat">
+          <div class="label">Allocation</div>
+          <div class="value" id="statAllocation">₱0</div>
+        </div>
+        <div class="stat">
+          <div class="label">Utilization</div>
+          <div class="value" id="statUtil">0%</div>
+          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Quick Summary</h2>
+        <p>Fiscal Year: <strong id="fyLabel">—</strong></p>
+        <p>Line Items: <strong id="itemCount">0</strong></p>
+        <p>Posting Status: <strong id="postingStatus">—</strong></p>
+        <div class="actions" id="submitActions">
+          <button class="btn btn-primary" id="submitBtn" onclick="submitPpmp()">Submit to Budget Office</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Items -->
+    <div id="tab-items" class="hidden">
+      <div class="card" id="itemFormCard">
+        <h2>Add Line Item</h2>
+        <div class="form-grid">
+          <div><label>Description</label><input id="itemDesc" type="text"></div>
+          <div><label>Category</label><select id="itemCat"></select></div>
+          <div><label>CSE (PS-DBM)</label><select id="itemCse"><option value="false">No</option><option value="true">Yes</option></select></div>
+          <div><label>Quantity</label><input id="itemQty" type="number" min="1" value="1"></div>
+          <div><label>Unit</label><input id="itemUnit" type="text" value="pc"></div>
+          <div><label>Unit Cost (₱)</label><input id="itemCost" type="number" min="0" step="0.01" value="0"></div>
+          <div><label>Procurement Mode</label><select id="itemMode"></select></div>
+          <div><label>Q1 Qty</label><input id="itemQ1" type="number" min="0" value="0"></div>
+          <div><label>Q2 Qty</label><input id="itemQ2" type="number" min="0" value="0"></div>
+          <div><label>Q3 Qty</label><input id="itemQ3" type="number" min="0" value="0"></div>
+          <div><label>Q4 Qty</label><input id="itemQ4" type="number" min="0" value="0"></div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" onclick="addItem()">Add Item</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Line Items</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>Description</th><th>Category</th><th>Qty</th>
+              <th>Unit Cost</th><th>Est. Budget</th><th>Mode</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="itemsTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Signatory -->
+    <div id="tab-signatory" class="hidden">
+      <div class="card">
+        <h2>Signatory Information</h2>
+        <div class="form-grid">
+          <div><label>Submitted By</label><input id="sigSubmittedBy" type="text"></div>
+          <div><label>Designation</label><input id="sigSubmittedDesig" type="text"></div>
+          <div><label>Prepared By</label><input id="sigPreparedBy" type="text"></div>
+          <div><label>Designation</label><input id="sigPreparedDesig" type="text"></div>
+          <div><label>AIP Reference #</label><input id="sigAip" type="text"></div>
+          <div><label>Responsibility Center #</label><input id="sigRc" type="text"></div>
+          <div><label>Office Code (from PR)</label><input id="sigOfficeCode" type="text"></div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="saveSigBtn" onclick="saveSignatory()">Save Signatory</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var appData = null;
+
+    window.onload = function() {
+      google.script.run
+        .withSuccessHandler(render)
+        .withFailureHandler(showError)
+        .getDashboardData();
+    };
+
+    function showError(err) {
+      document.getElementById('loading').innerHTML = '<p style="color:#c62828">' + err.message + '</p>';
+    }
+
+    function render(data) {
+      appData = data;
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('officeLabel').textContent = data.office.office_name + ' (' + data.office.office_code + ')';
+
+      var h = data.header;
+      var statusClass = h.status === 'Pending Budget Review' ? 'status-Pending' : 'status-' + h.status.replace(/\s/g, '');
+      document.getElementById('statusBadge').innerHTML = '<span class="status-badge ' + statusClass + '">' + h.status + '</span>';
+
+      document.getElementById('statStatus').textContent = h.status;
+      document.getElementById('statTotal').textContent = formatMoney(h.total_estimated_budget);
+      document.getElementById('statAllocation').textContent = formatMoney(h.budget_allocation);
+      var util = h.budget_allocation > 0 ? (h.total_estimated_budget / h.budget_allocation * 100) : 0;
+      document.getElementById('statUtil').textContent = util.toFixed(1) + '%';
+      var fill = document.getElementById('progressFill');
+      fill.style.width = Math.min(util, 100) + '%';
+      fill.className = 'progress-fill' + (util > 100 ? ' over' : '');
+      document.getElementById('fyLabel').textContent = h.fiscal_year;
+      document.getElementById('itemCount').textContent = data.items.length;
+      document.getElementById('postingStatus').textContent = h.posting_status;
+
+      var lockBanner = document.getElementById('lockBanner');
+      if (!data.can_edit) {
+        lockBanner.textContent = data.lock_reason;
+        lockBanner.classList.remove('hidden');
+        if (h.status === 'Approved') lockBanner.classList.add('permanent');
+      } else {
+        lockBanner.classList.add('hidden');
+      }
+
+      var remarksBox = document.getElementById('remarksBox');
+      if (h.status === 'Returned' && h.remarks) {
+        remarksBox.innerHTML = '<strong>Budget Office Remarks:</strong> ' + h.remarks;
+        remarksBox.classList.remove('hidden');
+      } else {
+        remarksBox.classList.add('hidden');
+      }
+
+      var canEdit = data.can_edit;
+      document.getElementById('itemFormCard').classList.toggle('hidden', !canEdit);
+      document.getElementById('submitBtn').disabled = !canEdit;
+      document.getElementById('submitBtn').textContent =
+        h.status === 'Returned' ? 'Resubmit to Budget Office' : 'Submit to Budget Office';
+      document.getElementById('saveSigBtn').disabled = !canEdit;
+      setFormDisabled(!canEdit);
+
+      populateSelects(data);
+      renderItems(data.items);
+      renderSignatory(data.signatory);
+
+      showTab('dashboard');
+    }
+
+    function setFormDisabled(disabled) {
+      ['itemDesc','itemCat','itemCse','itemQty','itemUnit','itemCost','itemMode',
+       'itemQ1','itemQ2','itemQ3','itemQ4','sigSubmittedBy','sigSubmittedDesig',
+       'sigPreparedBy','sigPreparedDesig','sigAip','sigRc','sigOfficeCode'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.disabled = disabled;
+      });
+    }
+
+    function populateSelects(data) {
+      fillSelect('itemCat', data.categories);
+      fillSelect('itemMode', data.procurement_modes);
+    }
+
+    function fillSelect(id, options) {
+      var sel = document.getElementById(id);
+      sel.innerHTML = options.map(function(o) { return '<option value="' + o + '">' + o + '</option>'; }).join('');
+    }
+
+    function renderItems(items) {
+      var tbody = document.getElementById('itemsTable');
+      var canEdit = appData && appData.can_edit;
+      tbody.innerHTML = items.map(function(item) {
+        return '<tr><td>' + item.row_id + '</td><td>' + esc(item.description) + '</td><td>' + esc(item.category) +
+          '</td><td>' + item.quantity + '</td><td>' + formatMoney(item.unit_cost) + '</td><td>' + formatMoney(item.estimated_budget) +
+          '</td><td>' + esc(item.procurement_mode) + '</td><td>' +
+          (canEdit ? '<button class="btn btn-danger btn-sm" onclick="deleteItem(' + item.row_id + ')">Delete</button>' : '') +
+          '</td></tr>';
+      }).join('');
+    }
+
+    function renderSignatory(sig) {
+      document.getElementById('sigSubmittedBy').value = sig.submitted_by || '';
+      document.getElementById('sigSubmittedDesig').value = sig.submitted_by_designation || '';
+      document.getElementById('sigPreparedBy').value = sig.prepared_by || '';
+      document.getElementById('sigPreparedDesig').value = sig.prepared_by_designation || '';
+      document.getElementById('sigAip').value = sig.aip_reference || '';
+      document.getElementById('sigRc').value = sig.responsibility_center_no || '';
+      document.getElementById('sigOfficeCode').value = sig.office_code_from_pr || '';
+    }
+
+    function showTab(name) {
+      ['dashboard','items','signatory'].forEach(function(t) {
+        document.getElementById('tab-' + t).classList.toggle('hidden', t !== name);
+      });
+      document.querySelectorAll('.nav button').forEach(function(btn, i) {
+        var tabs = ['dashboard','items','signatory'];
+        btn.classList.toggle('active', tabs[i] === name);
+      });
+    }
+
+    function getItemForm() {
+      return {
+        description: document.getElementById('itemDesc').value,
+        category: document.getElementById('itemCat').value,
+        is_cse: document.getElementById('itemCse').value === 'true',
+        quantity: document.getElementById('itemQty').value,
+        unit_of_measure: document.getElementById('itemUnit').value,
+        unit_cost: document.getElementById('itemCost').value,
+        procurement_mode: document.getElementById('itemMode').value,
+        q1_qty: document.getElementById('itemQ1').value,
+        q2_qty: document.getElementById('itemQ2').value,
+        q3_qty: document.getElementById('itemQ3').value,
+        q4_qty: document.getElementById('itemQ4').value
+      };
+    }
+
+    function addItem() {
+      google.script.run.withSuccessHandler(render).withFailureHandler(showError).addItem(getItemForm());
+    }
+
+    function deleteItem(rowId) {
+      if (!confirm('Delete this item?')) return;
+      google.script.run.withSuccessHandler(render).withFailureHandler(showError).deleteItem(rowId);
+    }
+
+    function saveSignatory() {
+      var sig = {
+        submitted_by: document.getElementById('sigSubmittedBy').value,
+        submitted_by_designation: document.getElementById('sigSubmittedDesig').value,
+        prepared_by: document.getElementById('sigPreparedBy').value,
+        prepared_by_designation: document.getElementById('sigPreparedDesig').value,
+        aip_reference: document.getElementById('sigAip').value,
+        responsibility_center_no: document.getElementById('sigRc').value,
+        office_code_from_pr: document.getElementById('sigOfficeCode').value
+      };
+      google.script.run.withSuccessHandler(render).withFailureHandler(showError).saveSignatory(sig);
+    }
+
+    function submitPpmp() {
+      if (!confirm('Submit PPMP to Budget Office? You will not be able to edit until it is returned for revision.')) return;
+      google.script.run.withSuccessHandler(render).withFailureHandler(showError).submitPpmp();
+    }
+
+    function formatMoney(n) { return '₱' + Number(n || 0).toLocaleString('en-PH', {minimumFractionDigits: 2}); }
+    function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  </script>
+</body>
+</html>

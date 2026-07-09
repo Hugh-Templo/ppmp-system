@@ -16,3 +16,10 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
 
 # Full rclone source path, e.g. "gdrive:inputs"
 DRIVE_SOURCE = f"{RCLONE_REMOTE}:{DRIVE_INPUT_FOLDER}"
+
+# Google Sheets API (Option B sync)
+GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv(
+    "GOOGLE_SERVICE_ACCOUNT_FILE", "./credentials/google-service-account.json"
+)
+GOOGLE_MASTER_SPREADSHEET_ID = os.getenv("GOOGLE_MASTER_SPREADSHEET_ID", "")
+GOOGLE_SYNC_FISCAL_YEAR = int(os.getenv("GOOGLE_SYNC_FISCAL_YEAR", "2027"))

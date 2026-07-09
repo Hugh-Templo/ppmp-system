@@ -67,9 +67,9 @@ def consolidate_ppmps(
         session.refresh(app)
 
     # 3. Consolidate items grouped by description, category, is_cse, unit_cost, procurement_mode
-    ppmp_ids = [p.id for p in approved_indicative_ppmps]
+    indicative_ids = [p.id for p in approved_indicative_ppmps]
     all_items = session.exec(
-        select(PPMPItem).where(PPMPItem.ppmp_id.in_(ppmp_ids))
+        select(PPMPItem).where(PPMPItem.indicative_ppmp_id.in_(indicative_ids))
     ).all()
 
     consolidation_map = {}
@@ -214,3 +214,16 @@ def get_app(
         "app": app,
         "rows": app.rows
     }
+
+
+@router.post("/sync-sheets")
+def trigger_sheets_sync(
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """Manually trigger Google Sheets → PostgreSQL sync (Option B)."""
+    try:
+        from app.sheets_sync import sync_from_sheets
+        count, message = sync_from_sheets()
+        return {"success": True, "offices_synced": count, "message": message}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Sheets sync failed: {str(e)}")
