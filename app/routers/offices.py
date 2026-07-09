@@ -1,11 +1,62 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlmodel import Session, select
-from typing import List
+from typing import List, Optional
 from app.database import get_session
 from app.models import User, Office, PPMP, PPMPItem
 from app.auth import get_current_user, check_role
 
 router = APIRouter(prefix="/api/offices", tags=["offices"])
+
+
+# --- BUDGET ALLOCATION ENDPOINTS FOR END USERS ---
+class BudgetUpdate(BaseModel):
+    budget_allocation: float
+
+@router.get("/budget/{office_id}")
+def get_office_budget(
+    office_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Get the budget allocation for a specific office (for end users to view their allocation)."""
+    # End users can only view their own office's budget
+    if current_user.role == "end_user" and current_user.office_id != office_id:
+        raise HTTPException(status_code=403, detail="Access denied to this office's budget")
+    
+    office = session.get(Office, office_id)
+    if not office:
+        raise HTTPException(status_code=404, detail="Office not found")
+    
+    return {"budget_allocation": office.budget_allocation}
+
+
+@router.put("/budget/{office_id}")
+def update_office_budget(
+    office_id: int,
+    budget_data: BudgetUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["end_user", "bac_admin"])),
+):
+    """Update the budget allocation for an office.
+    
+    - End users can update their own office's budget allocation
+    - BAC admins can update any office's budget allocation
+    """
+    # End users can only update their own office's budget
+    if current_user.role == "end_user" and current_user.office_id != office_id:
+        raise HTTPException(status_code=403, detail="Access denied to update this office's budget")
+    
+    office = session.get(Office, office_id)
+    if not office:
+        raise HTTPException(status_code=404, detail="Office not found")
+    
+    office.budget_allocation = budget_data.budget_allocation
+    session.add(office)
+    session.commit()
+    session.refresh(office)
+    
+    return {"message": "Budget allocation updated successfully", "budget_allocation": office.budget_allocation}
 
 
 

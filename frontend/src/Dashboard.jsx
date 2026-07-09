@@ -54,6 +54,10 @@ function Dashboard({ token, user, onLogout }) {
   const [responsibilityCenterNo, setResponsibilityCenterNo] = useState("");
   const [officeCodeFromPR, setOfficeCodeFromPR] = useState("");
 
+  // Budget Allocation state (for end users)
+  const [userBudgetAllocation, setUserBudgetAllocation] = useState(0);
+  const [userOfficeBudget, setUserOfficeBudget] = useState(0);
+
   // Registration state
   const [newUsername, setNewUsername] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -114,6 +118,12 @@ function Dashboard({ token, user, onLogout }) {
   useEffect(() => {
     if (user.role === "bac_admin" && activeTab === "dbm") {
       fetchDbmClassification();
+    }
+  }, [activeTab, user.role]);
+
+  useEffect(() => {
+    if (user.role === "end_user" && activeTab === "budget_allocation") {
+      fetchUserOfficeBudget();
     }
   }, [activeTab, user.role]);
 
@@ -583,6 +593,7 @@ function Dashboard({ token, user, onLogout }) {
     users: "Manage Users",
     dbm: "DBM Classification",
     audit: "Pending PPMP Review",
+    budget_allocation: "Budget Allocation",
   };
   const handleUpdateSignatory = async (e) => {
     e.preventDefault();
@@ -611,6 +622,59 @@ function Dashboard({ token, user, onLogout }) {
       }
     } catch (err) {
       showNotification("Network error occurred", "danger");
+    }
+  };
+
+  // --- BUDGET ALLOCATION FUNCTIONS FOR END USERS ---
+  const fetchUserOfficeBudget = async () => {
+    if (!user.office_id) {
+      showNotification("User is not assigned to any office", "danger");
+      return;
+    }
+    try {
+      const res = await fetch(`http://localhost:8000/api/offices/budget/${user.office_id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUserOfficeBudget(data.budget_allocation);
+      } else {
+        const errData = await res.json();
+        showNotification(errData.detail || "Failed to fetch budget allocation", "danger");
+      }
+    } catch (err) {
+      showNotification("Network error fetching budget allocation", "danger");
+    }
+  };
+
+  const handleUpdateBudgetAllocation = async (e) => {
+    e.preventDefault();
+    if (!user.office_id) {
+      showNotification("User is not assigned to any office", "danger");
+      return;
+    }
+    try {
+      const res = await fetch(`http://localhost:8000/api/offices/budget/${user.office_id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          budget_allocation: parseFloat(userBudgetAllocation),
+        }),
+      });
+      if (res.ok) {
+        showNotification("Budget allocation updated successfully!");
+        setUserBudgetAllocation(0);
+        fetchUserOfficeBudget();
+        fetchOffices(); // Refresh offices list for other roles
+      } else {
+        const errData = await res.json();
+        showNotification(errData.detail || "Failed to update budget allocation", "danger");
+      }
+    } catch (err) {
+      showNotification("Failed to update budget allocation", "danger");
     }
   };
   return (
@@ -655,7 +719,7 @@ function Dashboard({ token, user, onLogout }) {
                 View PPMPs
               </button>
             )}
-            {user.role === "end_user" && (
+{user.role === "end_user" && (
               <button
                 type="button"
                 className={`nav-link ${activeTab === "signatory" ? "active" : ""}`}
@@ -663,6 +727,16 @@ function Dashboard({ token, user, onLogout }) {
               >
                 <i className="fas fa-th-large" aria-hidden="true"></i>
                 Signatory
+              </button>
+            )}
+            {user.role === "end_user" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "budget_allocation" ? "active" : ""}`}
+                onClick={() => { setActiveTab("budget_allocation"); setSelectedPpmp(null); setSelectedApp(null); }}
+              >
+                <i className="fas fa-wallet" aria-hidden="true"></i>
+                Budget Allocation
               </button>
             )}
             {user.role === "bac_admin" && (
@@ -745,6 +819,18 @@ function Dashboard({ token, user, onLogout }) {
                   <div>
                     <div className="dashboard-card">
                       <h2 className="card-title">Create PPMP</h2>
+                      <div style={{ 
+                        backgroundColor: "#e8f4fd", 
+                        border: "1px solid #2196f3", 
+                        borderRadius: "6px", 
+                        padding: "12px", 
+                        marginBottom: "10px",
+                        fontSize: "13px"
+                      }}>
+                        <strong>Note:</strong> All PPMPs created at this stage are <strong>Indicative</strong> (pre-budget approval). 
+                        The "Final" status will be applied automatically after budget approval and consolidation, 
+                        in accordance with RA 12009 process flow.
+                      </div>
                       <form onSubmit={handleCreatePpmp} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                         <input
                           type="text"
@@ -754,10 +840,13 @@ function Dashboard({ token, user, onLogout }) {
                           onChange={(e) => setNewPpmpTitle(e.target.value)}
                           required
                         />
-                        <select className="form-input" value={newPpmpType} onChange={(e) => setNewPpmpType(e.target.value)}>
-                          <option value="Indicative">Indicative PPMP</option>
-                          <option value="Final">Final PPMP</option>
-                        </select>
+                        <input
+                          type="hidden"
+                          value={newPpmpType}
+                        />
+                        <div className="form-input" style={{ backgroundColor: "#f5f5f5", color: "#666", cursor: "not-allowed" }}>
+                          Indicative PPMP (pre-budget approval)
+                        </div>
                         <input
                           type="number"
                           className="form-input"
@@ -769,6 +858,7 @@ function Dashboard({ token, user, onLogout }) {
                         <button type="submit" className="btn">Create PPMP</button>
                       </form>
                     </div>
+```
 
                     <div className="dashboard-card" style={{ marginTop: "20px" }}>
                       <h2 className="card-title">My Office PPMPs</h2>
@@ -833,11 +923,27 @@ function Dashboard({ token, user, onLogout }) {
 
                         {/* Display remarks if PPMP was returned for revision */}
                         {selectedPpmp.ppmp.status === "Returned" && selectedPpmp.ppmp.remarks && (
-                          <div className="dashboard-card" style={{ backgroundColor: "#fff3f3", borderLeft: "4px solid #d32f2f", marginTop: "20px" }}>
-                            <h3 style={{ color: "#d32f2f", marginBottom: "10px" }}>Revision Required</h3>
-                            <p><strong>Budget Office Remarks:</strong></p>
-                            <p style={{ fontSize: "14px", lineHeight: "1.5" }}>{selectedPpmp.ppmp.remarks}</p>
-                            <p style={{ fontSize: "12px", color: "#666", marginTop: "10px" }}>Please address these comments before resubmitting your PPMP.</p>
+                          <div className="dashboard-card" style={{ 
+                            backgroundColor: "#fffafa", 
+                            borderLeft: "4px solid var(--danger-color)", 
+                            marginTop: "20px",
+                            marginBottom: "24px",
+                            padding: "1.25rem",
+                            boxShadow: "0 2px 4px rgba(0,0,0,0.05)"
+                          }}>
+                            <h3 style={{ color: "#b91c1c", fontSize: "0.95rem", fontWeight: "700", marginBottom: "0.75rem", display: "flex", alignItems: "center", gap: "8px" }}>
+                              <i className="fas fa-exclamation-triangle"></i>
+                              Revision Required
+                            </h3>
+                            <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
+                              <strong>Budget Office Remarks:</strong>
+                            </p>
+                            <div style={{ fontSize: "0.875rem", lineHeight: "1.6", color: "var(--text-primary)", background: "#ffffff", padding: "12px", borderRadius: "6px", border: "1px solid var(--border-color)", fontStyle: "italic" }}>
+                              "{selectedPpmp.ppmp.remarks}"
+                            </div>
+                            <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "1rem" }}>
+                              Please address the feedback above and resubmit for approval.
+                            </p>
                           </div>
                         )}
 
@@ -993,18 +1099,36 @@ function Dashboard({ token, user, onLogout }) {
                       <div className="dashboard-card">
                         <h2 className="card-title">Audit Workspace: {selectedPpmp.ppmp.title}</h2>
 
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", margin: "15px 0" }}>
+                        <div style={{ 
+                          display: "grid", 
+                          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", 
+                          gap: "1.5rem", 
+                          margin: "1.5rem 0",
+                          padding: "1.5rem",
+                          background: "var(--neuro-bg)",
+                          borderRadius: "8px",
+                          border: "1px solid var(--border-color)"
+                        }}>
                           <div>
-                            <strong>Department Code:</strong> {auditDetails.office_name}<br />
-                            <strong>Allocation:</strong> ₱{auditDetails.office_budget_allocation.toLocaleString()}
+                            <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Department</div>
+                            <div style={{ fontWeight: "700", fontSize: "1rem" }}>{auditDetails.office_name}</div>
+                            <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+                              Allocation: ₱{auditDetails.office_budget_allocation.toLocaleString()}
+                            </div>
                           </div>
                           <div>
-                            <strong>Total PPMP Requested:</strong> ₱{auditDetails.total_ppmp_cost.toLocaleString()}<br />
-                            <strong>Remaining Balance:</strong> ₱{auditDetails.remaining_budget.toLocaleString()}
+                            <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Budget Summary</div>
+                            <div style={{ fontWeight: "700", fontSize: "1rem", color: auditDetails.is_within_budget ? "var(--success-color)" : "var(--danger-color)" }}>
+                              ₱{auditDetails.total_ppmp_cost.toLocaleString()}
+                            </div>
+                            <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+                              Remaining: ₱{auditDetails.remaining_budget.toLocaleString()}
+                            </div>
                           </div>
-                          <div style={{ gridColumn: "span 2", fontWeight: "bold" }}>
-                            Status: <span style={{ color: auditDetails.is_within_budget ? "green" : "red" }}>
-                              {auditDetails.is_within_budget ? "WITHIN BUDGET LIMIT" : "EXCEEDED BUDGET LIMIT"}
+                          <div style={{ gridColumn: "1 / -1", borderTop: "1px solid var(--border-color)", paddingTop: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ fontSize: "0.875rem", fontWeight: "600", color: "var(--text-secondary)" }}>Audit Status:</span>
+                            <span className={`badge ${auditDetails.is_within_budget ? "badge-success" : "badge-danger"}`} style={{ padding: "6px 12px", fontSize: "0.8rem" }}>
+                              {auditDetails.is_within_budget ? "READY FOR APPROVAL" : "OVER BUDGET LIMIT"}
                             </span>
                           </div>
                         </div>
@@ -1033,19 +1157,22 @@ function Dashboard({ token, user, onLogout }) {
 
                         {user.role === "budget_office" && (
                           <>
+                            <h3 style={{ fontSize: "0.95rem", fontWeight: "700", marginBottom: "0.75rem" }}>Budget Office Action</h3>
                             <textarea
                               className="form-input"
-                              placeholder="Review Remarks..."
+                              placeholder="Provide feedback or remarks here..."
                               value={remarks}
                               onChange={(e) => setRemarks(e.target.value)}
-                              style={{ minHeight: "80px", marginBottom: "15px" }}
+                              style={{ minHeight: "100px", marginBottom: "1.5rem", fontSize: "0.9rem" }}
                             />
 
-                            <div style={{ display: "flex", gap: "10px" }}>
-                              <button className="btn btn-success" onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "approve")}>
+                            <div style={{ display: "flex", gap: "12px" }}>
+                              <button className="btn btn-success" style={{ flex: 1 }} onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "approve")}>
+                                <i className="fas fa-check" style={{ marginRight: "8px" }}></i>
                                 Approve PPMP
                               </button>
-                              <button type="button" className="btn btn-danger" onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "return")}>
+                              <button type="button" className="btn btn-danger" style={{ flex: 1 }} onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "return")}>
+                                <i className="fas fa-undo" style={{ marginRight: "8px" }}></i>
                                 Return for Revision
                               </button>
                             </div>
@@ -1191,18 +1318,36 @@ function Dashboard({ token, user, onLogout }) {
                   <div className="dashboard-card">
                     <h2 className="card-title">Audit Workspace: {selectedPpmp.ppmp.title}</h2>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", margin: "15px 0" }}>
+                    <div style={{ 
+                      display: "grid", 
+                      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", 
+                      gap: "1.5rem", 
+                      margin: "1.5rem 0",
+                      padding: "1.5rem",
+                      background: "var(--neuro-bg)",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-color)"
+                    }}>
                       <div>
-                        <strong>Department Code:</strong> {auditDetails.office_name}<br />
-                        <strong>Allocation:</strong> ₱{auditDetails.office_budget_allocation.toLocaleString()}
+                        <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Department</div>
+                        <div style={{ fontWeight: "700", fontSize: "1rem" }}>{auditDetails.office_name}</div>
+                        <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+                          Allocation: ₱{auditDetails.office_budget_allocation.toLocaleString()}
+                        </div>
                       </div>
                       <div>
-                        <strong>Total PPMP Requested:</strong> ₱{auditDetails.total_ppmp_cost.toLocaleString()}<br />
-                        <strong>Remaining Balance:</strong> ₱{auditDetails.remaining_budget.toLocaleString()}
+                        <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Budget Summary</div>
+                        <div style={{ fontWeight: "700", fontSize: "1rem", color: auditDetails.is_within_budget ? "var(--success-color)" : "var(--danger-color)" }}>
+                          ₱{auditDetails.total_ppmp_cost.toLocaleString()}
+                        </div>
+                        <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+                          Remaining: ₱{auditDetails.remaining_budget.toLocaleString()}
+                        </div>
                       </div>
-                      <div style={{ gridColumn: "span 2", fontWeight: "bold" }}>
-                        Status: <span style={{ color: auditDetails.is_within_budget ? "green" : "red" }}>
-                          {auditDetails.is_within_budget ? "WITHIN BUDGET LIMIT" : "EXCEEDED BUDGET LIMIT"}
+                      <div style={{ gridColumn: "1 / -1", borderTop: "1px solid var(--border-color)", paddingTop: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: "0.875rem", fontWeight: "600", color: "var(--text-secondary)" }}>Audit Status:</span>
+                        <span className={`badge ${auditDetails.is_within_budget ? "badge-success" : "badge-danger"}`} style={{ padding: "6px 12px", fontSize: "0.8rem" }}>
+                          {auditDetails.is_within_budget ? "READY FOR APPROVAL" : "OVER BUDGET LIMIT"}
                         </span>
                       </div>
                     </div>
@@ -1287,6 +1432,107 @@ function Dashboard({ token, user, onLogout }) {
               </table>
             </div>
           )}
+{/* --- BUDGET ALLOCATION SECTION FOR END USERS --- */}
+          {activeTab === "budget_allocation" && user.role === "end_user" && (
+            <div className="dashboard-card">
+              <h2 className="card-title">Budget Allocation</h2>
+              <p className="page-subtitle" style={{ marginBottom: "1rem" }}>
+                Input and view your office's budget allocation for the current fiscal year
+              </p>
+              
+              {!user.office_id ? (
+                <div className="dashboard-card" style={{ 
+                  background: "rgba(239, 68, 68, 0.1)",
+                  border: "1px solid var(--danger-color)",
+                  textAlign: "center",
+                  padding: "2rem"
+                }}>
+                  <i className="fas fa-exclamation-triangle" style={{ fontSize: "2rem", color: "var(--danger-color)", marginBottom: "1rem" }}></i>
+                  <h3 style={{ color: "var(--danger-color)", marginBottom: "0.5rem" }}>No Office Assigned</h3>
+                  <p style={{ color: "var(--text-secondary)" }}>
+                    You are not currently assigned to any office. Please contact the BAC Administrator to assign you to an office.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div style={{ 
+                    display: "grid", 
+                    gridTemplateColumns: "1fr 1fr", 
+                    gap: "1.5rem", 
+                    marginBottom: "1.5rem"
+                  }}>
+                    <div>
+                      <div className="dashboard-card" style={{ 
+                        background: "var(--neuro-bg)",
+                        border: "1px solid var(--border-color)"
+                      }}>
+                        <h3 style={{ fontSize: "0.95rem", fontWeight: "600", marginBottom: "1rem", color: "var(--text-secondary)" }}>
+                          <i className="fas fa-wallet" style={{ marginRight: "8px" }}></i>
+                          Your Office Budget Allocation
+                        </h3>
+                        <div style={{ 
+                          fontSize: "2rem", 
+                          fontWeight: "700", 
+                          color: "var(--accent-color)",
+                          marginBottom: "0.5rem"
+                        }}>
+                          ₱{userOfficeBudget.toLocaleString()}
+                        </div>
+                        <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                          {getOfficeLabel(user.office_id)}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <form onSubmit={handleUpdateBudgetAllocation} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <h3 style={{ fontSize: "0.95rem", fontWeight: "600", marginBottom: "0.5rem", color: "var(--text-secondary)" }}>
+                          <i className="fas fa-edit" style={{ marginRight: "8px" }}></i>
+                          Update Budget Allocation
+                        </h3>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="Enter Budget Allocation Amount"
+                          className="form-input"
+                          value={userBudgetAllocation}
+                          onChange={(e) => setUserBudgetAllocation(e.target.value)}
+                          required
+                        />
+                        <button type="submit" className="btn">
+                          <i className="fas fa-save" style={{ marginRight: "8px" }}></i>
+                          Save Budget Allocation
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+                  
+                  <div className="dashboard-card" style={{ 
+                    background: "var(--neuro-bg)",
+                    border: "1px solid var(--border-color)",
+                    marginTop: "1rem"
+                  }}>
+                    <h3 style={{ fontSize: "0.95rem", fontWeight: "600", marginBottom: "1rem", color: "var(--text-secondary)" }}>
+                      <i className="fas fa-info-circle" style={{ marginRight: "8px" }}></i>
+                      RA 12009 Budget Allocation Guidelines
+                    </h3>
+                    <ul style={{ 
+                      fontSize: "0.85rem", 
+                      color: "var(--text-secondary)",
+                      paddingLeft: "1.25rem",
+                      lineHeight: "1.8"
+                    }}>
+                      <li>Budget allocation should align with the approved Annual Investment Program (AIP)</li>
+                      <li>End-users are responsible for ensuring their PPMP requests do not exceed this allocation</li>
+                      <li>The Budget Office will verify all allocations during the review process</li>
+                      <li>Any changes to the allocation must be coordinated with the Budget Office</li>
+                    </ul>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {activeTab === "signatory" && user.role === "end_user" && (
             <div className="signatory-section">
               <div className="signatory-section-header">
@@ -1450,14 +1696,6 @@ function Dashboard({ token, user, onLogout }) {
                     className="form-input"
                     value={newOfficeCode}
                     onChange={(e) => setNewOfficeCode(e.target.value)}
-                    required
-                  />
-                  <input
-                    type="number"
-                    placeholder="Annual Budget Ceiling"
-                    className="form-input"
-                    value={newOfficeBudget}
-                    onChange={(e) => setNewOfficeBudget(e.target.value)}
                     required
                   />
                   <button type="submit" className="btn">Add Office</button>
@@ -1703,6 +1941,27 @@ function Dashboard({ token, user, onLogout }) {
           )}
         </div>
 
+{activeTab === "budget_allocation" && user.role === "end_user" && (
+          <footer className="workspace-footer">
+            <div className="workspace-footer-inner workspace-footer-budget">
+              <h2 className="workspace-footer-title">RA 12009 Budget Allocation Guidelines</h2>
+              <div className="workspace-footer-content">
+                <h3>Key Provisions</h3>
+                <ul>
+                  <li><strong>Section 4 - Planning Phase:</strong> End-users must conduct market scoping and cost estimation</li>
+                  <li><strong>Budget Transparency:</strong> All budget allocations must be visible for accountability</li>
+                  <li><strong>Digital Integration:</strong> Budget data must be submitted electronically for consolidation</li>
+                  <li><strong>Transitory Period:</strong> Three-year transition for full compliance with NGPA</li>
+                </ul>
+                <p className="workspace-footer-note">
+                  <i className="fas fa-info-circle" aria-hidden="true"></i>
+                  Under RA 12009, end-users are responsible for inputting their budget allocations which are visible to Budget Office and BAC Admin for review and consolidation
+                </p>
+              </div>
+            </div>
+          </footer>
+        )}
+
         {activeTab === "indicative" && user.role === "budget_office" && (
           <footer className="workspace-footer">
             <div className="workspace-footer-inner workspace-footer-budget">
@@ -1750,3 +2009,4 @@ function Dashboard({ token, user, onLogout }) {
 }
 
 export default Dashboard;
+  
