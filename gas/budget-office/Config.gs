@@ -4,7 +4,10 @@ var CONFIG = {
   FISCAL_YEAR: 2027,
   TABS: {
     HEADER: 'PPMP_Header',
-    ITEMS: 'PPMP_Items',
+    ITEMS_CSE: 'Items_CSE',
+    ITEMS_NONCSE: 'Items_nonCSE',
+    FORM_CSE: 'PPMP_CSE_Form',
+    FORM_NONCSE: 'PPMP_nonCSE_Form',
     SIGNATORY: 'Signatory',
     AUDIT: 'Audit_Log'
   }

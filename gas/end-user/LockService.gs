@@ -27,13 +27,15 @@ function assertEditable(header) {
 }
 
 function applySheetProtection(ss, lock) {
-  var itemsSheet = ss.getSheetByName(CONFIG.TABS.ITEMS);
-  var signatorySheet = ss.getSheetByName(CONFIG.TABS.SIGNATORY);
+  var protectedTabs = [
+    ss.getSheetByName(CONFIG.TABS.ITEMS_CSE),
+    ss.getSheetByName(CONFIG.TABS.ITEMS_NONCSE),
+    ss.getSheetByName(CONFIG.TABS.SIGNATORY)
+  ];
 
-  [itemsSheet, signatorySheet].forEach(function(sheet) {
+  protectedTabs.forEach(function(sheet) {
     if (!sheet) return;
-    var protections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
-    protections.forEach(function(p) { p.remove(); });
+    sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function(p) { p.remove(); });
     if (lock) {
       var protection = sheet.protect().setDescription('PPMP locked');
       protection.removeEditors(protection.getEditors());
@@ -41,12 +43,15 @@ function applySheetProtection(ss, lock) {
     }
   });
 
-  if (itemsSheet) {
-    var lastRow = Math.max(itemsSheet.getLastRow(), 1);
+  [CONFIG.TABS.ITEMS_CSE, CONFIG.TABS.ITEMS_NONCSE].forEach(function(tabName) {
+    var sheet = ss.getSheetByName(tabName);
+    if (!sheet) return;
+    var lastRow = Math.max(sheet.getLastRow(), 1);
     if (lastRow > 1) {
-      itemsSheet.getRange(2, 14, lastRow - 1, 1).setValue(lock);
+      // 'locked' is column N (14)
+      sheet.getRange(2, 14, lastRow - 1, 1).setValue(lock);
     }
-  }
+  });
 }
 
 function updateHeaderEditState_(headerSheet, header) {

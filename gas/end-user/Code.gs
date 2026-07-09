@@ -14,7 +14,7 @@ function getDashboardData() {
   var office = getOfficeForCurrentUser();
   var ss = openOfficeSpreadsheet(office.office_code);
   var header = readHeader(ss);
-  var items = readItems(ss);
+  var itemsByKind = readAllItems(ss);
   var signatory = readSignatory(ss);
   var total = recalcTotalBudget_(ss);
   header.total_estimated_budget = total;
@@ -22,13 +22,36 @@ function getDashboardData() {
   return {
     office: office,
     header: header,
-    items: items,
+    items_cse: itemsByKind.cse,
+    items_non_cse: itemsByKind.non_cse,
     signatory: signatory,
     can_edit: canEndUserEdit(header),
     lock_reason: getEditLockReason(header),
-    categories: CONFIG.CATEGORIES,
-    procurement_modes: CONFIG.PROCUREMENT_MODES
+    project_types: CONFIG.PROJECT_TYPES,
+    procurement_modes: CONFIG.PROCUREMENT_MODES,
+    fund_sources: CONFIG.FUND_SOURCES
   };
+}
+
+function _tabForKind(isCse) {
+  return isCse ? CONFIG.TABS.ITEMS_CSE : CONFIG.TABS.ITEMS_NONCSE;
+}
+
+function _itemRow(item) {
+  return [
+    item.description || '',
+    item.project_type || '',
+    item.quantity_size || '',
+    item.procurement_mode || '',
+    item.pre_proc_conf ? 'Yes' : 'No',
+    item.proc_start || '',
+    item.proc_end || '',
+    item.delivery_period || '',
+    item.fund_source || '',
+    Number(item.estimated_budget) || 0,
+    item.supporting_docs || '',
+    item.remarks || ''
+  ];
 }
 
 function addItem(item) {
@@ -37,29 +60,13 @@ function addItem(item) {
   var header = readHeader(ss);
   assertEditable(header);
 
-  var sheet = ss.getSheetByName(CONFIG.TABS.ITEMS);
+  var isCse = !!item.is_cse;
+  var sheet = ss.getSheetByName(_tabForKind(isCse));
   var nextRow = Math.max(sheet.getLastRow(), 1) + 1;
   var rowId = nextRow - 1;
-  var qty = Number(item.quantity) || 0;
-  var unitCost = Number(item.unit_cost) || 0;
-  var estimated = qty * unitCost;
 
-  sheet.getRange(nextRow, 1, 1, 14).setValues([[
-    rowId,
-    item.description,
-    item.category || CONFIG.CATEGORIES[0],
-    item.is_cse ? 'TRUE' : 'FALSE',
-    qty,
-    item.unit_of_measure || 'pc',
-    unitCost,
-    estimated,
-    item.procurement_mode || CONFIG.PROCUREMENT_MODES[0],
-    Number(item.q1_qty) || 0,
-    Number(item.q2_qty) || 0,
-    Number(item.q3_qty) || 0,
-    Number(item.q4_qty) || 0,
-    'FALSE'
-  ]]);
+  var rowData = [rowId].concat(_itemRow(item)).concat(['FALSE']);
+  sheet.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
 
   var total = recalcTotalBudget_(ss);
   updateSubmissionStatus(office.office_code, { total_estimated_budget: total });
@@ -72,26 +79,12 @@ function updateItem(rowId, item) {
   var header = readHeader(ss);
   assertEditable(header);
 
-  var sheet = ss.getSheetByName(CONFIG.TABS.ITEMS);
+  var isCse = !!item.is_cse;
+  var sheet = ss.getSheetByName(_tabForKind(isCse));
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (Number(data[i][0]) === Number(rowId)) {
-      var qty = Number(item.quantity) || 0;
-      var unitCost = Number(item.unit_cost) || 0;
-      sheet.getRange(i + 1, 2, 1, 12).setValues([[
-        item.description,
-        item.category,
-        item.is_cse ? 'TRUE' : 'FALSE',
-        qty,
-        item.unit_of_measure,
-        unitCost,
-        qty * unitCost,
-        item.procurement_mode,
-        Number(item.q1_qty) || 0,
-        Number(item.q2_qty) || 0,
-        Number(item.q3_qty) || 0,
-        Number(item.q4_qty) || 0
-      ]]);
+      sheet.getRange(i + 1, 2, 1, 12).setValues([_itemRow(item)]);
       break;
     }
   }
@@ -101,13 +94,13 @@ function updateItem(rowId, item) {
   return getDashboardData();
 }
 
-function deleteItem(rowId) {
+function deleteItem(rowId, isCse) {
   var office = getOfficeForCurrentUser();
   var ss = openOfficeSpreadsheet(office.office_code);
   var header = readHeader(ss);
   assertEditable(header);
 
-  var sheet = ss.getSheetByName(CONFIG.TABS.ITEMS);
+  var sheet = ss.getSheetByName(_tabForKind(!!isCse));
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (Number(data[i][0]) === Number(rowId)) {
@@ -136,8 +129,9 @@ function submitPpmp() {
   var header = readHeader(ss);
   assertEditable(header);
 
-  if (readItems(ss).length === 0) {
-    throw new Error('Add at least one line item before submitting.');
+  var all = readAllItems(ss);
+  if (all.cse.length === 0 && all.non_cse.length === 0) {
+    throw new Error('Add at least one CSE or non-CSE line item before submitting.');
   }
 
   var oldStatus = setHeaderStatus(ss, office.office_code, 'Pending Budget Review');

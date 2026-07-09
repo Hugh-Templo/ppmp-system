@@ -13,9 +13,12 @@ function getEditLockReason(header) {
 }
 
 function applySheetProtection(ss, lock) {
-  var itemsSheet = ss.getSheetByName(CONFIG.TABS.ITEMS);
-  var signatorySheet = ss.getSheetByName(CONFIG.TABS.SIGNATORY);
-  [itemsSheet, signatorySheet].forEach(function(sheet) {
+  var tabs = [
+    ss.getSheetByName(CONFIG.TABS.ITEMS_CSE),
+    ss.getSheetByName(CONFIG.TABS.ITEMS_NONCSE),
+    ss.getSheetByName(CONFIG.TABS.SIGNATORY)
+  ];
+  tabs.forEach(function(sheet) {
     if (!sheet) return;
     sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function(p) { p.remove(); });
     if (lock) {
@@ -24,9 +27,14 @@ function applySheetProtection(ss, lock) {
       if (protection.canDomainEdit()) protection.setDomainEdit(false);
     }
   });
-  if (itemsSheet && itemsSheet.getLastRow() > 1) {
-    itemsSheet.getRange(2, 14, itemsSheet.getLastRow() - 1, 1).setValue(lock);
-  }
+
+  [CONFIG.TABS.ITEMS_CSE, CONFIG.TABS.ITEMS_NONCSE].forEach(function(name) {
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+    if (sheet.getLastRow() > 1) {
+      sheet.getRange(2, 14, sheet.getLastRow() - 1, 1).setValue(lock);
+    }
+  });
 }
 
 function updateHeaderEditState_(headerSheet, header) {

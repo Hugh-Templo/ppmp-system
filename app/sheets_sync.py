@@ -1,8 +1,14 @@
 """
 Sync indicative PPMP data from Google Sheets (Option B) into PostgreSQL.
 
-Reads the Submission_Status master sheet, then pulls PPMP_Header and PPMP_Items
-from each office spreadsheet and upserts into IndicativePPMP + PPMPItem tables.
+Reads the Submission_Status master sheet, then pulls PPMP_Header, Items_CSE, and
+Items_nonCSE from each office spreadsheet and upserts into IndicativePPMP +
+PPMPItem tables.
+
+Item columns follow the 14-column NGPA_PPMP.xlsx layout:
+  row_id | description | project_type | quantity_size | procurement_mode |
+  pre_proc_conf | proc_start | proc_end | delivery_period | fund_source |
+  estimated_budget | supporting_docs | remarks | locked
 """
 
 import logging
@@ -44,22 +50,26 @@ HEADER_FIELDS = [
     "spreadsheet_id",
 ]
 
+# 14-column layout matching gas/setup/SheetTemplate.gs setupItemsTab_
 ITEM_FIELDS = [
     "row_id",
     "description",
-    "category",
-    "is_cse",
-    "quantity",
-    "unit_of_measure",
-    "unit_cost",
-    "estimated_budget",
+    "project_type",
+    "quantity_size",
     "procurement_mode",
-    "q1_qty",
-    "q2_qty",
-    "q3_qty",
-    "q4_qty",
+    "pre_proc_conf",
+    "proc_start",
+    "proc_end",
+    "delivery_period",
+    "fund_source",
+    "estimated_budget",
+    "supporting_docs",
+    "remarks",
     "locked",
 ]
+
+ITEMS_CSE_RANGE = "Items_CSE!A2:N"
+ITEMS_NONCSE_RANGE = "Items_nonCSE!A2:N"
 
 
 def _get_sheets_service():
@@ -70,13 +80,17 @@ def _get_sheets_service():
 
 
 def _read_range(service, spreadsheet_id: str, range_name: str) -> List[List[Any]]:
-    result = (
-        service.spreadsheets()
-        .values()
-        .get(spreadsheetId=spreadsheet_id, range=range_name)
-        .execute()
-    )
-    return result.get("values", [])
+    try:
+        result = (
+            service.spreadsheets()
+            .values()
+            .get(spreadsheetId=spreadsheet_id, range=range_name)
+            .execute()
+        )
+        return result.get("values", [])
+    except Exception as e:
+        logger.warning("Failed to read %s from %s: %s", range_name, spreadsheet_id, e)
+        return []
 
 
 def _parse_bool(val: Any) -> bool:
@@ -131,24 +145,28 @@ def read_ppmp_header(service, spreadsheet_id: str) -> Dict[str, Any]:
     return _row_to_dict(HEADER_FIELDS, rows[0])
 
 
-def read_ppmp_items(service, spreadsheet_id: str) -> List[Dict[str, Any]]:
-    rows = _read_range(service, spreadsheet_id, "PPMP_Items!A2:N")
+def read_items_range(service, spreadsheet_id: str, range_name: str) -> List[Dict[str, Any]]:
+    rows = _read_range(service, spreadsheet_id, range_name)
     items = []
     for row in rows:
         if not row or (len(row) > 1 and not row[1]):
             continue
         item = _row_to_dict(ITEM_FIELDS, row)
-        item["is_cse"] = _parse_bool(item.get("is_cse"))
-        item["quantity"] = _parse_int(item.get("quantity"))
-        item["unit_cost"] = _parse_float(item.get("unit_cost"))
-        item["estimated_budget"] = _parse_float(item.get("estimated_budget"))
-        item["q1_qty"] = _parse_int(item.get("q1_qty"))
-        item["q2_qty"] = _parse_int(item.get("q2_qty"))
-        item["q3_qty"] = _parse_int(item.get("q3_qty"))
-        item["q4_qty"] = _parse_int(item.get("q4_qty"))
         item["row_id"] = _parse_int(item.get("row_id"))
+        item["pre_proc_conf"] = _parse_bool(item.get("pre_proc_conf"))
+        item["estimated_budget"] = _parse_float(item.get("estimated_budget"))
+        item["locked"] = _parse_bool(item.get("locked"))
         items.append(item)
     return items
+
+
+def read_ppmp_items(
+    service, spreadsheet_id: str
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Returns (cse_items, non_cse_items)."""
+    cse = read_items_range(service, spreadsheet_id, ITEMS_CSE_RANGE)
+    non_cse = read_items_range(service, spreadsheet_id, ITEMS_NONCSE_RANGE)
+    return cse, non_cse
 
 
 def _get_or_create_office(session: Session, code: str, name: str, budget: float) -> Office:
@@ -200,13 +218,33 @@ def _upsert_indicative_ppmp(
     return indicative
 
 
-def _upsert_items(
+def _apply_item_fields(db_item: PPMPItem, data: Dict[str, Any], is_cse: bool) -> None:
+    db_item.description = str(data.get("description", ""))
+    db_item.project_type = str(data.get("project_type", "")) or None
+    db_item.quantity_size = str(data.get("quantity_size", "")) or None
+    db_item.procurement_mode = str(data.get("procurement_mode", "")) or "Competitive Bidding"
+    db_item.pre_proc_conf = bool(data.get("pre_proc_conf", False))
+    db_item.proc_start = str(data.get("proc_start", "")) or None
+    db_item.proc_end = str(data.get("proc_end", "")) or None
+    db_item.delivery_period = str(data.get("delivery_period", "")) or None
+    db_item.fund_source = str(data.get("fund_source", "")) or None
+    db_item.estimated_budget = float(data.get("estimated_budget", 0.0))
+    db_item.supporting_docs = str(data.get("supporting_docs", "")) or None
+    db_item.remarks = str(data.get("remarks", "")) or None
+    db_item.is_cse = is_cse
+
+
+def _upsert_items_for_kind(
     session: Session,
     indicative: IndicativePPMP,
     items: List[Dict[str, Any]],
+    is_cse: bool,
 ) -> int:
     existing = session.exec(
-        select(PPMPItem).where(PPMPItem.indicative_ppmp_id == indicative.id)
+        select(PPMPItem).where(
+            PPMPItem.indicative_ppmp_id == indicative.id,
+            PPMPItem.is_cse == is_cse,
+        )
     ).all()
     existing_by_row = {i.sheet_row_id: i for i in existing if i.sheet_row_id is not None}
     synced_row_ids = set()
@@ -217,21 +255,15 @@ def _upsert_items(
         db_item = existing_by_row.get(row_id)
 
         if not db_item:
-            db_item = PPMPItem(indicative_ppmp_id=indicative.id, sheet_row_id=row_id, description="")
+            db_item = PPMPItem(
+                indicative_ppmp_id=indicative.id,
+                sheet_row_id=row_id,
+                description="",
+                is_cse=is_cse,
+            )
             session.add(db_item)
 
-        db_item.description = str(item_data.get("description", ""))
-        db_item.category = str(item_data.get("category", "Office Supplies"))
-        db_item.is_cse = item_data.get("is_cse", False)
-        db_item.quantity = item_data.get("quantity", 0)
-        db_item.unit_of_measure = str(item_data.get("unit_of_measure", "pc"))
-        db_item.unit_cost = item_data.get("unit_cost", 0.0)
-        db_item.estimated_budget = item_data.get("estimated_budget", 0.0)
-        db_item.procurement_mode = str(item_data.get("procurement_mode", "Shopping"))
-        db_item.q1_qty = item_data.get("q1_qty", 0)
-        db_item.q2_qty = item_data.get("q2_qty", 0)
-        db_item.q3_qty = item_data.get("q3_qty", 0)
-        db_item.q4_qty = item_data.get("q4_qty", 0)
+        _apply_item_fields(db_item, item_data, is_cse)
 
     for row_id, db_item in existing_by_row.items():
         if row_id not in synced_row_ids:
@@ -264,7 +296,7 @@ def sync_from_sheets(fiscal_year: Optional[int] = None) -> Tuple[int, str]:
 
             try:
                 header = read_ppmp_header(service, spreadsheet_id)
-                items = read_ppmp_items(service, spreadsheet_id)
+                cse_items, non_cse_items = read_ppmp_items(service, spreadsheet_id)
 
                 office = _get_or_create_office(
                     session,
@@ -273,9 +305,13 @@ def sync_from_sheets(fiscal_year: Optional[int] = None) -> Tuple[int, str]:
                     budget=_parse_float(header.get("budget_allocation")),
                 )
                 indicative = _upsert_indicative_ppmp(session, office, header, sub, spreadsheet_id)
-                _upsert_items(session, indicative, items)
+                _upsert_items_for_kind(session, indicative, cse_items, is_cse=True)
+                _upsert_items_for_kind(session, indicative, non_cse_items, is_cse=False)
                 synced += 1
-                logger.info("Synced %s (%d items)", sub["office_code"], len(items))
+                logger.info(
+                    "Synced %s (CSE=%d, non-CSE=%d)",
+                    sub["office_code"], len(cse_items), len(non_cse_items),
+                )
             except Exception as e:
                 logger.error("Failed to sync %s: %s", sub["office_code"], str(e))
                 session.rollback()

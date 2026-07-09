@@ -4,7 +4,7 @@ function openSpreadsheetById(spreadsheetId) {
 
 function readHeader(ss) {
   var sheet = ss.getSheetByName(CONFIG.TABS.HEADER);
-  var row = sheet.getRange(2, 1, 2, 16).getValues()[0];
+  var row = sheet.getRange(2, 1, 1, 16).getValues()[0];
   return {
     office_code: String(row[0]),
     office_name: String(row[1]),
@@ -25,8 +25,13 @@ function readHeader(ss) {
   };
 }
 
-function readItems(ss) {
-  var sheet = ss.getSheetByName(CONFIG.TABS.ITEMS);
+/**
+ * Reads items from Items_CSE or Items_nonCSE (14-column NGPA-aligned layout).
+ */
+function readItems(ss, isCse) {
+  var tabName = isCse ? CONFIG.TABS.ITEMS_CSE : CONFIG.TABS.ITEMS_NONCSE;
+  var sheet = ss.getSheetByName(tabName);
+  if (!sheet) return [];
   var data = sheet.getDataRange().getValues();
   var items = [];
   for (var i = 1; i < data.length; i++) {
@@ -34,17 +39,18 @@ function readItems(ss) {
     items.push({
       row_id: data[i][0] || i,
       description: String(data[i][1]),
-      category: String(data[i][2]),
-      is_cse: data[i][3] === true || String(data[i][3]).toUpperCase() === 'TRUE',
-      quantity: Number(data[i][4]) || 0,
-      unit_of_measure: String(data[i][5]),
-      unit_cost: Number(data[i][6]) || 0,
-      estimated_budget: Number(data[i][7]) || 0,
-      procurement_mode: String(data[i][8]),
-      q1_qty: Number(data[i][9]) || 0,
-      q2_qty: Number(data[i][10]) || 0,
-      q3_qty: Number(data[i][11]) || 0,
-      q4_qty: Number(data[i][12]) || 0
+      project_type: String(data[i][2] || ''),
+      quantity_size: String(data[i][3] || ''),
+      procurement_mode: String(data[i][4] || ''),
+      pre_proc_conf: data[i][5] === true || String(data[i][5]).toUpperCase() === 'TRUE' || String(data[i][5]).toUpperCase() === 'YES',
+      proc_start: String(data[i][6] || ''),
+      proc_end: String(data[i][7] || ''),
+      delivery_period: String(data[i][8] || ''),
+      fund_source: String(data[i][9] || ''),
+      estimated_budget: Number(data[i][10]) || 0,
+      supporting_docs: String(data[i][11] || ''),
+      remarks: String(data[i][12] || ''),
+      is_cse: !!isCse
     });
   }
   return items;
@@ -115,18 +121,24 @@ function getOfficePpmpDetail(officeCode) {
 
   var ss = openSpreadsheetById(sub.spreadsheet_id);
   var header = readHeader(ss);
-  var items = readItems(ss);
+  var itemsCse = readItems(ss, true);
+  var itemsNonCse = readItems(ss, false);
   var signatory = readSignatory(ss);
   var utilization = header.budget_allocation > 0
     ? (header.total_estimated_budget / header.budget_allocation * 100) : 0;
+  var totalCse = itemsCse.reduce(function(a, x) { return a + (x.estimated_budget || 0); }, 0);
+  var totalNonCse = itemsNonCse.reduce(function(a, x) { return a + (x.estimated_budget || 0); }, 0);
 
   return {
     submission: sub,
     header: header,
-    items: items,
+    items_cse: itemsCse,
+    items_non_cse: itemsNonCse,
     signatory: signatory,
     audit: {
       total: header.total_estimated_budget,
+      total_cse: totalCse,
+      total_non_cse: totalNonCse,
       allocation: header.budget_allocation,
       utilization_pct: utilization,
       over_budget: header.total_estimated_budget > header.budget_allocation

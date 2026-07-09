@@ -115,28 +115,64 @@ class FinalPPMP(SQLModel, table=True):
 class PPMPItem(SQLModel, table=True):
     """
     Detailed line items inside a PPMP.
+    NGPA_PPMP.xlsx columns 1-12 are the canonical source of fields.
+    Legacy fields (category, quantity, unit_of_measure, unit_cost, q1..q4_qty) remain
+    nullable for backward compatibility.
     """
     id: Optional[int] = Field(default=None, primary_key=True)
     ppmp_id: Optional[int] = Field(default=None, foreign_key="ppmp.id")
     indicative_ppmp_id: Optional[int] = Field(default=None, foreign_key="indicative_ppmp.id")
-    sheet_row_id: Optional[int] = Field(default=None)  # row_id from Google Sheet for upsert
+    sheet_row_id: Optional[int] = Field(default=None)
+
+    # NGPA_PPMP.xlsx Column 1
     description: str
-    category: str  # e.g., "Office Supplies", "IT Equipment", "Catering"
-    is_cse: bool = Field(default=False)  # Common-Use Supplies and Equipment (CSE) via PS-DBM
-    quantity: int = Field(default=1)
-    unit_of_measure: str  # e.g., "pc", "box", "ream"
-    unit_cost: float = Field(default=0.0)
-    estimated_budget: float = Field(default=0.0)  # quantity * unit_cost
-    procurement_mode: str = Field(default="Competitive Bidding")  # e.g., "Shopping", "SVP", "Direct Contracting"
-    
-    # Milestone Schedule (Quarterly distribution of quantities/budget)
+
+    # NGPA_PPMP.xlsx Column 2 (Goods / Infrastructure / Consulting Services / General Support Services)
+    project_type: Optional[str] = Field(default=None)
+
+    # NGPA_PPMP.xlsx Column 3 (free text: quantity/size by lot, item, or package)
+    quantity_size: Optional[str] = Field(default=None)
+
+    # Flag: CSE (PS-DBM) vs non-CSE — determined by originating Sheet tab
+    is_cse: bool = Field(default=False)
+
+    # NGPA_PPMP.xlsx Column 4
+    procurement_mode: str = Field(default="Competitive Bidding")
+
+    # NGPA_PPMP.xlsx Column 5 (Yes/No)
+    pre_proc_conf: Optional[bool] = Field(default=False)
+
+    # NGPA_PPMP.xlsx Columns 6, 7 (MM/YYYY)
+    proc_start: Optional[str] = Field(default=None)
+    proc_end: Optional[str] = Field(default=None)
+
+    # NGPA_PPMP.xlsx Column 8 (MM/YYYY or "as needed")
+    delivery_period: Optional[str] = Field(default=None)
+
+    # NGPA_PPMP.xlsx Column 9
+    fund_source: Optional[str] = Field(default=None)
+
+    # NGPA_PPMP.xlsx Column 10 (Approved Budget for the Contract / Estimated Budget in PhP)
+    estimated_budget: float = Field(default=0.0)
+
+    # NGPA_PPMP.xlsx Column 11
+    supporting_docs: Optional[str] = Field(default=None)
+
+    # NGPA_PPMP.xlsx Column 12
+    remarks: Optional[str] = Field(default=None)
+
+    # Legacy (kept nullable for backward compatibility)
+    category: Optional[str] = Field(default=None)
+    quantity: Optional[int] = Field(default=None)
+    unit_of_measure: Optional[str] = Field(default=None)
+    unit_cost: Optional[float] = Field(default=None)
     q1_qty: int = Field(default=0)
     q2_qty: int = Field(default=0)
     q3_qty: int = Field(default=0)
     q4_qty: int = Field(default=0)
 
     # Relationships
-    ppmp: PPMP = Relationship(back_populates="items")
+    ppmp: Optional[PPMP] = Relationship(back_populates="items")
 
 
 class APP(SQLModel, table=True):
@@ -157,19 +193,33 @@ class APP(SQLModel, table=True):
 class APPRow(SQLModel, table=True):
     """
     Consolidated row in the APP combining similar PPMPItems.
+    Columns align with NGPA_CSE-APP / NGPA_nonCSE-APP output layout.
     """
     id: Optional[int] = Field(default=None, primary_key=True)
     app_id: int = Field(foreign_key="app.id")
+
     description: str
-    category: str
     is_cse: bool = Field(default=False)
-    total_quantity: int
-    unit_of_measure: str
-    unit_cost: float
-    total_estimated_budget: float
+
+    # NGPA aggregation dimensions
+    project_type: Optional[str] = Field(default=None)
     procurement_mode: str
-    
-    # Combined milestones
+    fund_source: Optional[str] = Field(default=None)
+    quantity_size: Optional[str] = Field(default=None)
+    proc_start: Optional[str] = Field(default=None)
+    proc_end: Optional[str] = Field(default=None)
+    delivery_period: Optional[str] = Field(default=None)
+    pre_proc_conf: Optional[bool] = Field(default=False)
+
+    # Consolidated amounts
+    total_estimated_budget: float
+    end_user_offices: Optional[str] = Field(default=None)  # comma-separated list
+
+    # Legacy (kept nullable)
+    category: Optional[str] = Field(default=None)
+    total_quantity: Optional[int] = Field(default=None)
+    unit_of_measure: Optional[str] = Field(default=None)
+    unit_cost: Optional[float] = Field(default=None)
     q1_qty: int = Field(default=0)
     q2_qty: int = Field(default=0)
     q3_qty: int = Field(default=0)

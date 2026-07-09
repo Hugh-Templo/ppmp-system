@@ -27,18 +27,9 @@
     <!-- Dashboard -->
     <div id="tab-dashboard" class="hidden">
       <div class="stats">
-        <div class="stat">
-          <div class="label">Status</div>
-          <div class="value" id="statStatus">—</div>
-        </div>
-        <div class="stat">
-          <div class="label">Total Budget</div>
-          <div class="value" id="statTotal">₱0</div>
-        </div>
-        <div class="stat">
-          <div class="label">Allocation</div>
-          <div class="value" id="statAllocation">₱0</div>
-        </div>
+        <div class="stat"><div class="label">Status</div><div class="value" id="statStatus">—</div></div>
+        <div class="stat"><div class="label">Total Budget</div><div class="value" id="statTotal">₱0</div></div>
+        <div class="stat"><div class="label">Allocation</div><div class="value" id="statAllocation">₱0</div></div>
         <div class="stat">
           <div class="label">Utilization</div>
           <div class="value" id="statUtil">0%</div>
@@ -48,7 +39,8 @@
       <div class="card">
         <h2>Quick Summary</h2>
         <p>Fiscal Year: <strong id="fyLabel">—</strong></p>
-        <p>Line Items: <strong id="itemCount">0</strong></p>
+        <p>CSE Items: <strong id="cseCount">0</strong></p>
+        <p>Non-CSE Items: <strong id="nonCseCount">0</strong></p>
         <p>Posting Status: <strong id="postingStatus">—</strong></p>
         <div class="actions" id="submitActions">
           <button class="btn btn-primary" id="submitBtn" onclick="submitPpmp()">Submit to Budget Office</button>
@@ -58,32 +50,44 @@
 
     <!-- Items -->
     <div id="tab-items" class="hidden">
+      <div class="card">
+        <h2>Item Type</h2>
+        <div class="segment">
+          <button id="segCse" class="seg-btn active" onclick="switchKind(true)">CSE (Common-Use Supplies &amp; Equipment)</button>
+          <button id="segNonCse" class="seg-btn" onclick="switchKind(false)">Non-CSE</button>
+        </div>
+        <p class="hint" id="kindHint"></p>
+      </div>
+
       <div class="card" id="itemFormCard">
-        <h2>Add Line Item</h2>
+        <h2 id="formTitle">Add Line Item — CSE</h2>
         <div class="form-grid">
-          <div><label>Description</label><input id="itemDesc" type="text"></div>
-          <div><label>Category</label><select id="itemCat"></select></div>
-          <div><label>CSE (PS-DBM)</label><select id="itemCse"><option value="false">No</option><option value="true">Yes</option></select></div>
-          <div><label>Quantity</label><input id="itemQty" type="number" min="1" value="1"></div>
-          <div><label>Unit</label><input id="itemUnit" type="text" value="pc"></div>
-          <div><label>Unit Cost (₱)</label><input id="itemCost" type="number" min="0" step="0.01" value="0"></div>
-          <div><label>Procurement Mode</label><select id="itemMode"></select></div>
-          <div><label>Q1 Qty</label><input id="itemQ1" type="number" min="0" value="0"></div>
-          <div><label>Q2 Qty</label><input id="itemQ2" type="number" min="0" value="0"></div>
-          <div><label>Q3 Qty</label><input id="itemQ3" type="number" min="0" value="0"></div>
-          <div><label>Q4 Qty</label><input id="itemQ4" type="number" min="0" value="0"></div>
+          <div class="span-2"><label>General Description and Objective (Col 1)</label><textarea id="fldDesc" rows="2"></textarea></div>
+          <div><label>Type of Project (Col 2)</label><select id="fldProjectType"></select></div>
+          <div><label>Quantity and Size (Col 3)</label><input id="fldQtySize" type="text" placeholder="e.g. 500 reams, or 'See TOR'"></div>
+          <div><label>Mode of Procurement (Col 4)</label><select id="fldMode"></select></div>
+          <div><label>Pre-Procurement Conference (Col 5)</label><select id="fldPreProc"><option value="No">No</option><option value="Yes">Yes</option></select></div>
+          <div><label>Start of Procurement MM/YYYY (Col 6)</label><input id="fldStart" type="text" placeholder="e.g. 03/2027"></div>
+          <div><label>End of Procurement MM/YYYY (Col 7)</label><input id="fldEnd" type="text" placeholder="e.g. 05/2027"></div>
+          <div><label>Expected Delivery Period (Col 8)</label><input id="fldDelivery" type="text" placeholder="MM/YYYY or 'as needed'"></div>
+          <div><label>Source of Funds (Col 9)</label><select id="fldFund"></select></div>
+          <div><label>Estimated Budget / ABC (Col 10)</label><input id="fldBudget" type="number" min="0" step="0.01" value="0"></div>
+          <div class="span-2"><label>Attached Supporting Documents (Col 11)</label><input id="fldDocs" type="text" placeholder="File names or URLs"></div>
+          <div class="span-2"><label>Remarks (Col 12)</label><textarea id="fldRemarks" rows="2"></textarea></div>
         </div>
         <div class="actions">
-          <button class="btn btn-primary" onclick="addItem()">Add Item</button>
+          <button class="btn btn-primary" id="btnAdd" onclick="addItem()">Add Item</button>
+          <button class="btn btn-secondary hidden" id="btnCancelEdit" onclick="cancelEdit()">Cancel Edit</button>
         </div>
       </div>
+
       <div class="card">
-        <h2>Line Items</h2>
+        <h2 id="itemsListTitle">CSE Line Items</h2>
         <table>
           <thead>
             <tr>
-              <th>#</th><th>Description</th><th>Category</th><th>Qty</th>
-              <th>Unit Cost</th><th>Est. Budget</th><th>Mode</th><th></th>
+              <th>#</th><th>Description</th><th>Type</th><th>Qty/Size</th>
+              <th>Mode</th><th>Fund Source</th><th>Est. Budget</th><th></th>
             </tr>
           </thead>
           <tbody id="itemsTable"></tbody>
@@ -113,6 +117,8 @@
 
   <script>
     var appData = null;
+    var currentKind = 'cse';   // 'cse' or 'non_cse'
+    var editingRowId = null;
 
     window.onload = function() {
       google.script.run
@@ -143,7 +149,8 @@
       fill.style.width = Math.min(util, 100) + '%';
       fill.className = 'progress-fill' + (util > 100 ? ' over' : '');
       document.getElementById('fyLabel').textContent = h.fiscal_year;
-      document.getElementById('itemCount').textContent = data.items.length;
+      document.getElementById('cseCount').textContent = data.items_cse.length;
+      document.getElementById('nonCseCount').textContent = data.items_non_cse.length;
       document.getElementById('postingStatus').textContent = h.posting_status;
 
       var lockBanner = document.getElementById('lockBanner');
@@ -157,7 +164,7 @@
 
       var remarksBox = document.getElementById('remarksBox');
       if (h.status === 'Returned' && h.remarks) {
-        remarksBox.innerHTML = '<strong>Budget Office Remarks:</strong> ' + h.remarks;
+        remarksBox.innerHTML = '<strong>Budget Office Remarks:</strong> ' + esc(h.remarks);
         remarksBox.classList.remove('hidden');
       } else {
         remarksBox.classList.add('hidden');
@@ -172,41 +179,78 @@
       setFormDisabled(!canEdit);
 
       populateSelects(data);
-      renderItems(data.items);
+      renderItems();
       renderSignatory(data.signatory);
+      updateKindHint();
 
       showTab('dashboard');
     }
 
     function setFormDisabled(disabled) {
-      ['itemDesc','itemCat','itemCse','itemQty','itemUnit','itemCost','itemMode',
-       'itemQ1','itemQ2','itemQ3','itemQ4','sigSubmittedBy','sigSubmittedDesig',
-       'sigPreparedBy','sigPreparedDesig','sigAip','sigRc','sigOfficeCode'].forEach(function(id) {
+      ['fldDesc','fldProjectType','fldQtySize','fldMode','fldPreProc','fldStart','fldEnd',
+       'fldDelivery','fldFund','fldBudget','fldDocs','fldRemarks',
+       'sigSubmittedBy','sigSubmittedDesig','sigPreparedBy','sigPreparedDesig',
+       'sigAip','sigRc','sigOfficeCode'].forEach(function(id) {
         var el = document.getElementById(id);
         if (el) el.disabled = disabled;
       });
     }
 
     function populateSelects(data) {
-      fillSelect('itemCat', data.categories);
-      fillSelect('itemMode', data.procurement_modes);
+      fillSelect('fldProjectType', data.project_types);
+      fillSelect('fldMode', data.procurement_modes);
+      fillSelect('fldFund', data.fund_sources);
     }
 
     function fillSelect(id, options) {
       var sel = document.getElementById(id);
-      sel.innerHTML = options.map(function(o) { return '<option value="' + o + '">' + o + '</option>'; }).join('');
+      sel.innerHTML = options.map(function(o) { return '<option value="' + esc(o) + '">' + esc(o) + '</option>'; }).join('');
     }
 
-    function renderItems(items) {
+    function switchKind(isCse) {
+      currentKind = isCse ? 'cse' : 'non_cse';
+      document.getElementById('segCse').classList.toggle('active', isCse);
+      document.getElementById('segNonCse').classList.toggle('active', !isCse);
+      document.getElementById('formTitle').textContent = 'Add Line Item — ' + (isCse ? 'CSE' : 'Non-CSE');
+      document.getElementById('itemsListTitle').textContent = (isCse ? 'CSE' : 'Non-CSE') + ' Line Items';
+      cancelEdit();
+      renderItems();
+      updateKindHint();
+    }
+
+    function updateKindHint() {
+      var el = document.getElementById('kindHint');
+      if (currentKind === 'cse') {
+        el.textContent = 'CSE items are Common-Use Supplies & Equipment procured through PS-DBM.';
+      } else {
+        el.textContent = 'Non-CSE items cover Goods, Infrastructure, Consulting, and General Support Services.';
+      }
+    }
+
+    function currentItems() {
+      return currentKind === 'cse' ? appData.items_cse : appData.items_non_cse;
+    }
+
+    function renderItems() {
+      if (!appData) return;
+      var items = currentItems();
       var tbody = document.getElementById('itemsTable');
-      var canEdit = appData && appData.can_edit;
-      tbody.innerHTML = items.map(function(item) {
-        return '<tr><td>' + item.row_id + '</td><td>' + esc(item.description) + '</td><td>' + esc(item.category) +
-          '</td><td>' + item.quantity + '</td><td>' + formatMoney(item.unit_cost) + '</td><td>' + formatMoney(item.estimated_budget) +
-          '</td><td>' + esc(item.procurement_mode) + '</td><td>' +
-          (canEdit ? '<button class="btn btn-danger btn-sm" onclick="deleteItem(' + item.row_id + ')">Delete</button>' : '') +
-          '</td></tr>';
-      }).join('');
+      var canEdit = appData.can_edit;
+      tbody.innerHTML = items.map(function(item, i) {
+        var actions = canEdit
+          ? '<button class="btn btn-secondary btn-sm" onclick="startEdit(' + item.row_id + ')">Edit</button> ' +
+            '<button class="btn btn-danger btn-sm" onclick="deleteItem(' + item.row_id + ')">Delete</button>'
+          : '';
+        return '<tr>' +
+          '<td>' + (i+1) + '</td>' +
+          '<td>' + esc(item.description) + '</td>' +
+          '<td>' + esc(item.project_type) + '</td>' +
+          '<td>' + esc(item.quantity_size) + '</td>' +
+          '<td>' + esc(item.procurement_mode) + '</td>' +
+          '<td>' + esc(item.fund_source) + '</td>' +
+          '<td>' + formatMoney(item.estimated_budget) + '</td>' +
+          '<td>' + actions + '</td></tr>';
+      }).join('') || '<tr><td colspan="8" style="text-align:center;color:#999">No items yet.</td></tr>';
     }
 
     function renderSignatory(sig) {
@@ -231,27 +275,76 @@
 
     function getItemForm() {
       return {
-        description: document.getElementById('itemDesc').value,
-        category: document.getElementById('itemCat').value,
-        is_cse: document.getElementById('itemCse').value === 'true',
-        quantity: document.getElementById('itemQty').value,
-        unit_of_measure: document.getElementById('itemUnit').value,
-        unit_cost: document.getElementById('itemCost').value,
-        procurement_mode: document.getElementById('itemMode').value,
-        q1_qty: document.getElementById('itemQ1').value,
-        q2_qty: document.getElementById('itemQ2').value,
-        q3_qty: document.getElementById('itemQ3').value,
-        q4_qty: document.getElementById('itemQ4').value
+        is_cse: currentKind === 'cse',
+        description: document.getElementById('fldDesc').value,
+        project_type: document.getElementById('fldProjectType').value,
+        quantity_size: document.getElementById('fldQtySize').value,
+        procurement_mode: document.getElementById('fldMode').value,
+        pre_proc_conf: document.getElementById('fldPreProc').value === 'Yes',
+        proc_start: document.getElementById('fldStart').value,
+        proc_end: document.getElementById('fldEnd').value,
+        delivery_period: document.getElementById('fldDelivery').value,
+        fund_source: document.getElementById('fldFund').value,
+        estimated_budget: document.getElementById('fldBudget').value,
+        supporting_docs: document.getElementById('fldDocs').value,
+        remarks: document.getElementById('fldRemarks').value
       };
     }
 
+    function clearForm() {
+      document.getElementById('fldDesc').value = '';
+      document.getElementById('fldQtySize').value = '';
+      document.getElementById('fldPreProc').value = 'No';
+      document.getElementById('fldStart').value = '';
+      document.getElementById('fldEnd').value = '';
+      document.getElementById('fldDelivery').value = '';
+      document.getElementById('fldBudget').value = '0';
+      document.getElementById('fldDocs').value = '';
+      document.getElementById('fldRemarks').value = '';
+    }
+
+    function startEdit(rowId) {
+      var item = currentItems().filter(function(x) { return Number(x.row_id) === Number(rowId); })[0];
+      if (!item) return;
+      editingRowId = rowId;
+      document.getElementById('fldDesc').value = item.description;
+      document.getElementById('fldProjectType').value = item.project_type;
+      document.getElementById('fldQtySize').value = item.quantity_size;
+      document.getElementById('fldMode').value = item.procurement_mode;
+      document.getElementById('fldPreProc').value = item.pre_proc_conf ? 'Yes' : 'No';
+      document.getElementById('fldStart').value = item.proc_start;
+      document.getElementById('fldEnd').value = item.proc_end;
+      document.getElementById('fldDelivery').value = item.delivery_period;
+      document.getElementById('fldFund').value = item.fund_source;
+      document.getElementById('fldBudget').value = item.estimated_budget;
+      document.getElementById('fldDocs').value = item.supporting_docs;
+      document.getElementById('fldRemarks').value = item.remarks;
+      document.getElementById('btnAdd').textContent = 'Update Item';
+      document.getElementById('btnAdd').setAttribute('onclick', 'saveEdit()');
+      document.getElementById('btnCancelEdit').classList.remove('hidden');
+    }
+
+    function cancelEdit() {
+      editingRowId = null;
+      document.getElementById('btnAdd').textContent = 'Add Item';
+      document.getElementById('btnAdd').setAttribute('onclick', 'addItem()');
+      document.getElementById('btnCancelEdit').classList.add('hidden');
+      clearForm();
+    }
+
     function addItem() {
-      google.script.run.withSuccessHandler(render).withFailureHandler(showError).addItem(getItemForm());
+      google.script.run.withSuccessHandler(function(d) { render(d); cancelEdit(); showTab('items'); }).withFailureHandler(showError).addItem(getItemForm());
+    }
+
+    function saveEdit() {
+      var rowId = editingRowId;
+      google.script.run.withSuccessHandler(function(d) { render(d); cancelEdit(); showTab('items'); }).withFailureHandler(showError).updateItem(rowId, getItemForm());
     }
 
     function deleteItem(rowId) {
       if (!confirm('Delete this item?')) return;
-      google.script.run.withSuccessHandler(render).withFailureHandler(showError).deleteItem(rowId);
+      google.script.run.withSuccessHandler(function(d) { render(d); showTab('items'); }).withFailureHandler(showError)
+        .deleteItem(rowId, currentKind === 'cse');
     }
 
     function saveSignatory() {
@@ -273,7 +366,7 @@
     }
 
     function formatMoney(n) { return '₱' + Number(n || 0).toLocaleString('en-PH', {minimumFractionDigits: 2}); }
-    function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
   </script>
 </body>
 </html>

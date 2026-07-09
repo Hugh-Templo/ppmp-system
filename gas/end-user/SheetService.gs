@@ -16,7 +16,7 @@ function openOfficeSpreadsheet(officeCode) {
 
 function readHeader(ss) {
   var sheet = ss.getSheetByName(CONFIG.TABS.HEADER);
-  var row = sheet.getRange(2, 1, 2, 16).getValues()[0];
+  var row = sheet.getRange(2, 1, 1, 16).getValues()[0];
   return {
     office_code: String(row[0]),
     office_name: String(row[1]),
@@ -37,8 +37,14 @@ function readHeader(ss) {
   };
 }
 
-function readItems(ss) {
-  var sheet = ss.getSheetByName(CONFIG.TABS.ITEMS);
+/**
+ * Returns items from either Items_CSE or Items_nonCSE.
+ * Columns follow the 14-column NGPA-aligned layout in SheetTemplate.gs.
+ */
+function readItems(ss, isCse) {
+  var tabName = isCse ? CONFIG.TABS.ITEMS_CSE : CONFIG.TABS.ITEMS_NONCSE;
+  var sheet = ss.getSheetByName(tabName);
+  if (!sheet) return [];
   var data = sheet.getDataRange().getValues();
   var items = [];
   for (var i = 1; i < data.length; i++) {
@@ -46,21 +52,29 @@ function readItems(ss) {
     items.push({
       row_id: data[i][0] || i,
       description: String(data[i][1]),
-      category: String(data[i][2]),
-      is_cse: data[i][3] === true || String(data[i][3]).toUpperCase() === 'TRUE',
-      quantity: Number(data[i][4]) || 0,
-      unit_of_measure: String(data[i][5]),
-      unit_cost: Number(data[i][6]) || 0,
-      estimated_budget: Number(data[i][7]) || 0,
-      procurement_mode: String(data[i][8]),
-      q1_qty: Number(data[i][9]) || 0,
-      q2_qty: Number(data[i][10]) || 0,
-      q3_qty: Number(data[i][11]) || 0,
-      q4_qty: Number(data[i][12]) || 0,
-      locked: data[i][13] === true || String(data[i][13]).toUpperCase() === 'TRUE'
+      project_type: String(data[i][2] || ''),
+      quantity_size: String(data[i][3] || ''),
+      procurement_mode: String(data[i][4] || ''),
+      pre_proc_conf: data[i][5] === true || String(data[i][5]).toUpperCase() === 'TRUE' || String(data[i][5]).toUpperCase() === 'YES',
+      proc_start: String(data[i][6] || ''),
+      proc_end: String(data[i][7] || ''),
+      delivery_period: String(data[i][8] || ''),
+      fund_source: String(data[i][9] || ''),
+      estimated_budget: Number(data[i][10]) || 0,
+      supporting_docs: String(data[i][11] || ''),
+      remarks: String(data[i][12] || ''),
+      locked: data[i][13] === true || String(data[i][13]).toUpperCase() === 'TRUE',
+      is_cse: !!isCse
     });
   }
   return items;
+}
+
+function readAllItems(ss) {
+  return {
+    cse: readItems(ss, true),
+    non_cse: readItems(ss, false)
+  };
 }
 
 function readSignatory(ss) {
@@ -87,8 +101,11 @@ function writeSignatory(ss, signatory) {
 }
 
 function recalcTotalBudget_(ss) {
-  var items = readItems(ss);
-  var total = items.reduce(function(sum, item) { return sum + (item.estimated_budget || 0); }, 0);
+  var all = readAllItems(ss);
+  var total = 0;
+  ['cse', 'non_cse'].forEach(function(k) {
+    all[k].forEach(function(item) { total += (item.estimated_budget || 0); });
+  });
   ss.getSheetByName(CONFIG.TABS.HEADER).getRange(2, 9).setValue(total);
   return total;
 }

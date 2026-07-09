@@ -58,9 +58,26 @@ Then create `Office_Registry.gsheet` inside `_Master/` with columns
 1. Create a Google Cloud service account with **Google Sheets API** enabled
 2. Share `Submission_Status_2027` spreadsheet with the service account email (Viewer)
 3. Download JSON key → save as `credentials/google-service-account.json`
-4. Run DB migration: `migrations/001_sheets_sync.sql`
+4. Run DB migrations in order:
+   - `migrations/001_sheets_sync.sql`
+   - `migrations/002_ngpa_columns.sql` (NGPA / RA 12009 columns on `ppmpitem` and `approw`)
 5. Set env vars in `.env` (see below)
 6. BAC Admin can manually sync via `POST /api/bac/sync-sheets` or wait for hourly Celery job
+
+### 6. Consolidate & Export APP (BAC Admin)
+
+Once offices' indicative PPMPs are approved and posted:
+
+1. `POST /api/bac/consolidate/{fiscal_year}` — builds an `APP` grouped by
+   `(is_cse, description, project_type, procurement_mode, fund_source)` with CSE
+   and non-CSE kept as separate rows.
+2. Download the official RA 12009 outputs (BAC dashboard has three buttons):
+   - `GET /api/bac/apps/{fy}/export/cse`      → filled `NGPA_CSE-APP.xlsx`
+   - `GET /api/bac/apps/{fy}/export/noncse`   → filled `NGPA_nonCSE-APP.xlsx`
+   - `GET /api/bac/apps/{fy}/export/combined` → filled `APP-CSE&nonCSE {fy} Form.xlsx`
+
+The three templates live in `templates/` and are opened via openpyxl, so the
+official layouts, formatting, and formulas are preserved.
 
 ## Environment Variables (FastAPI)
 
@@ -69,6 +86,22 @@ GOOGLE_SERVICE_ACCOUNT_FILE=./credentials/google-service-account.json
 GOOGLE_MASTER_SPREADSHEET_ID=submission_status_sheet_id
 GOOGLE_SYNC_FISCAL_YEAR=2027
 ```
+
+## Per-office Sheet Structure
+
+Each office's spreadsheet contains 7 tabs, aligned with the RA 12009 NGPA
+templates in `templates/`:
+
+1. `PPMP_Header` — office metadata, status, totals, edit lock
+2. `Items_CSE` — structured CSE line items (web app writes here)
+3. `Items_nonCSE` — structured non-CSE line items
+4. `PPMP_CSE_Form` — printable NGPA_PPMP layout (formulas mirror `Items_CSE`)
+5. `PPMP_nonCSE_Form` — printable NGPA_PPMP layout (formulas mirror `Items_nonCSE`)
+6. `Signatory`
+7. `Audit_Log`
+
+`Items_CSE` / `Items_nonCSE` use the 14-column NGPA layout (see
+`SHEETS_TEMPLATE.md` for column reference and dropdown options).
 
 ## Edit Lock Rules
 

@@ -563,6 +563,33 @@ function Dashboard({ token, user, onLogout }) {
     }
   };
 
+  const handleExportApp = async (fiscalYear, kind) => {
+    const labels = { cse: "CSE APP", noncse: "Non-CSE APP", combined: "Combined APP" };
+    try {
+      const res = await fetch(`http://localhost:8000/api/bac/apps/${fiscalYear}/export/${kind}`, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Export failed" }));
+        showNotification(err.detail || `${labels[kind]} export failed`, "danger");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `APP-${kind === "noncse" ? "nonCSE" : kind.toUpperCase()}-FY${fiscalYear}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showNotification(`${labels[kind]} download started`);
+    } catch (err) {
+      showNotification(`Failed to download ${labels[kind]}`, "danger");
+    }
+  };
+
   const handleSelectApp = async (appId) => {
     try {
       const res = await fetch(`http://localhost:8000/api/bac/apps/${appId}`, {
@@ -1237,29 +1264,53 @@ function Dashboard({ token, user, onLogout }) {
                     {selectedApp ? (
                       <div className="dashboard-card">
                         <h2 className="card-title">{selectedApp.app.title} Details</h2>
+                        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", margin: "8px 0 16px 0" }}>
+                          <button
+                            className="btn"
+                            onClick={() => handleExportApp(selectedApp.app.fiscal_year, "cse")}
+                          >
+                            Download CSE APP (.xlsx)
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={() => handleExportApp(selectedApp.app.fiscal_year, "noncse")}
+                          >
+                            Download Non-CSE APP (.xlsx)
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={() => handleExportApp(selectedApp.app.fiscal_year, "combined")}
+                          >
+                            Download Combined APP (.xlsx)
+                          </button>
+                        </div>
                         <div className="table-wrapper">
                           <table className="custom-table" style={{ fontSize: "11px" }}>
                             <thead>
                               <tr>
-                                <th>Category</th>
+                                <th>Kind</th>
                                 <th>Description</th>
-                                <th>Total Qty</th>
-                                <th>Unit Cost</th>
-                                <th>Total Budget</th>
+                                <th>Type</th>
+                                <th>Qty/Size</th>
                                 <th>Mode</th>
-                                <th>Milestones (Q1-Q4)</th>
+                                <th>Fund Source</th>
+                                <th>Timeline (Start→End)</th>
+                                <th>Est. Budget</th>
+                                <th>End-User Offices</th>
                               </tr>
                             </thead>
                             <tbody>
                               {selectedApp.rows.map((row) => (
                                 <tr key={row.id}>
-                                  <td>{row.category}</td>
+                                  <td>{row.is_cse ? "CSE" : "Non-CSE"}</td>
                                   <td>{row.description}</td>
-                                  <td>{row.total_quantity} {row.unit_of_measure}</td>
-                                  <td>₱{row.unit_cost.toLocaleString()}</td>
-                                  <td>₱{row.total_estimated_budget.toLocaleString()}</td>
+                                  <td>{row.project_type || "—"}</td>
+                                  <td>{row.quantity_size || "—"}</td>
                                   <td>{row.procurement_mode}</td>
-                                  <td>{row.q1_qty}/{row.q2_qty}/{row.q3_qty}/{row.q4_qty}</td>
+                                  <td>{row.fund_source || "—"}</td>
+                                  <td>{(row.proc_start || "—") + " → " + (row.proc_end || "—")}</td>
+                                  <td>₱{Number(row.total_estimated_budget || 0).toLocaleString()}</td>
+                                  <td>{row.end_user_offices || "—"}</td>
                                 </tr>
                               ))}
                             </tbody>

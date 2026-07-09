@@ -44,12 +44,27 @@
         <div id="overBudgetWarning" class="hidden" style="color:#c62828;margin-bottom:1rem;font-weight:600;"></div>
       </div>
       <div class="card">
-        <h2>Line Items</h2>
+        <h2>CSE Line Items <span id="cseCountLabel" class="hint"></span></h2>
         <table>
           <thead>
-            <tr><th>#</th><th>Description</th><th>Category</th><th>Qty</th><th>Unit Cost</th><th>Est. Budget</th><th>Mode</th></tr>
+            <tr>
+              <th>#</th><th>Description</th><th>Type</th><th>Qty/Size</th>
+              <th>Mode</th><th>Fund Source</th><th>Timeline</th><th>Est. Budget</th>
+            </tr>
           </thead>
-          <tbody id="reviewItems"></tbody>
+          <tbody id="reviewItemsCse"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>Non-CSE Line Items <span id="nonCseCountLabel" class="hint"></span></h2>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>Description</th><th>Type</th><th>Qty/Size</th>
+              <th>Mode</th><th>Fund Source</th><th>Timeline</th><th>Est. Budget</th>
+            </tr>
+          </thead>
+          <tbody id="reviewItemsNonCse"></tbody>
         </table>
       </div>
       <div class="card">
@@ -115,6 +130,22 @@
       return '<div class="stat"><div class="num">' + num + '</div><div class="lbl">' + label + '</div></div>';
     }
 
+    function renderItemsRows(items) {
+      return items.map(function(item, i) {
+        var timeline = (item.proc_start || '—') + ' → ' + (item.proc_end || '—') + '<br><small>Del: ' + esc(item.delivery_period || '—') + '</small>';
+        return '<tr>' +
+          '<td>' + (i+1) + '</td>' +
+          '<td>' + esc(item.description) + '</td>' +
+          '<td>' + esc(item.project_type) + '</td>' +
+          '<td>' + esc(item.quantity_size) + '</td>' +
+          '<td>' + esc(item.procurement_mode) + '</td>' +
+          '<td>' + esc(item.fund_source) + '</td>' +
+          '<td>' + timeline + '</td>' +
+          '<td>' + formatMoney(item.estimated_budget) + '</td>' +
+          '</tr>';
+      }).join('') || '<tr><td colspan="8" style="text-align:center;color:#999">No items</td></tr>';
+    }
+
     function openReview(officeCode) {
       currentOffice = officeCode;
       document.getElementById('loading').classList.remove('hidden');
@@ -134,6 +165,8 @@
 
       document.getElementById('auditBox').innerHTML =
         '<div class="audit-item"><strong>Total Budget</strong><br>' + formatMoney(data.audit.total) + '</div>' +
+        '<div class="audit-item"><strong>CSE Total</strong><br>' + formatMoney(data.audit.total_cse || 0) + '</div>' +
+        '<div class="audit-item"><strong>Non-CSE Total</strong><br>' + formatMoney(data.audit.total_non_cse || 0) + '</div>' +
         '<div class="audit-item"><strong>Allocation</strong><br>' + formatMoney(data.audit.allocation) + '</div>' +
         '<div class="audit-item"><strong>Utilization</strong><br>' + data.audit.utilization_pct.toFixed(1) + '%</div>' +
         '<div class="audit-item"><strong>Status</strong><br>' + badge(h.status) + ' ' + badge(h.posting_status, 'posting') + '</div>';
@@ -146,11 +179,10 @@
         warn.classList.add('hidden');
       }
 
-      document.getElementById('reviewItems').innerHTML = data.items.map(function(item, i) {
-        return '<tr><td>' + (i+1) + '</td><td>' + esc(item.description) + '</td><td>' + esc(item.category) +
-          '</td><td>' + item.quantity + '</td><td>' + formatMoney(item.unit_cost) + '</td><td>' + formatMoney(item.estimated_budget) +
-          '</td><td>' + esc(item.procurement_mode) + '</td></tr>';
-      }).join('') || '<tr><td colspan="7">No items</td></tr>';
+      document.getElementById('cseCountLabel').textContent = '(' + data.items_cse.length + ' items)';
+      document.getElementById('nonCseCountLabel').textContent = '(' + data.items_non_cse.length + ' items)';
+      document.getElementById('reviewItemsCse').innerHTML = renderItemsRows(data.items_cse);
+      document.getElementById('reviewItemsNonCse').innerHTML = renderItemsRows(data.items_non_cse);
 
       var sig = data.signatory;
       document.getElementById('reviewSignatory').innerHTML =
