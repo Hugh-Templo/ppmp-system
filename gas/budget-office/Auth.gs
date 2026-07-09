@@ -1,6 +1,6 @@
 var BUDGET_OFFICE_EMAILS = [
-  'budget@ormoccity.gov.ph'
-  // Add more budget office staff emails here
+  'budget.ormoc@gmail.com'
+  // Add other budget office Gmail accounts here
 ];
 
 function getCurrentUserEmail() {

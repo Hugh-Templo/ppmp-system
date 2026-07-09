@@ -1,6 +1,6 @@
 # Google Apps Script — PPMP Indicative System
 
-Deploy under the **BAC Google Workspace account**.
+Deploy under a **BAC personal Gmail account** (e.g. `bac.ormoc@gmail.com`). No Google Workspace required — each office uses its own personal Gmail (e.g. `cho.ormoc@gmail.com`) listed in `Office_Registry`.
 
 ## Projects
 
@@ -14,39 +14,44 @@ Deploy under the **BAC Google Workspace account**.
 
 ### 1. Create Drive folder structure
 
-On the BAC account, create:
+Sign in as `bac.ormoc@gmail.com` and create:
 
 ```
 PPMP_Indicative/
 ├── _Master/
 │   ├── Office_Registry.gsheet
-│   └── Submission_Status_2027.gsheet
+│   └── Submission_Status_2027.gsheet   (created by setup script)
 └── 2027/
     └── (office sheets created by setup script)
 ```
 
+Then create `Office_Registry.gsheet` inside `_Master/` with columns
+`office_code`, `office_name`, `contact_email`, `budget_allocation` — one row per office. The `contact_email` must be the **exact** Gmail the office rep will sign in with.
+
 ### 2. Run setup script
 
-1. Open [script.google.com](https://script.google.com) → New project
+1. Open [script.google.com](https://script.google.com) → New project (signed in as `bac.ormoc@gmail.com`)
 2. Copy files from `gas/setup/` into the project
 3. Set `MASTER_FOLDER_ID` and `OFFICE_REGISTRY_ID` in `Config.gs`
-4. Run `setupFiscalYear(2027)` — creates 40 office spreadsheets from template
+4. Run `setupFiscalYear(2027)` — creates one spreadsheet per office and `Submission_Status_2027`
 
 ### 3. Deploy End User Web App
 
 1. New Apps Script project → copy all files from `gas/end-user/`
-2. Set IDs in `Config.gs` (MASTER_SHEET_ID, SUBMISSION_STATUS_ID, FISCAL_YEAR)
+2. Set IDs in `Config.gs` (`OFFICE_REGISTRY_ID`, `SUBMISSION_STATUS_ID`, `FISCAL_YEAR`)
 3. Deploy → New deployment → Web app
-   - Execute as: **Me**
-   - Who has access: **Anyone within [your domain]**
-4. Share each office sheet with the office Google Group (Editor)
+   - Execute as: **Me** (`bac.ormoc@gmail.com`)
+   - Who has access: **Anyone** (Google sign-in required — do NOT pick "Anyone anonymous")
+4. Share the web app URL with each office. Access control is enforced by `Auth.gs`, which matches the signed-in email against `contact_email` in `Office_Registry`.
 
 ### 4. Deploy Budget Office Web App
 
 1. New Apps Script project → copy all files from `gas/budget-office/`
-2. Set `BUDGET_OFFICE_EMAILS` in `Auth.gs`
-3. Deploy same as above
-4. Share `_Master` folder and all office sheets with Budget Office group (Editor)
+2. Add authorized emails to `BUDGET_OFFICE_EMAILS` in `Auth.gs` (e.g. `budget.ormoc@gmail.com`)
+3. Deploy → New deployment → Web app
+   - Execute as: **Me** (`bac.ormoc@gmail.com`)
+   - Who has access: **Anyone** (Google sign-in required)
+4. Share the URL with budget office staff.
 
 ### 5. Connect FastAPI (Option B)
 
@@ -61,7 +66,6 @@ PPMP_Indicative/
 
 ```env
 GOOGLE_SERVICE_ACCOUNT_FILE=./credentials/google-service-account.json
-GOOGLE_DRIVE_PPMP_FOLDER_ID=your_drive_folder_id
 GOOGLE_MASTER_SPREADSHEET_ID=submission_status_sheet_id
 GOOGLE_SYNC_FISCAL_YEAR=2027
 ```
@@ -73,3 +77,12 @@ GOOGLE_SYNC_FISCAL_YEAR=2027
 - **Approved** → permanently locked
 - Budget office **Return for Revision** unlocks (only if not Approved)
 - Budget office **Approve** permanently locks
+
+## Troubleshooting
+
+| Symptom | Cause / Fix |
+|---------|-------------|
+| "No office assigned to <email>" | Email not in `Office_Registry.contact_email`, or typo. Add/fix the row. |
+| "Unauthorized. Only Budget Office staff..." | Email not in `BUDGET_OFFICE_EMAILS`. Add it in `gas/budget-office/Auth.gs` and redeploy. |
+| Office rep can open sheet directly and edit past a lock | The lock lives in the web app. Do not share raw sheets with edit access; keep sheets owned by `bac.ormoc@gmail.com` only. |
+| End user prompted for permissions on first open | Normal — Google asks for consent because the app runs as BAC. |

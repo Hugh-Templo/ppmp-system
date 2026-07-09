@@ -10,6 +10,7 @@ function setupFiscalYear(fiscalYear) {
   var codeIdx = headers.indexOf('office_code');
   var nameIdx = headers.indexOf('office_name');
   var budgetIdx = headers.indexOf('budget_allocation');
+  var emailIdx = headers.indexOf('contact_email');
 
   if (codeIdx < 0 || nameIdx < 0) {
     throw new Error('Office_Registry must have office_code and office_name columns');
@@ -24,7 +25,16 @@ function setupFiscalYear(fiscalYear) {
     if (!officeCode) continue;
 
     var budget = budgetIdx >= 0 ? Number(data[i][budgetIdx]) || 0 : 0;
+    var contactEmail = emailIdx >= 0 ? String(data[i][emailIdx] || '').trim() : '';
     var ss = createOfficeSpreadsheet(officeCode, officeName, fiscalYear, budget);
+
+    if (contactEmail) {
+      try {
+        DriveApp.getFileById(ss.getId()).addViewer(contactEmail);
+      } catch (err) {
+        Logger.log('Could not share ' + officeCode + ' with ' + contactEmail + ': ' + err);
+      }
+    }
 
     statusSheet.appendRow([
       officeCode, officeName, fiscalYear, ss.getId(),

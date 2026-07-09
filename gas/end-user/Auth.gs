@@ -4,7 +4,7 @@ function getCurrentUserEmail() {
 
 function getOfficeForCurrentUser() {
   var email = getCurrentUserEmail().toLowerCase();
-  if (!email) throw new Error('Unable to identify user. Please sign in with your Google Workspace account.');
+  if (!email) throw new Error('Unable to identify user. Please sign in with the Google account assigned to your office.');
 
   var registry = SpreadsheetApp.openById(CONFIG.OFFICE_REGISTRY_ID);
   var sheet = registry.getSheetByName('Offices') || registry.getSheets()[0];
