@@ -26,7 +26,14 @@ PPMP_Indicative/
 ```
 
 Then create `Office_Registry.gsheet` inside `_Master/` with columns
-`office_code`, `office_name`, `contact_email`, `budget_allocation` — one row per office. The `contact_email` must be the **exact** Gmail the office rep will sign in with.
+`office_code`, `office_name`, `contact_email`, `budget_allocation`.
+
+**Quick start (no emails yet):** import `templates/end-users/Office_Registry_import.csv`
+(generated from `templates/end-users/offices_list.xlsx`) into a new Google Sheet.
+Leave `contact_email` blank for now — setup will still create all office PPMP sheets;
+end users cannot sign in until BAC fills in their Gmail per row.
+
+When emails are ready, set `contact_email` to the **exact** Gmail each office rep will use.
 
 ### 2. Run setup script
 
