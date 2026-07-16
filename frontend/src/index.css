@@ -1374,6 +1374,309 @@ pre.json-block {
   min-width: 0;
 }
 
+.ppmp-fullscreen-columns--readonly {
+  grid-template-columns: 1fr;
+}
+
+.ppmp-fullscreen-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* -----------------------------------------------------------------
+   NGPA PPMP Form (read-only Excel-format view)
+   Mirrors the printed NGPA_PPMP.xlsx layout for Approved and
+   Pending Budget Review PPMPs.
+   ----------------------------------------------------------------- */
+.ngpa-ppmp-form {
+  --ngpa-border: #1f2937;
+  --ngpa-border-soft: #94a3b8;
+  --ngpa-header-bg: #f1f5f9;
+  --ngpa-total-bg: #fef3c7;
+  color: var(--text-primary);
+  font-family: "Times New Roman", "Georgia", serif;
+  background: #ffffff;
+  padding: 1.25rem 1.5rem 1.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.ngpa-ppmp-form__header {
+  text-align: center;
+  border-bottom: 2px solid var(--ngpa-border);
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+}
+
+.ngpa-ppmp-form__letterhead {
+  font-style: italic;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.ngpa-ppmp-form__doc-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-bottom: 0.75rem;
+  text-transform: uppercase;
+}
+
+.ngpa-ppmp-form__type-row {
+  display: flex;
+  justify-content: center;
+  gap: 3rem;
+  margin-bottom: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.ngpa-ppmp-form__type-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.ngpa-ppmp-form__type-mark.is-active {
+  color: var(--text-primary);
+}
+
+.ngpa-ppmp-form__type-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  border: 1.5px solid var(--ngpa-border);
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
+.ngpa-ppmp-form__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  text-align: left;
+  font-size: 0.95rem;
+  flex-wrap: wrap;
+}
+
+.ngpa-ppmp-form__meta > div {
+  flex: 1 1 240px;
+}
+
+.ngpa-ppmp-form__table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--ngpa-border);
+  margin-bottom: 1.25rem;
+}
+
+.ngpa-ppmp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  table-layout: auto;
+}
+
+.ngpa-ppmp-table th,
+.ngpa-ppmp-table td {
+  border: 1px solid var(--ngpa-border);
+  padding: 0.4rem 0.5rem;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.ngpa-ppmp-table thead th {
+  background: var(--ngpa-header-bg);
+  font-weight: 700;
+  text-align: center;
+  vertical-align: middle;
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.ngpa-ppmp-table__group {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ngpa-ppmp-table__col-numbers th {
+  font-weight: 600;
+  font-style: italic;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  background: #f8fafc;
+}
+
+.ngpa-ppmp-table tbody td {
+  min-height: 2.5rem;
+}
+
+.ngpa-ppmp-table tbody tr:nth-child(even) td {
+  background: #fbfdff;
+}
+
+.ngpa-ppmp-table__center {
+  text-align: center;
+}
+
+.ngpa-ppmp-table__amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ngpa-ppmp-table__total td {
+  background: var(--ngpa-total-bg);
+  font-weight: 700;
+}
+
+.ngpa-ppmp-table__total-label {
+  text-align: right;
+  letter-spacing: 0.03em;
+}
+
+.ngpa-ppmp-table__total-value {
+  font-size: 0.9rem;
+}
+
+.ngpa-ppmp-form__signatories {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.ngpa-ppmp-form__sig-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+}
+
+.ngpa-ppmp-form__sig-role {
+  font-weight: 700;
+  margin-bottom: 1.5rem;
+  font-size: 0.95rem;
+}
+
+.ngpa-ppmp-form__sig-name {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  min-height: 1.2rem;
+  border-bottom: 1px solid var(--ngpa-border);
+  padding-bottom: 0.15rem;
+  align-self: stretch;
+  text-align: center;
+}
+
+.ngpa-ppmp-form__sig-line {
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--text-secondary);
+  align-self: stretch;
+  text-align: center;
+  margin-bottom: 0.75rem;
+}
+
+.ngpa-ppmp-form__sig-designation {
+  min-height: 1.2rem;
+  border-bottom: 1px solid var(--ngpa-border-soft);
+  padding-bottom: 0.15rem;
+  align-self: stretch;
+  text-align: center;
+}
+
+.ngpa-ppmp-form__sig-caption {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  align-self: stretch;
+  text-align: center;
+  margin-bottom: 0.5rem;
+}
+
+.ngpa-ppmp-form__sig-unit {
+  min-height: 1.2rem;
+  border-bottom: 1px solid var(--ngpa-border-soft);
+  padding-bottom: 0.15rem;
+  align-self: stretch;
+  text-align: center;
+}
+
+.ngpa-ppmp-form__sig-date {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 900px) {
+  .ngpa-ppmp-form__signatories {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  .ngpa-ppmp-form__type-row {
+    gap: 1.5rem;
+  }
+}
+
+@media print {
+  body,
+  html,
+  #root {
+    background: #ffffff !important;
+  }
+
+  .app-shell,
+  .dashboard-sidebar,
+  .dashboard-topbar,
+  .ppmp-fullscreen-header,
+  .ppmp-fullscreen-back,
+  .ppmp-fullscreen-actions,
+  .alert,
+  .ppmp-add-item-card {
+    display: none !important;
+  }
+
+  .ppmp-fullscreen,
+  .ppmp-fullscreen-body,
+  .ppmp-fullscreen-columns,
+  .ppmp-items-card {
+    position: static !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #ffffff !important;
+  }
+
+  .ngpa-ppmp-form {
+    border: none;
+    padding: 0;
+  }
+
+  .ngpa-ppmp-form__table-wrapper {
+    overflow: visible;
+  }
+
+  .ngpa-ppmp-table {
+    font-size: 9pt;
+  }
+
+  @page {
+    size: A4 landscape;
+    margin: 12mm;
+  }
+}
+
 .ppmp-add-item-form {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

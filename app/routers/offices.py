@@ -3,14 +3,14 @@ import logging
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from typing import List, Optional
 from app.database import get_session
 from app.models import User, Office, PPMP, PPMPItem
 from app.auth import get_current_user, check_role
-from app.ppmp_template import write_signatory
+from app.ppmp_template import export_ppmp_xlsx, write_signatory
 
 logger = logging.getLogger(__name__)
 
@@ -248,19 +248,76 @@ def get_ppmp(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    """Get details of a specific PPMP and its items."""
+    """Get details of a specific PPMP and its items, enriched with office/
+    signatory info so the NGPA-format view can render prepared-by / submitted-by
+    without an extra round-trip."""
     ppmp = session.get(PPMP, ppmp_id)
     if not ppmp:
         raise HTTPException(status_code=404, detail="PPMP not found")
-    
+
     # Restrict end-users to only view their office's PPMPs
     if current_user.role == "end_user" and ppmp.office_id != current_user.office_id:
         raise HTTPException(status_code=403, detail="Access denied to this office's PPMP")
-        
+
+    office = session.get(Office, ppmp.office_id) if ppmp.office_id else None
+    office_payload = None
+    if office is not None:
+        office_payload = {
+            "id": office.id,
+            "name": office.name,
+            "code": office.code,
+            "prepared_by": office.prepared_by or "",
+            "prepared_by_designation": office.prepared_by_designation or "",
+            "submitted_by": office.submitted_by or "",
+            "submitted_by_designation": office.submitted_by_designation or "",
+        }
+
     return {
         "ppmp": ppmp,
-        "items": ppmp.items
+        "items": ppmp.items,
+        "office": office_payload,
     }
+
+
+@router.get("/ppmps/{ppmp_id}/export")
+def export_ppmp(
+    ppmp_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Download the office's NGPA_PPMP.xlsx filled with this PPMP's items."""
+    ppmp = session.get(PPMP, ppmp_id)
+    if not ppmp:
+        raise HTTPException(status_code=404, detail="PPMP not found")
+
+    if current_user.role == "end_user" and ppmp.office_id != current_user.office_id:
+        raise HTTPException(status_code=403, detail="Access denied to this office's PPMP")
+
+    office = session.get(Office, ppmp.office_id) if ppmp.office_id else None
+    if office is None:
+        raise HTTPException(status_code=404, detail="Office for this PPMP not found")
+
+    try:
+        content = export_ppmp_xlsx(office, ppmp, ppmp.items)
+    except FileNotFoundError as exc:
+        logger.error("Master template missing: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail="Master PPMP template is missing on the server.",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to export PPMP xlsx")
+        raise HTTPException(status_code=500, detail=f"PPMP export failed: {exc}")
+
+    safe_title = "".join(
+        ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in (ppmp.title or "PPMP")
+    ).strip("_") or "PPMP"
+    filename = f"NGPA_PPMP_{safe_title}_FY{ppmp.fiscal_year}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/ppmps/{ppmp_id}/submit")

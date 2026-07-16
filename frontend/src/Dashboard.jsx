@@ -543,6 +543,34 @@ function Dashboard({ token, user, onLogout }) {
     }
   };
 
+  const handleDownloadPpmpXlsx = async () => {
+    if (!selectedPpmp) return;
+    try {
+      const res = await fetch(
+        `http://localhost:8000/api/offices/ppmps/${selectedPpmp.ppmp.id}/export`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Export failed" }));
+        showNotification(err.detail || "PPMP export failed", "danger");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const safeTitle = (selectedPpmp.ppmp.title || "PPMP").replace(/[^A-Za-z0-9_-]+/g, "_");
+      a.href = url;
+      a.download = `NGPA_PPMP_${safeTitle}_FY${selectedPpmp.ppmp.fiscal_year}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showNotification("PPMP download started");
+    } catch (err) {
+      showNotification("Failed to download PPMP", "danger");
+    }
+  };
+
   const handleReviewAction = async (ppmpId, action) => {
     try {
       const res = await fetch(`http://localhost:8000/api/budget/ppmps/${ppmpId}/review?action=${action}&remarks=${remarks}`, {
@@ -776,6 +804,196 @@ function Dashboard({ token, user, onLogout }) {
       {isCse ? "CSE" : "nonCSE"}
     </span>
   );
+
+  const ngpaQuantitySize = (item) => {
+    if (item.quantity_size) return item.quantity_size;
+    const qty = item.quantity == null ? "" : String(item.quantity);
+    const uom = (item.unit_of_measure || "").trim();
+    return `${qty} ${uom}`.trim();
+  };
+
+  const ngpaYesNo = (value) => {
+    if (value === null || value === undefined) return "";
+    return value ? "Yes" : "No";
+  };
+
+  const ngpaMoney = (value) =>
+    Number(value || 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+  const renderNgpaPpmpForm = (payload) => {
+    const { ppmp, items = [], office } = payload || {};
+    if (!ppmp) return null;
+
+    const officeName = office?.name || "";
+    // Approved PPMPs display the FINAL marker; every other status (Draft,
+    // Returned, Pending Budget Review) shows INDICATIVE, matching the Excel.
+    const isFinal = (ppmp.status || "").toLowerCase() === "approved";
+    const totalBudget = items.reduce(
+      (sum, it) => sum + Number(it.estimated_budget || 0),
+      0
+    );
+
+    // The master template reserves 5 pre-formatted item rows; pad the on-screen
+    // form to the same minimum so an empty PPMP still looks like the printed form.
+    const MIN_ROWS = 5;
+    const paddedCount = Math.max(items.length, MIN_ROWS);
+    const paddedItems = Array.from({ length: paddedCount }, (_, idx) => items[idx] || null);
+
+    return (
+      <div className="ngpa-ppmp-form" role="document" aria-label="NGPA PPMP Form">
+        <div className="ngpa-ppmp-form__header">
+          <div className="ngpa-ppmp-form__letterhead">[Agency Letterhead with Logo]</div>
+          <div className="ngpa-ppmp-form__doc-title">
+            PROJECT PROCUREMENT MANAGEMENT PLAN (PPMP) NO. ___
+          </div>
+          <div className="ngpa-ppmp-form__type-row">
+            <span className={`ngpa-ppmp-form__type-mark${!isFinal ? " is-active" : ""}`}>
+              <span className="ngpa-ppmp-form__type-check" aria-hidden="true">
+                {!isFinal ? "\u2713" : ""}
+              </span>
+              INDICATIVE
+            </span>
+            <span className={`ngpa-ppmp-form__type-mark${isFinal ? " is-active" : ""}`}>
+              <span className="ngpa-ppmp-form__type-check" aria-hidden="true">
+                {isFinal ? "\u2713" : ""}
+              </span>
+              FINAL
+            </span>
+          </div>
+          <div className="ngpa-ppmp-form__meta">
+            <div><strong>Fiscal Year :</strong> {ppmp.fiscal_year}</div>
+            <div>
+              <strong>End-User or Implementing Unit:</strong> {officeName || "\u2014"}
+            </div>
+          </div>
+        </div>
+
+        <div className="ngpa-ppmp-form__table-wrapper">
+          <table className="ngpa-ppmp-table">
+            <colgroup>
+              <col style={{ minWidth: 220 }} />
+              <col style={{ minWidth: 140 }} />
+              <col style={{ minWidth: 160 }} />
+              <col style={{ minWidth: 170 }} />
+              <col style={{ minWidth: 120 }} />
+              <col style={{ minWidth: 110 }} />
+              <col style={{ minWidth: 110 }} />
+              <col style={{ minWidth: 150 }} />
+              <col style={{ minWidth: 140 }} />
+              <col style={{ minWidth: 140 }} />
+              <col style={{ minWidth: 170 }} />
+              <col style={{ minWidth: 200 }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th colSpan={5} className="ngpa-ppmp-table__group">
+                  PROCUREMENT PROJECT DETAILS
+                </th>
+                <th colSpan={3} className="ngpa-ppmp-table__group">
+                  PROJECTED TIMELINE (MM/YYYY)
+                </th>
+                <th colSpan={2} className="ngpa-ppmp-table__group">
+                  FUNDING DETAILS
+                </th>
+                <th rowSpan={2} className="ngpa-ppmp-table__group ngpa-ppmp-table__group--vertical">
+                  ATTACHED SUPPORTING DOCUMENTS
+                </th>
+                <th rowSpan={2} className="ngpa-ppmp-table__group ngpa-ppmp-table__group--vertical">
+                  REMARKS
+                </th>
+              </tr>
+              <tr>
+                <th>General Description and Objective of the Project to be Procured</th>
+                <th>Type of the Project to be Procured (Goods / Infrastructure / Consulting Services)</th>
+                <th>Quantity and Size of the Project to be Procured</th>
+                <th>Recommended Mode of Procurement</th>
+                <th>Pre-Procurement Conference (Yes/No)</th>
+                <th>Start of Procurement Activity</th>
+                <th>End of Procurement Activity</th>
+                <th>Expected Delivery / Implementation Period</th>
+                <th>Source of Funds</th>
+                <th>Estimated Budget / Authorized Budgetary Allocation (PhP)</th>
+              </tr>
+              <tr className="ngpa-ppmp-table__col-numbers">
+                {Array.from({ length: 12 }, (_, i) => (
+                  <th key={i}>Column {i + 1}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {paddedItems.map((item, idx) => (
+                <tr key={item ? item.id : `blank-${idx}`}>
+                  <td>{item?.description || ""}</td>
+                  <td>{item?.project_type || ""}</td>
+                  <td>{item ? ngpaQuantitySize(item) : ""}</td>
+                  <td>{item?.procurement_mode || ""}</td>
+                  <td className="ngpa-ppmp-table__center">
+                    {item ? ngpaYesNo(item.pre_proc_conf) : ""}
+                  </td>
+                  <td className="ngpa-ppmp-table__center">{item?.proc_start || ""}</td>
+                  <td className="ngpa-ppmp-table__center">{item?.proc_end || ""}</td>
+                  <td className="ngpa-ppmp-table__center">{item?.delivery_period || ""}</td>
+                  <td>{item?.fund_source || ""}</td>
+                  <td className="ngpa-ppmp-table__amount">
+                    {item ? ngpaMoney(item.estimated_budget) : ""}
+                  </td>
+                  <td>{item?.supporting_docs || ""}</td>
+                  <td>{item?.remarks || ""}</td>
+                </tr>
+              ))}
+              <tr className="ngpa-ppmp-table__total">
+                <td colSpan={8}></td>
+                <td className="ngpa-ppmp-table__total-label">TOTAL BUDGET:</td>
+                <td className="ngpa-ppmp-table__amount ngpa-ppmp-table__total-value">
+                  {ngpaMoney(totalBudget)}
+                </td>
+                <td colSpan={2}></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div className="ngpa-ppmp-form__signatories">
+          <div className="ngpa-ppmp-form__sig-block">
+            <div className="ngpa-ppmp-form__sig-role">Prepared by:</div>
+            <div className="ngpa-ppmp-form__sig-name">
+              {office?.prepared_by || ""}
+            </div>
+            <div className="ngpa-ppmp-form__sig-line">Signature over Printed Name</div>
+            <div className="ngpa-ppmp-form__sig-designation">
+              {office?.prepared_by_designation || ""}
+            </div>
+            <div className="ngpa-ppmp-form__sig-caption">Position/Designation</div>
+            <div className="ngpa-ppmp-form__sig-unit">{officeName}</div>
+            <div className="ngpa-ppmp-form__sig-caption">[End-User or Implementing Unit]</div>
+            <div className="ngpa-ppmp-form__sig-date">Date : _________________</div>
+          </div>
+          <div className="ngpa-ppmp-form__sig-block">
+            <div className="ngpa-ppmp-form__sig-role">Submitted by:</div>
+            <div className="ngpa-ppmp-form__sig-name">
+              {office?.submitted_by || ""}
+            </div>
+            <div className="ngpa-ppmp-form__sig-line">Signature over Printed Name</div>
+            <div className="ngpa-ppmp-form__sig-designation">
+              {office?.submitted_by_designation || ""}
+            </div>
+            <div className="ngpa-ppmp-form__sig-caption">Position/Designation</div>
+            <div className="ngpa-ppmp-form__sig-unit">
+              {officeName ? `Head of ${officeName}` : ""}
+            </div>
+            <div className="ngpa-ppmp-form__sig-caption">
+              [Head of the End-User or Implementing Unit]
+            </div>
+            <div className="ngpa-ppmp-form__sig-date">Date : ____________</div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const fetchSignatory = async () => {
     if (!user?.office_id) return;
     try {
@@ -2260,16 +2478,39 @@ function Dashboard({ token, user, onLogout }) {
                 </span>
               </div>
             </div>
-            {(selectedPpmp.ppmp.status === "Draft" || selectedPpmp.ppmp.status === "Returned") && (
-              <button
-                type="button"
-                className="btn btn-success ppmp-fullscreen-submit"
-                onClick={() => handleSubmitPpmp(selectedPpmp.ppmp.id)}
-              >
-                <i className="fas fa-paper-plane" aria-hidden="true"></i>
-                Submit to Budget Office
-              </button>
-            )}
+            <div className="ppmp-fullscreen-actions">
+              {(selectedPpmp.ppmp.status === "Approved" ||
+                selectedPpmp.ppmp.status === "Pending Budget Review") && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-secondary ppmp-fullscreen-submit"
+                    onClick={() => window.print()}
+                  >
+                    <i className="fas fa-print" aria-hidden="true"></i>
+                    Print
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ppmp-fullscreen-submit"
+                    onClick={handleDownloadPpmpXlsx}
+                  >
+                    <i className="fas fa-file-excel" aria-hidden="true"></i>
+                    Download Excel
+                  </button>
+                </>
+              )}
+              {(selectedPpmp.ppmp.status === "Draft" || selectedPpmp.ppmp.status === "Returned") && (
+                <button
+                  type="button"
+                  className="btn btn-success ppmp-fullscreen-submit"
+                  onClick={() => handleSubmitPpmp(selectedPpmp.ppmp.id)}
+                >
+                  <i className="fas fa-paper-plane" aria-hidden="true"></i>
+                  Submit to Budget Office
+                </button>
+              )}
+            </div>
           </header>
 
           <div className="ppmp-fullscreen-body">
@@ -2303,7 +2544,14 @@ function Dashboard({ token, user, onLogout }) {
               </div>
             )}
 
-            <div className="ppmp-fullscreen-columns">
+            <div
+              className={`ppmp-fullscreen-columns${
+                selectedPpmp.ppmp.status === "Approved" ||
+                selectedPpmp.ppmp.status === "Pending Budget Review"
+                  ? " ppmp-fullscreen-columns--readonly"
+                  : ""
+              }`}
+            >
               {selectedPpmp.ppmp.status !== "Approved" && selectedPpmp.ppmp.status !== "Pending Budget Review" && (
               <section className="dashboard-card ppmp-add-item-card">
                 <h2 className="card-title">Add Line Item</h2>
@@ -2448,49 +2696,54 @@ function Dashboard({ token, user, onLogout }) {
               )}
 
               <section className="dashboard-card ppmp-items-card">
-              <h2 className="card-title">PPMP Line Items ({selectedPpmp.items.length})</h2>
-              <div className="table-wrapper">
-                <table className="custom-table">
-                  <thead>
-                    <tr>
-                      <th>Description</th>
-                      <th>Qty</th>
-                      <th>Unit</th>
-                      <th>Unit Cost</th>
-                      <th>Subtotal</th>
-                      <th>Mode</th>
-                      <th>Q1/Q2/Q3/Q4</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedPpmp.items.length === 0 ? (
-                      <tr>
-                        <td colSpan="8" style={{ textAlign: "center", color: "var(--text-muted)", padding: "2rem" }}>
-                          No items added yet. Use the form above to add your first line item.
-                        </td>
-                      </tr>
-                    ) : (
-                      selectedPpmp.items.map((item) => (
-                        <tr key={item.id}>
-                          <td>{item.description}</td>
-                          <td>{item.quantity}</td>
-                          <td>{item.unit_of_measure}</td>
-                          <td>₱{item.unit_cost.toLocaleString()}</td>
-                          <td>₱{item.estimated_budget.toLocaleString()}</td>
-                          <td>{item.procurement_mode}</td>
-                          <td>{item.q1_qty}/{item.q2_qty}/{item.q3_qty}/{item.q4_qty}</td>
-                          <td>
-                            {selectedPpmp.ppmp.status !== "Approved" && selectedPpmp.ppmp.status !== "Pending Budget Review" && (
-                              <button type="button" className="btn btn-danger btn-sm" onClick={() => handleDeletePpmpItem(item.id)}>Remove</button>
-                            )}
-                          </td>
+              {selectedPpmp.ppmp.status === "Approved" ||
+              selectedPpmp.ppmp.status === "Pending Budget Review" ? (
+                renderNgpaPpmpForm(selectedPpmp)
+              ) : (
+                <>
+                  <h2 className="card-title">PPMP Line Items ({selectedPpmp.items.length})</h2>
+                  <div className="table-wrapper">
+                    <table className="custom-table">
+                      <thead>
+                        <tr>
+                          <th>Description</th>
+                          <th>Qty</th>
+                          <th>Unit</th>
+                          <th>Unit Cost</th>
+                          <th>Subtotal</th>
+                          <th>Mode</th>
+                          <th>Q1/Q2/Q3/Q4</th>
+                          <th>Actions</th>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                      </thead>
+                      <tbody>
+                        {selectedPpmp.items.length === 0 ? (
+                          <tr>
+                            <td colSpan="8" style={{ textAlign: "center", color: "var(--text-muted)", padding: "2rem" }}>
+                              No items added yet. Use the form above to add your first line item.
+                            </td>
+                          </tr>
+                        ) : (
+                          selectedPpmp.items.map((item) => (
+                            <tr key={item.id}>
+                              <td>{item.description}</td>
+                              <td>{item.quantity}</td>
+                              <td>{item.unit_of_measure}</td>
+                              <td>₱{(item.unit_cost || 0).toLocaleString()}</td>
+                              <td>₱{(item.estimated_budget || 0).toLocaleString()}</td>
+                              <td>{item.procurement_mode}</td>
+                              <td>{item.q1_qty}/{item.q2_qty}/{item.q3_qty}/{item.q4_qty}</td>
+                              <td>
+                                <button type="button" className="btn btn-danger btn-sm" onClick={() => handleDeletePpmpItem(item.id)}>Remove</button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
               </section>
             </div>
           </div>
