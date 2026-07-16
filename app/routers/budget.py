@@ -40,6 +40,41 @@ def list_indicative_ppmps(
     return session.exec(select(IndicativePPMP)).all()
 
 
+@router.get("/final")
+def list_final_ppmps(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["budget_office"])),
+):
+    """
+    List Final PPMPs that end users have Submitted or Approved.
+    Read-only view for Budget Office monitoring (RA 12009 Phase 4).
+    Includes office_name and a supplemental flag for v2+ revisions.
+    """
+    rows = session.exec(
+        select(FinalPPMP, Office)
+        .join(Office, Office.id == FinalPPMP.office_id)
+        .where(FinalPPMP.approval_status.in_(["Submitted", "Approved"]))
+        .order_by(FinalPPMP.office_id, FinalPPMP.fiscal_year.desc(), FinalPPMP.version.desc())
+    ).all()
+
+    return [
+        {
+            "id": ppmp.id,
+            "title": ppmp.title,
+            "fiscal_year": ppmp.fiscal_year,
+            "office_id": ppmp.office_id,
+            "office_name": office.name,
+            "version": ppmp.version,
+            "is_supplemental": ppmp.version >= 2,
+            "approval_status": ppmp.approval_status,
+            "submitted_at": ppmp.submitted_at,
+            "approved_at": ppmp.approved_at,
+            "remarks": ppmp.remarks,
+        }
+        for ppmp, office in rows
+    ]
+
+
 @router.post("/indicative/ppmps/{ppmp_id}/post")
 def post_indicative_ppmp(
     ppmp_id: int,

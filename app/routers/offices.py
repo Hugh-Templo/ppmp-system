@@ -1,3 +1,8 @@
+import json
+import logging
+from functools import lru_cache
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -5,8 +10,149 @@ from typing import List, Optional
 from app.database import get_session
 from app.models import User, Office, PPMP, PPMPItem
 from app.auth import get_current_user, check_role
+from app.ppmp_template import write_signatory
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/offices", tags=["offices"])
+
+
+# --- ITEM CATALOG (static JSON, cached in memory) ---
+_ITEM_CATALOG_PATH = (
+    Path(__file__).resolve().parent.parent / "data" / "item_catalog.json"
+)
+
+
+@lru_cache(maxsize=1)
+def _load_item_catalog() -> dict:
+    try:
+        with _ITEM_CATALOG_PATH.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        logger.warning("Item catalog missing at %s", _ITEM_CATALOG_PATH)
+        return {"version": 0, "items": []}
+    items = data.get("items", [])
+    return {
+        "version": data.get("version", 1),
+        "updated_at": data.get("updated_at"),
+        "items": items,
+        "count": len(items),
+    }
+
+
+@router.get("/item-catalog")
+def get_item_catalog(current_user: User = Depends(get_current_user)):
+    """Return the static PPMP/APP item catalog used by the description
+    combobox on the end-user Dashboard. Cached in-process."""
+    return _load_item_catalog()
+
+
+# --- SIGNATORY ENDPOINTS ---
+class SignatoryPayload(BaseModel):
+    submitted_by: Optional[str] = None
+    submitted_by_designation: Optional[str] = None
+    prepared_by: Optional[str] = None
+    prepared_by_designation: Optional[str] = None
+    aip_reference: Optional[str] = None
+    responsibility_center_no: Optional[str] = None
+    office_code_from_pr: Optional[str] = None
+    office_id: Optional[int] = None
+
+
+def _serialize_signatory(office: Office) -> dict:
+    return {
+        "office_id": office.id,
+        "office_name": office.name,
+        "office_code": office.code,
+        "submitted_by": office.submitted_by or "",
+        "submitted_by_designation": office.submitted_by_designation or "",
+        "prepared_by": office.prepared_by or "",
+        "prepared_by_designation": office.prepared_by_designation or "",
+        "aip_reference": office.aip_reference or "",
+        "responsibility_center_no": office.responsibility_center_no or "",
+        "office_code_from_pr": office.office_code_from_pr or "",
+        "ppmp_template_path": office.ppmp_template_path or "",
+    }
+
+
+def _resolve_office(
+    session: Session, current_user: User, office_id: Optional[int]
+) -> Office:
+    target_id = office_id if office_id is not None else current_user.office_id
+    if not target_id:
+        raise HTTPException(
+            status_code=400, detail="User is not assigned to any office"
+        )
+    if current_user.role == "end_user" and target_id != current_user.office_id:
+        raise HTTPException(
+            status_code=403, detail="Access denied to this office's signatory"
+        )
+    office = session.get(Office, target_id)
+    if not office:
+        raise HTTPException(status_code=404, detail="Office not found")
+    return office
+
+
+@router.get("/signatory")
+def get_signatory(
+    office_id: Optional[int] = None,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the current signatory values for the caller's office (or the
+    given office_id when the caller has elevated privileges)."""
+    office = _resolve_office(session, current_user, office_id)
+    return _serialize_signatory(office)
+
+
+@router.post("/signatory")
+def update_signatory(
+    payload: SignatoryPayload,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["end_user", "bac_admin"])),
+):
+    """Persist signatory fields on the Office row and rewrite the office's
+    NGPA_PPMP.xlsx footer with the new values."""
+    office = _resolve_office(session, current_user, payload.office_id)
+
+    office.submitted_by = payload.submitted_by
+    office.submitted_by_designation = payload.submitted_by_designation
+    office.prepared_by = payload.prepared_by
+    office.prepared_by_designation = payload.prepared_by_designation
+    office.aip_reference = payload.aip_reference
+    office.responsibility_center_no = payload.responsibility_center_no
+    office.office_code_from_pr = payload.office_code_from_pr
+
+    try:
+        template_path = write_signatory(office)
+        try:
+            from app.ppmp_template import REPO_ROOT
+            office.ppmp_template_path = str(
+                template_path.relative_to(REPO_ROOT)
+            ).replace("\\", "/")
+        except ValueError:
+            office.ppmp_template_path = str(template_path)
+    except FileNotFoundError as exc:
+        logger.error("Master template missing: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail="Master PPMP template is missing on the server.",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to write signatory into office template")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update PPMP template: {exc}",
+        )
+
+    session.add(office)
+    session.commit()
+    session.refresh(office)
+
+    return {
+        "message": "Signatory information updated successfully",
+        "signatory": _serialize_signatory(office),
+    }
 
 
 # --- BUDGET ALLOCATION ENDPOINTS FOR END USERS ---

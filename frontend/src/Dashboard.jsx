@@ -9,6 +9,13 @@ function Dashboard({ token, user, onLogout }) {
   const [newPpmpTitle, setNewPpmpTitle] = useState("");
   const [newPpmpYear, setNewPpmpYear] = useState(new Date().getFullYear() + 1);
   const [newPpmpType, setNewPpmpType] = useState("Indicative");
+  const [newPpmpIsCse, setNewPpmpIsCse] = useState(false);
+
+  // Item description autocomplete (backed by /api/offices/item-catalog).
+  const [itemCatalog, setItemCatalog] = useState([]);
+  const [descSuggestions, setDescSuggestions] = useState([]);
+  const [descOpen, setDescOpen] = useState(false);
+  const [descHighlight, setDescHighlight] = useState(-1);
 
   // Item Form state
   const [itemDesc, setItemDesc] = useState("");
@@ -26,6 +33,7 @@ function Dashboard({ token, user, onLogout }) {
   // Budget Office state
   const [pendingPpmps, setPendingPpmps] = useState([]);
   const [indicativePpmps, setIndicativePpmps] = useState([]);
+  const [finalPpmps, setFinalPpmps] = useState([]);
   const [auditDetails, setAuditDetails] = useState(null);
   const [remarks, setRemarks] = useState("");
 
@@ -84,6 +92,7 @@ function Dashboard({ token, user, onLogout }) {
     } else if (user.role === "budget_office") {
       fetchPendingPpmps();
       fetchIndicativePpmps();
+      fetchFinalPpmps();
       fetchOffices();
     } else if (user.role === "bac_admin") {
       fetchApps();
@@ -109,6 +118,12 @@ function Dashboard({ token, user, onLogout }) {
   }, [activeTab, user.role]);
 
   useEffect(() => {
+    if (user.role === "budget_office" && activeTab === "final") {
+      fetchFinalPpmps();
+    }
+  }, [activeTab, user.role]);
+
+  useEffect(() => {
     if (user.role === "bac_admin" && activeTab === "audit") {
       fetchPendingPpmps();
       fetchIndicativePpmps();
@@ -124,6 +139,35 @@ function Dashboard({ token, user, onLogout }) {
   useEffect(() => {
     if (user.role === "end_user" && activeTab === "budget_allocation") {
       fetchUserOfficeBudget();
+    }
+  }, [activeTab, user.role]);
+
+  useEffect(() => {
+    if (user.role === "end_user" && activeTab === "signatory") {
+      fetchSignatory();
+    }
+  }, [activeTab, user.role]);
+
+  useEffect(() => {
+    if (user.role === "end_user") {
+      fetchSignatory();
+    }
+  }, [user.role]);
+
+  useEffect(() => {
+    if (user.role === "end_user" && selectedPpmp) {
+      fetchItemCatalog();
+    }
+  }, [user.role, selectedPpmp]);
+
+  useEffect(() => {
+    if (itemCatalog.length === 0) return;
+    setItemIsCse(Boolean(catalogMatchFor(itemDesc)));
+  }, [itemCatalog, itemDesc]);
+
+  useEffect(() => {
+    if (user.role === "end_user" && activeTab === "view_ppmps") {
+      fetchOfficePpmps();
     }
   }, [activeTab, user.role]);
 
@@ -168,6 +212,20 @@ function Dashboard({ token, user, onLogout }) {
       if (res.ok) {
         const data = await res.json();
         setIndicativePpmps(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchFinalPpmps = async () => {
+    try {
+      const res = await fetch("http://localhost:8000/api/budget/final", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setFinalPpmps(data);
       }
     } catch (err) {
       console.error(err);
@@ -277,6 +335,9 @@ function Dashboard({ token, user, onLogout }) {
       if (res.ok) {
         const data = await res.json();
         setSelectedPpmp(data);
+        if (user.role === "end_user") {
+          setItemIsCse(false);
+        }
         if (user.role === "budget_office" || user.role === "bac_admin") {
           loadAudit(ppmpId);
         }
@@ -284,6 +345,84 @@ function Dashboard({ token, user, onLogout }) {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const fetchItemCatalog = async () => {
+    if (itemCatalog.length > 0) return;
+    try {
+      const res = await fetch("http://localhost:8000/api/offices/item-catalog", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data?.items)) setItemCatalog(data.items);
+    } catch (err) {
+      // Non-fatal: description just falls back to plain input.
+    }
+  };
+
+  const computeDescSuggestions = (query) => {
+    const q = (query || "").trim().toLowerCase();
+    if (!q || itemCatalog.length === 0) return [];
+    const matches = itemCatalog.filter((it) =>
+      (it.description || "").toLowerCase().includes(q)
+    );
+    matches.sort((a, b) => {
+      const aStarts = (a.description || "").toLowerCase().startsWith(q) ? 0 : 1;
+      const bStarts = (b.description || "").toLowerCase().startsWith(q) ? 0 : 1;
+      if (aStarts !== bStarts) return aStarts - bStarts;
+      return (a.description || "").localeCompare(b.description || "");
+    });
+    return matches.slice(0, 10);
+  };
+
+  const catalogMatchFor = (value) => {
+    const target = (value || "").trim().toLowerCase();
+    if (!target) return null;
+    return itemCatalog.find(
+      (it) => (it.description || "").trim().toLowerCase() === target
+    ) || null;
+  };
+
+  const handleItemDescChange = (value) => {
+    setItemDesc(value);
+    const next = computeDescSuggestions(value);
+    setDescSuggestions(next);
+    setDescOpen(next.length > 0);
+    setDescHighlight(next.length > 0 ? 0 : -1);
+    // A typed item counts as CSE only when it exactly matches a catalog entry;
+    // anything else is nonCSE per PS-DBM APP-CSE 2027 rules.
+    setItemIsCse(Boolean(catalogMatchFor(value)));
+  };
+
+  const handleItemDescKeyDown = (e) => {
+    if (!descOpen || descSuggestions.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setDescHighlight((idx) => (idx + 1) % descSuggestions.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setDescHighlight((idx) =>
+        idx <= 0 ? descSuggestions.length - 1 : idx - 1
+      );
+    } else if (e.key === "Enter") {
+      if (descHighlight >= 0 && descHighlight < descSuggestions.length) {
+        e.preventDefault();
+        pickCatalogItem(descSuggestions[descHighlight]);
+      }
+    } else if (e.key === "Escape") {
+      setDescOpen(false);
+    }
+  };
+
+  const pickCatalogItem = (entry) => {
+    if (!entry) return;
+    setItemDesc(entry.description || "");
+    if (entry.category) setItemCat(entry.category);
+    if (entry.unit_of_measure) setItemUnit(entry.unit_of_measure);
+    setItemIsCse(!!entry.is_cse);
+    setDescOpen(false);
+    setDescHighlight(-1);
   };
 
   const loadAudit = async (ppmpId) => {
@@ -313,12 +452,14 @@ function Dashboard({ token, user, onLogout }) {
           title: newPpmpTitle,
           fiscal_year: newPpmpYear,
           type: newPpmpType,
+          is_cse: newPpmpIsCse,
           office_id: user.office_id,
         }),
       });
       if (res.ok) {
         showNotification("PPMP created successfully!");
         setNewPpmpTitle("");
+        setNewPpmpIsCse(false);
         fetchOfficePpmps();
       }
     } catch (err) {
@@ -353,9 +494,13 @@ function Dashboard({ token, user, onLogout }) {
       if (res.ok) {
         showNotification("Item added to PPMP!");
         setItemDesc("");
+        setDescSuggestions([]);
+        setDescOpen(false);
+        setDescHighlight(-1);
         setItemQty(1);
         setItemCost(0.0);
         setQ1(0); setQ2(0); setQ3(0); setQ4(0);
+        setItemIsCse(false);
         handleSelectPpmp(selectedPpmp.ppmp.id);
       } else {
         const errData = await res.json();
@@ -615,13 +760,43 @@ function Dashboard({ token, user, onLogout }) {
 
   const pageTitles = {
     dashboard: "Dashboard",
+    view_ppmps: "View PPMPs",
+    signatory: "Signatory Information",
     indicative: "Indicative PPMP Management",
+    final: "Final PPMP",
     offices: "Manage Offices",
     users: "Manage Users",
     dbm: "DBM Classification",
     audit: "Pending PPMP Review",
     budget_allocation: "Budget Allocation",
   };
+
+  const renderPpmpTypeBadge = (isCse) => (
+    <span className={`ppmp-type-badge ${isCse ? "cse" : "noncse"}`}>
+      {isCse ? "CSE" : "nonCSE"}
+    </span>
+  );
+  const fetchSignatory = async () => {
+    if (!user?.office_id) return;
+    try {
+      const res = await fetch(
+        `http://localhost:8000/api/offices/signatory?office_id=${user.office_id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      setSubmittedBy(data.submitted_by || "");
+      setSubmittedByDesignation(data.submitted_by_designation || "");
+      setPreparedBy(data.prepared_by || "");
+      setPreparedByDesignation(data.prepared_by_designation || "");
+      setAipReference(data.aip_reference || "");
+      setResponsibilityCenterNo(data.responsibility_center_no || "");
+      setOfficeCodeFromPR(data.office_code_from_pr || "");
+    } catch (err) {
+      // Non-fatal: leave inputs blank so the user can still save.
+    }
+  };
+
   const handleUpdateSignatory = async (e) => {
     e.preventDefault();
     try {
@@ -643,9 +818,29 @@ function Dashboard({ token, user, onLogout }) {
         }),
       });
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const sig = data.signatory || {};
+        setSubmittedBy(sig.submitted_by || submittedBy);
+        setSubmittedByDesignation(
+          sig.submitted_by_designation || submittedByDesignation
+        );
+        setPreparedBy(sig.prepared_by || preparedBy);
+        setPreparedByDesignation(
+          sig.prepared_by_designation || preparedByDesignation
+        );
+        setAipReference(sig.aip_reference || aipReference);
+        setResponsibilityCenterNo(
+          sig.responsibility_center_no || responsibilityCenterNo
+        );
+        setOfficeCodeFromPR(sig.office_code_from_pr || officeCodeFromPR);
         showNotification("Signatory information updated successfully!");
       } else {
-        showNotification("Failed to update signatory information", "danger");
+        let detail = "Failed to update signatory information";
+        try {
+          const body = await res.json();
+          if (body?.detail) detail = body.detail;
+        } catch (_) {}
+        showNotification(detail, "danger");
       }
     } catch (err) {
       showNotification("Network error occurred", "danger");
@@ -734,6 +929,16 @@ function Dashboard({ token, user, onLogout }) {
               >
                 <i className="fas fa-file-invoice" aria-hidden="true"></i>
                 Indicative PPMP
+              </button>
+            )}
+            {user.role === "budget_office" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "final" ? "active" : ""}`}
+                onClick={() => { setActiveTab("final"); setSelectedPpmp(null); setAuditDetails(null); }}
+              >
+                <i className="fas fa-file-contract" aria-hidden="true"></i>
+                Final PPMP
               </button>
             )}
             {user.role === "end_user" && (
@@ -842,246 +1047,112 @@ function Dashboard({ token, user, onLogout }) {
             <div>
               {/* --- END-USER VIEW --- */}
               {user.role === "end_user" && (
-                <div className="grid-2">
-                  <div>
-                    <div className="dashboard-card">
-                      <h2 className="card-title">Create PPMP</h2>
-                      <div style={{ 
-                        backgroundColor: "#e8f4fd", 
-                        border: "1px solid #2196f3", 
-                        borderRadius: "6px", 
-                        padding: "12px", 
-                        marginBottom: "10px",
-                        fontSize: "13px"
-                      }}>
-                        <strong>Note:</strong> All PPMPs created at this stage are <strong>Indicative</strong> (pre-budget approval). 
-                        The "Final" status will be applied automatically after budget approval and consolidation, 
-                        in accordance with RA 12009 process flow.
+                <div className="end-user-dashboard">
+                  <div className="dashboard-card">
+                    <h2 className="card-title">Create PPMP</h2>
+                    <div style={{
+                      backgroundColor: "#e8f4fd",
+                      border: "1px solid #2196f3",
+                      borderRadius: "6px",
+                      padding: "12px",
+                      marginBottom: "10px",
+                      fontSize: "13px"
+                    }}>
+                      <strong>Note:</strong> All PPMPs created at this stage are <strong>Indicative</strong> (pre-budget approval).
+                      The "Final" status will be applied automatically after budget approval and consolidation,
+                      in accordance with RA 12009 process flow.
+                    </div>
+                    <form onSubmit={handleCreatePpmp} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="PPMP Title (e.g., Office Supplies 2027)"
+                        value={newPpmpTitle}
+                        onChange={(e) => setNewPpmpTitle(e.target.value)}
+                        required
+                      />
+                      <input
+                        type="hidden"
+                        value={newPpmpType}
+                      />
+                      <input
+                        type="number"
+                        className="form-input"
+                        placeholder="Fiscal Year"
+                        value={newPpmpYear}
+                        onChange={(e) => setNewPpmpYear(e.target.value)}
+                        required
+                      />
+                      <div className="ppmp-type-picker" role="radiogroup" aria-label="PPMP type">
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={!newPpmpIsCse}
+                          className={`ppmp-type-picker-option ${!newPpmpIsCse ? "active noncse" : ""}`}
+                          onClick={() => setNewPpmpIsCse(false)}
+                        >
+                          nonCSE
+                        </button>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={newPpmpIsCse}
+                          className={`ppmp-type-picker-option ${newPpmpIsCse ? "active cse" : ""}`}
+                          onClick={() => setNewPpmpIsCse(true)}
+                        >
+                          CSE
+                        </button>
                       </div>
-                      <form onSubmit={handleCreatePpmp} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="PPMP Title (e.g., Office Supplies 2027)"
-                          value={newPpmpTitle}
-                          onChange={(e) => setNewPpmpTitle(e.target.value)}
-                          required
-                        />
-                        <input
-                          type="hidden"
-                          value={newPpmpType}
-                        />
-                        <div className="form-input" style={{ backgroundColor: "#f5f5f5", color: "#666", cursor: "not-allowed" }}>
-                          Indicative PPMP (pre-budget approval)
-                        </div>
-                        <input
-                          type="number"
-                          className="form-input"
-                          placeholder="Fiscal Year"
-                          value={newPpmpYear}
-                          onChange={(e) => setNewPpmpYear(e.target.value)}
-                          required
-                        />
-                        <button type="submit" className="btn">Create PPMP</button>
-                      </form>
-                    </div>
-```
-
-                    <div className="dashboard-card" style={{ marginTop: "20px" }}>
-                      <h2 className="card-title">My Office PPMPs</h2>
-                      <table className="custom-table">
-                        <thead>
-                          <tr>
-                            <th>Title</th>
-                            <th>Year</th>
-                            <th>Status</th>
-                            <th>Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {ppmps.length === 0 ? (
-                            <tr>
-                              <td colSpan="5">No PPMPs created yet.</td>
-                            </tr>
-                          ) : (
-                            ppmps.map((p) => (
-                              <tr key={p.id}>
-                                <td>{p.title}</td>
-                                <td>{p.fiscal_year}</td>
-                                <td>
-                                  <span className={`badge ${p.status === "Approved" ? "badge-success" : p.status === "Pending Budget Review" ? "badge-warning" : p.status === "Returned" ? "badge-danger" : "badge-secondary"}`}>
-                                    {p.status}
-                                  </span>
-                                </td>
-                                <td>
-                                  {p.status === "Returned" && p.remarks && (
-                                    <div style={{ fontSize: "12px", color: "#d32f2f", marginTop: "5px" }}>
-                                      <strong>Remarks:</strong> {p.remarks}
-                                    </div>
-                                  )}
-                                </td>
-                                <td>
-                                  <button className="btn" onClick={() => handleSelectPpmp(p.id)}>View/Edit</button>
-                                </td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
+                      <button type="submit" className="btn">Create PPMP</button>
+                    </form>
                   </div>
 
-                  {/* PPMP Items Workspace */}
-                  <div>
-                    {selectedPpmp ? (
-                      <div className="dashboard-card">
-                        <h2 className="card-title">{selectedPpmp.ppmp.title} Items ({selectedPpmp.ppmp.status})</h2>
-
-                        {/* Submit PPMP if in Draft or Returned */}
-                        {(selectedPpmp.ppmp.status === "Draft" || selectedPpmp.ppmp.status === "Returned") && (
-                          <button
-                            className="btn btn-success"
-                            style={{ marginBottom: "15px", width: "100%" }}
-                            onClick={() => handleSubmitPpmp(selectedPpmp.ppmp.id)}
-                          >
-                            Submit to Budget Office
-                          </button>
-                        )}
-
-                        {/* Display remarks if PPMP was returned for revision */}
-                        {selectedPpmp.ppmp.status === "Returned" && selectedPpmp.ppmp.remarks && (
-                          <div className="dashboard-card" style={{ 
-                            backgroundColor: "#fffafa", 
-                            borderLeft: "4px solid var(--danger-color)", 
-                            marginTop: "20px",
-                            marginBottom: "24px",
-                            padding: "1.25rem",
-                            boxShadow: "0 2px 4px rgba(0,0,0,0.05)"
-                          }}>
-                            <h3 style={{ color: "#b91c1c", fontSize: "0.95rem", fontWeight: "700", marginBottom: "0.75rem", display: "flex", alignItems: "center", gap: "8px" }}>
-                              <i className="fas fa-exclamation-triangle"></i>
-                              Revision Required
-                            </h3>
-                            <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
-                              <strong>Budget Office Remarks:</strong>
-                            </p>
-                            <div style={{ fontSize: "0.875rem", lineHeight: "1.6", color: "var(--text-primary)", background: "#ffffff", padding: "12px", borderRadius: "6px", border: "1px solid var(--border-color)", fontStyle: "italic" }}>
-                              "{selectedPpmp.ppmp.remarks}"
-                            </div>
-                            <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "1rem" }}>
-                              Please address the feedback above and resubmit for approval.
-                            </p>
-                          </div>
-                        )}
-
-                        <table className="custom-table" style={{ fontSize: "12px" }}>
-                          <thead>
-                            <tr>
-                              <th>Description</th>
-                              <th>Qty</th>
-                              <th>Unit</th>
-                              <th>Cost</th>
-                              <th>Subtotal</th>
-                              <th>Mode</th>
-                              <th>Q1/Q2/Q3/Q4</th>
-                              <th>Actions</th>
+                  <div className="dashboard-card">
+                    <h2 className="card-title">My Office PPMPs</h2>
+                    <table className="custom-table">
+                      <thead>
+                        <tr>
+                          <th>Title</th>
+                          <th>Type</th>
+                          <th>Year</th>
+                          <th>Status</th>
+                          <th>Remarks</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ppmps.length === 0 ? (
+                          <tr>
+                            <td colSpan="6">No PPMPs created yet.</td>
+                          </tr>
+                        ) : (
+                          ppmps.map((p) => (
+                            <tr key={p.id}>
+                              <td>{p.title}</td>
+                              <td>{renderPpmpTypeBadge(p.is_cse)}</td>
+                              <td>{p.fiscal_year}</td>
+                              <td>
+                                <span className={`badge ${p.status === "Approved" ? "badge-success" : p.status === "Pending Budget Review" ? "badge-warning" : p.status === "Returned" ? "badge-danger" : "badge-secondary"}`}>
+                                  {p.status}
+                                </span>
+                              </td>
+                              <td>
+                                {p.status === "Returned" && p.remarks ? (
+                                  <div style={{ fontSize: "12px", color: "#d32f2f" }}>
+                                    <strong>Remarks:</strong> {p.remarks}
+                                  </div>
+                                ) : (
+                                  <span style={{ color: "var(--text-muted)" }}>—</span>
+                                )}
+                              </td>
+                              <td>
+                                <button className="btn" onClick={() => handleSelectPpmp(p.id)}>View/Edit</button>
+                              </td>
                             </tr>
-                          </thead>
-                          <tbody>
-                            {selectedPpmp.items.length === 0 ? (
-                              <tr>
-                                <td colSpan="8">No items added yet.</td>
-                              </tr>
-                            ) : (
-                              selectedPpmp.items.map((item) => (
-                                <tr key={item.id}>
-                                  <td>{item.description}</td>
-                                  <td>{item.quantity}</td>
-                                  <td>{item.unit_of_measure}</td>
-                                  <td>₱{item.unit_cost.toLocaleString()}</td>
-                                  <td>₱{item.estimated_budget.toLocaleString()}</td>
-                                  <td>{item.procurement_mode}</td>
-                                  <td>{item.q1_qty}/{item.q2_qty}/{item.q3_qty}/{item.q4_qty}</td>
-                                  <td>
-                                    {selectedPpmp.ppmp.status !== "Approved" && selectedPpmp.ppmp.status !== "Pending Budget Review" && (
-                                      <button type="button" className="btn btn-danger btn-sm" onClick={() => handleDeletePpmpItem(item.id)}>Remove</button>
-                                    )}
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-
-                        {/* Add Item form */}
-                        {selectedPpmp.ppmp.status !== "Approved" && selectedPpmp.ppmp.status !== "Pending Budget Review" && (
-                          <form onSubmit={handleAddPpmpItem} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "20px" }}>
-                            <h3 style={{ gridColumn: "span 2", margin: "5px 0" }}>Add Line Item</h3>
-                            <input
-                              type="text"
-                              placeholder="Item Description"
-                              className="form-input"
-                              value={itemDesc}
-                              onChange={(e) => setItemDesc(e.target.value)}
-                              required
-                              style={{ gridColumn: "span 2" }}
-                            />
-                            <select className="form-input" value={itemCat} onChange={(e) => setItemCat(e.target.value)}>
-                              <option value="Office Supplies">Office Supplies</option>
-                              <option value="IT Equipment">IT Equipment</option>
-                              <option value="Catering Services">Catering Services</option>
-                              <option value="Services">Services / Repair</option>
-                            </select>
-                            <label style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                              <input type="checkbox" checked={itemIsCse} onChange={(e) => setItemIsCse(e.target.checked)} />
-                              Is Common-Use (PS-DBM)?
-                            </label>
-                            <input
-                              type="number"
-                              placeholder="Quantity"
-                              className="form-input"
-                              value={itemQty}
-                              onChange={(e) => setItemQty(e.target.value)}
-                              required
-                            />
-                            <input
-                              type="text"
-                              placeholder="Unit (e.g. pc, box)"
-                              className="form-input"
-                              value={itemUnit}
-                              onChange={(e) => setItemUnit(e.target.value)}
-                              required
-                            />
-                            <input
-                              type="number"
-                              step="0.01"
-                              placeholder="Unit Cost"
-                              className="form-input"
-                              value={itemCost}
-                              onChange={(e) => setItemCost(e.target.value)}
-                              required
-                            />
-                            <select className="form-input" value={itemProcMode} onChange={(e) => setItemProcMode(e.target.value)}>
-                              <option value="Shopping">Shopping</option>
-                              <option value="SVP">Small Value Procurement</option>
-                              <option value="Competitive Bidding">Competitive Bidding</option>
-                            </select>
-
-                            <h4 style={{ gridColumn: "span 2", margin: "5px 0" }}>Milestone Distribution (Qty)</h4>
-                            <input type="number" placeholder="Q1 Qty" className="form-input" value={q1} onChange={(e) => setQ1(e.target.value)} />
-                            <input type="number" placeholder="Q2 Qty" className="form-input" value={q2} onChange={(e) => setQ2(e.target.value)} />
-                            <input type="number" placeholder="Q3 Qty" className="form-input" value={q3} onChange={(e) => setQ3(e.target.value)} />
-                            <input type="number" placeholder="Q4 Qty" className="form-input" value={q4} onChange={(e) => setQ4(e.target.value)} />
-
-                            <button type="submit" className="btn" style={{ gridColumn: "span 2" }}>Add Item</button>
-                          </form>
+                          ))
                         )}
-                      </div>
-                    ) : (
-                      <div className="dashboard-card" style={{ textAlign: "center", color: "var(--text-muted)" }}>
-                        Select a PPMP to view or edit details.
-                      </div>
-                    )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
@@ -1483,6 +1554,116 @@ function Dashboard({ token, user, onLogout }) {
               </table>
             </div>
           )}
+          {activeTab === "final" && user.role === "budget_office" && (
+            <div className="dashboard-card">
+              <h2 className="card-title">Final PPMP</h2>
+              <p className="page-subtitle" style={{ marginBottom: "1rem" }}>
+                End users who have submitted or had their Final PPMP approved (RA 12009 Phase 4).
+                Supplemental revisions (v2+) appear as separate entries.
+              </p>
+              <table className="custom-table">
+                <thead>
+                  <tr>
+                    <th>Office</th>
+                    <th>Fiscal Year</th>
+                    <th>Version</th>
+                    <th>Approval Status</th>
+                    <th>Submitted</th>
+                    <th>Approved</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {finalPpmps.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" style={{ textAlign: "center", color: "var(--text-muted)" }}>
+                        No Final PPMP submissions yet. End users will submit Final PPMPs after budget approval (Phase 4).
+                      </td>
+                    </tr>
+                  ) : (
+                    finalPpmps.map((p) => (
+                      <tr key={p.id}>
+                        <td>{p.office_name}</td>
+                        <td>{p.fiscal_year}</td>
+                        <td>
+                          <span className={`badge ${p.is_supplemental ? "badge-warning" : "badge-secondary"}`}>
+                            {p.is_supplemental ? `Supplemental v${p.version}` : "Original"}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`badge ${p.approval_status === "Approved" ? "badge-success" : p.approval_status === "Submitted" ? "badge-warning" : "badge-secondary"}`}>
+                            {p.approval_status}
+                          </span>
+                        </td>
+                        <td>{p.submitted_at ? new Date(p.submitted_at).toLocaleDateString() : "—"}</td>
+                        <td>{p.approved_at ? new Date(p.approved_at).toLocaleDateString() : "—"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+{/* --- VIEW PPMPs (dedicated list for end users) --- */}
+          {activeTab === "view_ppmps" && user.role === "end_user" && (
+            <div className="dashboard-card">
+              <h2 className="card-title">My Office PPMPs</h2>
+              <p className="page-subtitle" style={{ marginBottom: "1rem" }}>
+                All Project Procurement Management Plans for your office. The
+                <span className="ppmp-type-badge cse" style={{ margin: "0 6px" }}>CSE</span>
+                and
+                <span className="ppmp-type-badge noncse" style={{ margin: "0 6px" }}>nonCSE</span>
+                tags indicate the type chosen at creation.
+              </p>
+
+              <table className="custom-table">
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Type</th>
+                    <th>Year</th>
+                    <th>Status</th>
+                    <th>Remarks</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ppmps.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" style={{ textAlign: "center", padding: "1.5rem", color: "var(--text-muted)" }}>
+                        No PPMPs created yet. Create one from the Dashboard.
+                      </td>
+                    </tr>
+                  ) : (
+                    ppmps.map((p) => (
+                      <tr key={p.id}>
+                        <td>{p.title}</td>
+                        <td>{renderPpmpTypeBadge(p.is_cse)}</td>
+                        <td>{p.fiscal_year}</td>
+                        <td>
+                          <span className={`badge ${p.status === "Approved" ? "badge-success" : p.status === "Pending Budget Review" ? "badge-warning" : p.status === "Returned" ? "badge-danger" : "badge-secondary"}`}>
+                            {p.status}
+                          </span>
+                        </td>
+                        <td>
+                          {p.status === "Returned" && p.remarks ? (
+                            <div style={{ fontSize: "12px", color: "#d32f2f" }}>
+                              <strong>Remarks:</strong> {p.remarks}
+                            </div>
+                          ) : (
+                            <span style={{ color: "var(--text-muted)" }}>—</span>
+                          )}
+                        </td>
+                        <td>
+                          <button className="btn" onClick={() => handleSelectPpmp(p.id)}>View/Edit</button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
 {/* --- BUDGET ALLOCATION SECTION FOR END USERS --- */}
           {activeTab === "budget_allocation" && user.role === "end_user" && (
             <div className="dashboard-card">
@@ -2055,6 +2236,266 @@ function Dashboard({ token, user, onLogout }) {
           </footer>
         )}
       </main>
+
+      {/* --- END-USER FULL-SCREEN PPMP WORKSPACE --- */}
+      {user.role === "end_user" && selectedPpmp && (
+        <div className="ppmp-fullscreen" role="dialog" aria-modal="true">
+          <header className="ppmp-fullscreen-header">
+            <button
+              type="button"
+              className="btn btn-secondary ppmp-fullscreen-back"
+              onClick={() => setSelectedPpmp(null)}
+            >
+              <i className="fas fa-arrow-left" aria-hidden="true"></i>
+              Back to Dashboard
+            </button>
+            <div className="ppmp-fullscreen-title">
+              <h1>{selectedPpmp.ppmp.title}</h1>
+              <div className="ppmp-fullscreen-meta">
+                <span className={`badge ${selectedPpmp.ppmp.status === "Approved" ? "badge-success" : selectedPpmp.ppmp.status === "Pending Budget Review" ? "badge-warning" : selectedPpmp.ppmp.status === "Returned" ? "badge-danger" : "badge-secondary"}`}>
+                  {selectedPpmp.ppmp.status}
+                </span>
+                <span className="ppmp-fullscreen-year">
+                  Fiscal Year {selectedPpmp.ppmp.fiscal_year}
+                </span>
+              </div>
+            </div>
+            {(selectedPpmp.ppmp.status === "Draft" || selectedPpmp.ppmp.status === "Returned") && (
+              <button
+                type="button"
+                className="btn btn-success ppmp-fullscreen-submit"
+                onClick={() => handleSubmitPpmp(selectedPpmp.ppmp.id)}
+              >
+                <i className="fas fa-paper-plane" aria-hidden="true"></i>
+                Submit to Budget Office
+              </button>
+            )}
+          </header>
+
+          <div className="ppmp-fullscreen-body">
+            {notification.message && (
+              <div className={`alert alert-${notification.type}`}>
+                {notification.message}
+              </div>
+            )}
+
+            {selectedPpmp.ppmp.status === "Returned" && selectedPpmp.ppmp.remarks && (
+              <div className="dashboard-card" style={{
+                backgroundColor: "#fffafa",
+                borderLeft: "4px solid var(--danger-color)",
+                marginBottom: "24px",
+                padding: "1.25rem",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.05)"
+              }}>
+                <h3 style={{ color: "#b91c1c", fontSize: "0.95rem", fontWeight: "700", marginBottom: "0.75rem", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <i className="fas fa-exclamation-triangle"></i>
+                  Revision Required
+                </h3>
+                <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
+                  <strong>Budget Office Remarks:</strong>
+                </p>
+                <div style={{ fontSize: "0.875rem", lineHeight: "1.6", color: "var(--text-primary)", background: "#ffffff", padding: "12px", borderRadius: "6px", border: "1px solid var(--border-color)", fontStyle: "italic" }}>
+                  "{selectedPpmp.ppmp.remarks}"
+                </div>
+                <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "1rem" }}>
+                  Please address the feedback above and resubmit for approval.
+                </p>
+              </div>
+            )}
+
+            <div className="ppmp-fullscreen-columns">
+              {selectedPpmp.ppmp.status !== "Approved" && selectedPpmp.ppmp.status !== "Pending Budget Review" && (
+              <section className="dashboard-card ppmp-add-item-card">
+                <h2 className="card-title">Add Line Item</h2>
+                <form onSubmit={handleAddPpmpItem} className="ppmp-add-item-form">
+                  <div className="form-field form-field-full">
+                    <label className="form-label" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span>Item Description</span>
+                      {renderPpmpTypeBadge(itemIsCse)}
+                      <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: 400 }}>
+                        {itemIsCse
+                          ? "Matched PS-DBM CSE catalog"
+                          : "Not in CSE catalog"}
+                      </span>
+                    </label>
+                    <div className="item-desc-combobox">
+                      <input
+                        type="text"
+                        placeholder="Type to search catalog (e.g. Bond Paper A4)"
+                        className="form-input"
+                        value={itemDesc}
+                        onChange={(e) => handleItemDescChange(e.target.value)}
+                        onFocus={() => {
+                          if (descSuggestions.length > 0) setDescOpen(true);
+                        }}
+                        onBlur={() => {
+                          setTimeout(() => setDescOpen(false), 120);
+                        }}
+                        onKeyDown={handleItemDescKeyDown}
+                        role="combobox"
+                        aria-expanded={descOpen}
+                        aria-autocomplete="list"
+                        autoComplete="off"
+                        required
+                      />
+                      {descOpen && descSuggestions.length > 0 && (
+                        <ul className="item-desc-suggestions" role="listbox">
+                          {descSuggestions.map((entry, idx) => (
+                            <li
+                              key={`${entry.description}-${idx}`}
+                              className={`item-desc-suggestion ${
+                                idx === descHighlight ? "active" : ""
+                              }`}
+                              role="option"
+                              aria-selected={idx === descHighlight}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                pickCatalogItem(entry);
+                              }}
+                              onMouseEnter={() => setDescHighlight(idx)}
+                            >
+                              <div className="item-desc-suggestion-main">
+                                <span className="item-desc-suggestion-name">
+                                  {entry.description}
+                                </span>
+                                <span className="item-desc-suggestion-meta">
+                                  {entry.category}
+                                  {entry.unit_of_measure ? ` \u2022 ${entry.unit_of_measure}` : ""}
+                                </span>
+                              </div>
+                              {renderPpmpTypeBadge(entry.is_cse)}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="form-field">
+                    <label className="form-label">Category</label>
+                    <select className="form-input" value={itemCat} onChange={(e) => setItemCat(e.target.value)}>
+                      <option value="Office Supplies">Office Supplies</option>
+                      <option value="IT Equipment">IT Equipment</option>
+                      <option value="Catering Services">Catering Services</option>
+                      <option value="Services">Services / Repair</option>
+                    </select>
+                  </div>
+
+                  <div className="form-field">
+                    <label className="form-label">Quantity</label>
+                    <input
+                      type="number"
+                      placeholder="0"
+                      className="form-input"
+                      value={itemQty}
+                      onChange={(e) => setItemQty(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-field">
+                    <label className="form-label">Unit of Measure</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. pc, box, ream"
+                      className="form-input"
+                      value={itemUnit}
+                      onChange={(e) => setItemUnit(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-field">
+                    <label className="form-label">Unit Cost (PHP)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      className="form-input"
+                      value={itemCost}
+                      onChange={(e) => setItemCost(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-field">
+                    <label className="form-label">Procurement Mode</label>
+                    <select className="form-input" value={itemProcMode} onChange={(e) => setItemProcMode(e.target.value)}>
+                      <option value="Shopping">Shopping</option>
+                      <option value="SVP">Small Value Procurement</option>
+                      <option value="Competitive Bidding">Competitive Bidding</option>
+                    </select>
+                  </div>
+
+                  <div className="form-field form-field-full">
+                    <label className="form-label">Milestone Distribution (Quantity per Quarter)</label>
+                    <div className="ppmp-milestone-grid">
+                      <input type="number" placeholder="Q1" className="form-input" value={q1} onChange={(e) => setQ1(e.target.value)} />
+                      <input type="number" placeholder="Q2" className="form-input" value={q2} onChange={(e) => setQ2(e.target.value)} />
+                      <input type="number" placeholder="Q3" className="form-input" value={q3} onChange={(e) => setQ3(e.target.value)} />
+                      <input type="number" placeholder="Q4" className="form-input" value={q4} onChange={(e) => setQ4(e.target.value)} />
+                    </div>
+                  </div>
+
+                  <div className="form-field form-field-full ppmp-add-item-actions">
+                    <button type="submit" className="btn">
+                      <i className="fas fa-plus" aria-hidden="true"></i>
+                      Add Item
+                    </button>
+                  </div>
+                </form>
+              </section>
+              )}
+
+              <section className="dashboard-card ppmp-items-card">
+              <h2 className="card-title">PPMP Line Items ({selectedPpmp.items.length})</h2>
+              <div className="table-wrapper">
+                <table className="custom-table">
+                  <thead>
+                    <tr>
+                      <th>Description</th>
+                      <th>Qty</th>
+                      <th>Unit</th>
+                      <th>Unit Cost</th>
+                      <th>Subtotal</th>
+                      <th>Mode</th>
+                      <th>Q1/Q2/Q3/Q4</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedPpmp.items.length === 0 ? (
+                      <tr>
+                        <td colSpan="8" style={{ textAlign: "center", color: "var(--text-muted)", padding: "2rem" }}>
+                          No items added yet. Use the form above to add your first line item.
+                        </td>
+                      </tr>
+                    ) : (
+                      selectedPpmp.items.map((item) => (
+                        <tr key={item.id}>
+                          <td>{item.description}</td>
+                          <td>{item.quantity}</td>
+                          <td>{item.unit_of_measure}</td>
+                          <td>₱{item.unit_cost.toLocaleString()}</td>
+                          <td>₱{item.estimated_budget.toLocaleString()}</td>
+                          <td>{item.procurement_mode}</td>
+                          <td>{item.q1_qty}/{item.q2_qty}/{item.q3_qty}/{item.q4_qty}</td>
+                          <td>
+                            {selectedPpmp.ppmp.status !== "Approved" && selectedPpmp.ppmp.status !== "Pending Budget Review" && (
+                              <button type="button" className="btn btn-danger btn-sm" onClick={() => handleDeletePpmpItem(item.id)}>Remove</button>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

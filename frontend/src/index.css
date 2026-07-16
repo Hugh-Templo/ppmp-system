@@ -158,7 +158,7 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0.6;
+  opacity: 4;
   filter: grayscale(100%) brightness(40%) contrast(120%);
   mix-blend-mode: luminosity;
 }
@@ -1246,3 +1246,358 @@ pre.json-block {
 .mobile-menu-btn {
   display: none;
 }
+
+/* ===================== END-USER PPMP FULL-SCREEN WORKSPACE ===================== */
+
+.end-user-dashboard {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.end-user-dashboard > .dashboard-card {
+  min-width: 0;
+}
+
+@media (max-width: 1024px) {
+  .end-user-dashboard {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ppmp-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: var(--neuro-bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: ppmpFullscreenIn 0.2s ease-out;
+}
+
+@keyframes ppmpFullscreenIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ppmp-fullscreen-header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1.25rem 2rem;
+  background: var(--neuro-surface);
+  border-bottom: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  flex-shrink: 0;
+}
+
+.ppmp-fullscreen-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ppmp-fullscreen-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ppmp-fullscreen-title h1 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ppmp-fullscreen-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.ppmp-fullscreen-year {
+  font-weight: 500;
+}
+
+.ppmp-fullscreen-submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ppmp-fullscreen-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.ppmp-fullscreen-body .dashboard-card {
+  margin: 0;
+}
+
+.ppmp-fullscreen-body .dashboard-card:hover {
+  transform: none;
+}
+
+.ppmp-fullscreen-columns {
+  display: grid;
+  grid-template-columns: minmax(380px, 460px) 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.ppmp-fullscreen-columns .ppmp-items-card {
+  min-width: 0;
+}
+
+.ppmp-add-item-form {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem 1.25rem;
+}
+
+.ppmp-add-item-form .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ppmp-add-item-form .form-field-full {
+  grid-column: 1 / -1;
+}
+
+.ppmp-add-item-form .form-field-checkbox label {
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.ppmp-add-item-form .form-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ppmp-milestone-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.ppmp-add-item-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-color);
+  margin-top: 0.5rem;
+}
+
+.ppmp-add-item-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 160px;
+  justify-content: center;
+}
+
+@media (max-width: 1280px) {
+  .ppmp-fullscreen-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .ppmp-fullscreen-header {
+    flex-wrap: wrap;
+    padding: 1rem;
+    gap: 0.75rem;
+  }
+
+  .ppmp-fullscreen-title h1 {
+    font-size: 1.1rem;
+    white-space: normal;
+  }
+
+  .ppmp-fullscreen-submit {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .ppmp-fullscreen-body {
+    padding: 1rem;
+  }
+
+  .ppmp-add-item-form {
+    grid-template-columns: 1fr;
+  }
+
+  .ppmp-milestone-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* -----------------------------------------------------------------
+   PPMP Type Badge (CSE / nonCSE)
+   Compact uppercase pill rendered inline in PPMP list tables.
+   ----------------------------------------------------------------- */
+.ppmp-type-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  line-height: 1.4;
+  vertical-align: middle;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.ppmp-type-badge.cse {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
+.ppmp-type-badge.noncse {
+  background: #e5e7eb;
+  color: #4b5563;
+  border-color: #d1d5db;
+}
+
+/* -----------------------------------------------------------------
+   PPMP Type Picker (Create PPMP form)
+   Two-button segmented control that mirrors the badge colors so users
+   can tell what type they're creating at a glance.
+   ----------------------------------------------------------------- */
+.ppmp-type-picker {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 8px;
+  align-self: flex-start;
+}
+
+.ppmp-type-picker-option {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.ppmp-type-picker-option:hover {
+  color: var(--text-secondary, #334155);
+}
+
+.ppmp-type-picker-option.active.cse {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
+.ppmp-type-picker-option.active.noncse {
+  background: #e5e7eb;
+  color: #374151;
+  border-color: #d1d5db;
+}
+
+/* -----------------------------------------------------------------
+   Item description combobox (autocomplete)
+   ----------------------------------------------------------------- */
+.item-desc-combobox {
+  position: relative;
+  width: 100%;
+}
+
+.item-desc-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.item-desc-suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.item-desc-suggestion .item-desc-suggestion-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.item-desc-suggestion .item-desc-suggestion-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item-desc-suggestion .item-desc-suggestion-meta {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.item-desc-suggestion.active,
+.item-desc-suggestion:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.item-desc-suggestion .ppmp-type-badge {
+  flex-shrink: 0;
+}
+

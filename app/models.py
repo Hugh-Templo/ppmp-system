@@ -1,6 +1,6 @@
 from typing import Optional, List
 from datetime import datetime
-from sqlmodel import SQLModel, Field, Relationship
+from sqlmodel import SQLModel, Field, Relationship, UniqueConstraint
 
 
 class Office(SQLModel, table=True):
@@ -12,6 +12,17 @@ class Office(SQLModel, table=True):
     code: str = Field(unique=True)  # e.g., "O-HOPE", "O-BUDGET", "O-BAC", "O-CHO"
     budget_allocation: float = Field(default=0.0)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Signatory fields — mirrored into the office's NGPA_PPMP.xlsx footer on save.
+    submitted_by: Optional[str] = Field(default=None)
+    submitted_by_designation: Optional[str] = Field(default=None)
+    prepared_by: Optional[str] = Field(default=None)
+    prepared_by_designation: Optional[str] = Field(default=None)
+    aip_reference: Optional[str] = Field(default=None)
+    responsibility_center_no: Optional[str] = Field(default=None)
+    office_code_from_pr: Optional[str] = Field(default=None)
+    # Relative path (from repo root) to this office's generated NGPA_PPMP.xlsx copy.
+    ppmp_template_path: Optional[str] = Field(default=None)
 
     # Relationships
     users: List["User"] = Relationship(back_populates="office")
@@ -47,6 +58,8 @@ class PPMP(SQLModel, table=True):
     office_id: int = Field(foreign_key="office.id")
     status: str = Field(default="Draft")  # "Draft", "Pending Budget Review", "Approved", "Returned"
     type: str = Field(default="Indicative")  # "Indicative" or "Final"
+    # PPMP-level CSE flag chosen at creation; items default to this but can override.
+    is_cse: bool = Field(default=False, index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     remarks: Optional[str] = Field(default=None)  # Remarks from budget office when returning for revision
@@ -92,9 +105,15 @@ class FinalPPMP(SQLModel, table=True):
     """
     Final PPMP for RA 12009 compliance.
     Status transitions: Draft -> Submitted -> Approved/Rejected
+
+    Supplemental revisions (end user adds items after approval) are tracked as
+    additional rows with version >= 2 for the same (office_id, fiscal_year).
     """
     __tablename__ = "final_ppmp"
-    
+    __table_args__ = (
+        UniqueConstraint("office_id", "fiscal_year", "version", name="uq_final_ppmp_office_fy_version"),
+    )
+
     # Base PPMP fields (copied from PPMP)
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str
@@ -104,12 +123,15 @@ class FinalPPMP(SQLModel, table=True):
     type: str = Field(default="Final")  # "Indicative" or "Final"
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     # RA 12009 specific fields
     approval_status: str = Field(default="Draft")  # "Draft", "Submitted", "Approved", "Rejected"
+    submitted_at: Optional[datetime] = Field(default=None)  # When end user submitted the Final PPMP
     approved_at: Optional[datetime] = Field(default=None)
     approved_by: Optional[int] = Field(default=None)  # User ID of HoPE or designated official
     verification_notes: Optional[str] = Field(default=None)  # Notes from verification process
+    remarks: Optional[str] = Field(default=None)  # Revision notes (future return flow)
+    version: int = Field(default=1)  # 1 = Original Final PPMP; 2+ = Supplemental revisions
 
 
 class PPMPItem(SQLModel, table=True):

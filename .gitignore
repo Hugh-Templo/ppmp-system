@@ -1,0 +1,27 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Local database & data
+data/
+*.sqlite
+*.sqlite3
+
+# Node / frontend build artifacts
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Excel lock files
+templates/~$*.xlsx
+**/~$*.xlsx
+
+# Generated per-office PPMP template copies (created at runtime).
+# Existing shared registry files under templates/end-users/ stay tracked.
+templates/end-users/*/
