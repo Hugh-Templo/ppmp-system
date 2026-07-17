@@ -25,3 +25,5 @@ templates/~$*.xlsx
 # Generated per-office PPMP template copies (created at runtime).
 # Existing shared registry files under templates/end-users/ stay tracked.
 templates/end-users/*/
+
+token.txt

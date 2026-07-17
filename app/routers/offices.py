@@ -344,6 +344,38 @@ def submit_ppmp(
     return {"message": "PPMP submitted for budget review successfully", "status": ppmp.status}
 
 
+@router.delete("/ppmps/{ppmp_id}")
+def delete_ppmp(
+    ppmp_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["end_user"])),
+):
+    """Delete a PPMP (and its line items) — only while it is still in Draft
+    status and belongs to the caller's office. Submitted, returned, and
+    approved PPMPs cannot be deleted from this endpoint."""
+    ppmp = session.get(PPMP, ppmp_id)
+    if not ppmp:
+        raise HTTPException(status_code=404, detail="PPMP not found")
+
+    if ppmp.office_id != current_user.office_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if ppmp.status != "Draft":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"PPMP cannot be deleted while status is '{ppmp.status}'. Only Draft PPMPs may be deleted.",
+        )
+
+    # Remove line items first to avoid foreign-key violations.
+    items = session.exec(select(PPMPItem).where(PPMPItem.ppmp_id == ppmp_id)).all()
+    for item in items:
+        session.delete(item)
+
+    session.delete(ppmp)
+    session.commit()
+    return {"message": "PPMP deleted successfully", "ppmp_id": ppmp_id}
+
+
 @router.post("/ppmps/{ppmp_id}/items", response_model=PPMPItem)
 def add_ppmp_item(
     ppmp_id: int,

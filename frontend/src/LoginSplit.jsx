@@ -17,7 +17,7 @@ function Login({ onLogin }) {
       formData.append("username", username);
       formData.append("password", password);
 
-      const response = await fetch("http://localhost:8000/api/auth/token", {
+      const response = await fetch("/api/auth/token", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",

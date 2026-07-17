@@ -20,7 +20,7 @@ function Login({ onLogin }) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-      const response = await fetch("http://localhost:8000/api/auth/token", {
+      const response = await fetch("/api/auth/token", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -58,7 +58,7 @@ function Login({ onLogin }) {
             className="bg-logo" 
           />
           <img 
-            src="/dev.png" 
+            //src="/dev.png" 
             alt="Developer Silhouette" 
             className="dev-silhouette" 
           />

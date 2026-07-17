@@ -24,7 +24,7 @@ function App() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-      const response = await fetch("http://localhost:8000/api/auth/me", {
+      const response = await fetch("/api/auth/me", {
         headers: {
           Authorization: `Bearer ${authToken}`,
         },

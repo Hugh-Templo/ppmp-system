@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
-from sqlmodel import Session, select
+from pydantic import BaseModel
+from sqlmodel import Session, select, text
 from typing import List, Optional
 from datetime import datetime
 from app.database import get_session
@@ -8,6 +9,21 @@ from app.models import User, APP, APPRow, Office, PPMP, PPMPItem, IndicativePPMP
 from app.auth import check_role, get_current_user
 
 router = APIRouter(prefix="/api/bac", tags=["bac"])
+
+
+class OfficeUpdate(BaseModel):
+    name: Optional[str] = None
+    code: Optional[str] = None
+    budget_allocation: Optional[float] = None
+
+
+@router.get("/offices", response_model=List[Office])
+def list_offices_bac(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """List all offices (BAC admin CRUD read)."""
+    return session.exec(select(Office).order_by(Office.code)).all()
 
 
 @router.post("/offices", response_model=Office)
@@ -20,16 +36,115 @@ def create_office(
     existing = session.exec(select(Office).where(Office.code == office_data.code)).first()
     if existing:
         raise HTTPException(status_code=400, detail="Office code already exists")
-        
+
+    if office_data.name:
+        name_clash = session.exec(
+            select(Office).where(Office.name == office_data.name)
+        ).first()
+        if name_clash:
+            raise HTTPException(status_code=400, detail="Office name already exists")
+
     new_office = Office(
         name=office_data.name,
         code=office_data.code,
-        budget_allocation=office_data.budget_allocation
+        budget_allocation=office_data.budget_allocation or 0.0,
     )
     session.add(new_office)
     session.commit()
     session.refresh(new_office)
     return new_office
+
+
+@router.put("/offices/{office_id}", response_model=Office)
+def update_office(
+    office_id: int,
+    payload: OfficeUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """Update an existing office (name, code, budget ceiling)."""
+    office = session.get(Office, office_id)
+    if not office:
+        raise HTTPException(status_code=404, detail="Office not found")
+
+    if payload.code is not None and payload.code != office.code:
+        clash = session.exec(select(Office).where(Office.code == payload.code)).first()
+        if clash:
+            raise HTTPException(status_code=400, detail="Office code already exists")
+        office.code = payload.code
+
+    if payload.name is not None and payload.name != office.name:
+        clash = session.exec(select(Office).where(Office.name == payload.name)).first()
+        if clash:
+            raise HTTPException(status_code=400, detail="Office name already exists")
+        office.name = payload.name
+
+    if payload.budget_allocation is not None:
+        office.budget_allocation = float(payload.budget_allocation)
+
+    session.add(office)
+    session.commit()
+    session.refresh(office)
+    return office
+
+
+@router.delete("/offices/{office_id}")
+def delete_office(
+    office_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """Delete an office and its related PPMPs. Users assigned to the office
+    are unassigned (office_id cleared) rather than deleted."""
+    office = session.get(Office, office_id)
+    if not office:
+        raise HTTPException(status_code=404, detail="Office not found")
+
+    try:
+        # Unassign users so FK constraints do not block the delete.
+        assigned_users = session.exec(
+            select(User).where(User.office_id == office_id)
+        ).all()
+        for user in assigned_users:
+            user.office_id = None
+            session.add(user)
+
+        # Delete related rows with SQL so schema drift on FinalPPMP/etc. cannot
+        # block office deletion (column mismatches on SELECT of ORM models).
+        session.exec(
+            text(
+                "DELETE FROM ppmpitem WHERE ppmp_id IN "
+                "(SELECT id FROM ppmp WHERE office_id = :oid)"
+            ).bindparams(oid=office_id)
+        )
+        session.exec(
+            text(
+                "DELETE FROM ppmpitem WHERE indicative_ppmp_id IN "
+                "(SELECT id FROM indicative_ppmp WHERE office_id = :oid)"
+            ).bindparams(oid=office_id)
+        )
+        session.exec(text("DELETE FROM ppmp WHERE office_id = :oid").bindparams(oid=office_id))
+        session.exec(
+            text("DELETE FROM indicative_ppmp WHERE office_id = :oid").bindparams(oid=office_id)
+        )
+        session.exec(
+            text("DELETE FROM final_ppmp WHERE office_id = :oid").bindparams(oid=office_id)
+        )
+
+        session.delete(office)
+        session.commit()
+    except Exception as exc:  # noqa: BLE001
+        session.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete office: {exc}",
+        ) from exc
+
+    return {
+        "message": "Office deleted successfully",
+        "office_id": office_id,
+        "users_unassigned": len(assigned_users),
+    }
 
 
 @router.post("/consolidate/{fiscal_year}", response_model=APP)
@@ -39,44 +154,48 @@ def consolidate_ppmps(
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
     """
-    Consolidate all 'Approved' indicative PPMPs for the specified fiscal year into a single APP.
-    If an APP already exists for that year, it updates it.
+    Consolidate all budget-approved office PPMPs for the specified fiscal year
+    into a single APP (CSE and non-CSE rows kept separate via item.is_cse).
+    If an APP already exists for that year, it is recalculated.
     """
-    # 1. Fetch all approved indicative PPMPs for this year
-    approved_indicative_ppmps = session.exec(
-        select(IndicativePPMP).where(IndicativePPMP.fiscal_year == fiscal_year, IndicativePPMP.posting_status == "Approved")
-    ).all()
-    
-    if not approved_indicative_ppmps:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"No approved indicative PPMPs found for fiscal year {fiscal_year} to consolidate"
+    # 1. Fetch all Approved office PPMPs for this year
+    approved_ppmps = session.exec(
+        select(PPMP).where(
+            PPMP.fiscal_year == fiscal_year,
+            PPMP.status == "Approved",
         )
-        
+    ).all()
+
+    if not approved_ppmps:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No approved PPMPs found for fiscal year {fiscal_year} to consolidate",
+        )
+
     # 2. Find or create the APP entity
     app = session.exec(select(APP).where(APP.fiscal_year == fiscal_year)).first()
     if app:
-        # Delete existing rows for recalculation
         existing_rows = session.exec(select(APPRow).where(APPRow.app_id == app.id)).all()
         for row in existing_rows:
             session.delete(row)
         session.commit()
     else:
-        app = APP(title=f"Consolidated Annual Procurement Plan (APP) FY {fiscal_year}", fiscal_year=fiscal_year)
+        app = APP(
+            title=f"Consolidated Annual Procurement Plan (APP) FY {fiscal_year}",
+            fiscal_year=fiscal_year,
+        )
         session.add(app)
         session.commit()
         session.refresh(app)
 
     # 3. Consolidate items grouped by NGPA dimensions (per RA 12009 APP layout).
     #    Group key: (is_cse, description, project_type, procurement_mode, fund_source)
-    #    CSE and non-CSE are kept separate; project_type + fund_source drive
-    #    the sectional grouping in the CSE and non-CSE APP output.
-    indicative_ids = [p.id for p in approved_indicative_ppmps]
+    ppmp_ids = [p.id for p in approved_ppmps]
     office_lookup = {o.id: o for o in session.exec(select(Office)).all()}
-    ppmp_office_lookup = {p.id: office_lookup.get(p.office_id) for p in approved_indicative_ppmps}
+    ppmp_office_lookup = {p.id: office_lookup.get(p.office_id) for p in approved_ppmps}
 
     all_items = session.exec(
-        select(PPMPItem).where(PPMPItem.indicative_ppmp_id.in_(indicative_ids))
+        select(PPMPItem).where(PPMPItem.ppmp_id.in_(ppmp_ids))
     ).all()
 
     consolidation_map: dict = {}
@@ -102,23 +221,25 @@ def consolidate_ppmps(
                 "pre_proc_conf": bool(item.pre_proc_conf),
                 "total_estimated_budget": 0.0,
                 "offices": set(),
-                # Legacy quarterly totals kept for backward compatibility
                 "total_quantity": 0,
-                "q1_qty": 0, "q2_qty": 0, "q3_qty": 0, "q4_qty": 0,
+                "q1_qty": 0,
+                "q2_qty": 0,
+                "q3_qty": 0,
+                "q4_qty": 0,
                 "category": item.category,
                 "unit_of_measure": item.unit_of_measure,
                 "unit_cost": item.unit_cost,
             }
 
         group = consolidation_map[key]
-        group["total_estimated_budget"] += (item.estimated_budget or 0.0)
-        group["total_quantity"] += (item.quantity or 0)
-        group["q1_qty"] += (item.q1_qty or 0)
-        group["q2_qty"] += (item.q2_qty or 0)
-        group["q3_qty"] += (item.q3_qty or 0)
-        group["q4_qty"] += (item.q4_qty or 0)
+        group["total_estimated_budget"] += item.estimated_budget or 0.0
+        group["total_quantity"] += item.quantity or 0
+        group["q1_qty"] += item.q1_qty or 0
+        group["q2_qty"] += item.q2_qty or 0
+        group["q3_qty"] += item.q3_qty or 0
+        group["q4_qty"] += item.q4_qty or 0
 
-        office = ppmp_office_lookup.get(item.indicative_ppmp_id)
+        office = ppmp_office_lookup.get(item.ppmp_id)
         if office is not None:
             group["offices"].add(office.code or office.name or "")
 
@@ -152,6 +273,59 @@ def consolidate_ppmps(
     session.commit()
     session.refresh(app)
     return app
+
+
+@router.get("/ppmps/approved")
+def list_approved_ppmps_for_app(
+    fiscal_year: int,
+    kind: str = "cse",
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """List budget-approved office PPMPs for a FY that have CSE or non-CSE items."""
+    kind_norm = (kind or "cse").strip().lower()
+    if kind_norm not in ("cse", "noncse"):
+        raise HTTPException(status_code=400, detail="kind must be 'cse' or 'noncse'")
+    want_cse = kind_norm == "cse"
+
+    approved = session.exec(
+        select(PPMP).where(
+            PPMP.fiscal_year == fiscal_year,
+            PPMP.status == "Approved",
+        )
+    ).all()
+    if not approved:
+        return []
+
+    office_lookup = {o.id: o for o in session.exec(select(Office)).all()}
+    result = []
+    for ppmp in approved:
+        items = session.exec(
+            select(PPMPItem).where(PPMPItem.ppmp_id == ppmp.id)
+        ).all()
+        matching = [it for it in items if bool(it.is_cse) == want_cse]
+        if not matching:
+            continue
+        office = office_lookup.get(ppmp.office_id)
+        result.append(
+            {
+                "id": ppmp.id,
+                "title": ppmp.title,
+                "fiscal_year": ppmp.fiscal_year,
+                "status": ppmp.status,
+                "office_id": ppmp.office_id,
+                "office_name": office.name if office else "",
+                "office_code": office.code if office else "",
+                "item_count": len(matching),
+                "total_estimated_budget": sum(
+                    float(it.estimated_budget or 0) for it in matching
+                ),
+                "is_cse_kind": want_cse,
+            }
+        )
+
+    result.sort(key=lambda r: ((r["office_name"] or "").lower(), (r["title"] or "").lower()))
+    return result
 
 
 @router.post("/indicative/ppmps/{ppmp_id}/approve")
@@ -228,6 +402,29 @@ def list_apps(
 ):
     """List all consolidated APPs."""
     return session.exec(select(APP)).all()
+
+
+@router.get("/apps/by-year/{fiscal_year}")
+def get_app_by_year(
+    fiscal_year: int,
+    kind: Optional[str] = None,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """Return the consolidated APP for a fiscal year, optionally filtered by CSE/nonCSE."""
+    app = session.exec(select(APP).where(APP.fiscal_year == fiscal_year)).first()
+    if not app:
+        return {"app": None, "rows": []}
+
+    rows = list(app.rows or [])
+    if kind:
+        kind_norm = kind.strip().lower()
+        if kind_norm not in ("cse", "noncse"):
+            raise HTTPException(status_code=400, detail="kind must be 'cse' or 'noncse'")
+        want_cse = kind_norm == "cse"
+        rows = [r for r in rows if bool(r.is_cse) == want_cse]
+
+    return {"app": app, "rows": rows}
 
 
 @router.get("/apps/{app_id}")

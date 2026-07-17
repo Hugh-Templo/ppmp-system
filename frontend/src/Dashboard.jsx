@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 function Dashboard({ token, user, onLogout }) {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [ppmps, setPpmps] = useState([]);
   const [selectedPpmp, setSelectedPpmp] = useState(null);
+  const notificationTimerRef = useRef(null);
 
   // End-User state
   const [newPpmpTitle, setNewPpmpTitle] = useState("");
@@ -43,9 +44,14 @@ function Dashboard({ token, user, onLogout }) {
   const [newOfficeName, setNewOfficeName] = useState("");
   const [newOfficeCode, setNewOfficeCode] = useState("");
   const [newOfficeBudget, setNewOfficeBudget] = useState(0);
+  const [editingOfficeId, setEditingOfficeId] = useState(null);
   const [offices, setOffices] = useState([]);
   const [consolidationYear, setConsolidationYear] = useState(new Date().getFullYear() + 1);
   const [dbmClassification, setDbmClassification] = useState([]);
+  // CSE-APP / nonCSE-APP workspace
+  const [approvedAppPpmps, setApprovedAppPpmps] = useState([]);
+  const [kindAppPayload, setKindAppPayload] = useState({ app: null, rows: [] });
+  const [appWorkspaceLoading, setAppWorkspaceLoading] = useState(false);
 
   // DBM Classification form state
   const [newDbmCode, setNewDbmCode] = useState("");
@@ -76,11 +82,70 @@ function Dashboard({ token, user, onLogout }) {
   const [registeredUsers, setRegisteredUsers] = useState([]);
 
   const [notification, setNotification] = useState({ message: "", type: "" });
+  const [confirmDialog, setConfirmDialog] = useState({
+    open: false,
+    title: "",
+    message: "",
+    confirmLabel: "Confirm",
+    cancelLabel: "Cancel",
+    variant: "primary", // "primary" | "danger"
+    onConfirm: null,
+  });
 
   const showNotification = (message, type = "success") => {
+    if (notificationTimerRef.current) {
+      clearTimeout(notificationTimerRef.current);
+    }
     setNotification({ message, type });
-    setTimeout(() => setNotification({ message: "", type: "" }), 5000);
+    notificationTimerRef.current = setTimeout(() => {
+      setNotification({ message: "", type: "" });
+      notificationTimerRef.current = null;
+    }, 4500);
   };
+
+  const dismissNotification = () => {
+    if (notificationTimerRef.current) {
+      clearTimeout(notificationTimerRef.current);
+      notificationTimerRef.current = null;
+    }
+    setNotification({ message: "", type: "" });
+  };
+
+  const showConfirm = ({
+    title = "Please confirm",
+    message,
+    confirmLabel = "Confirm",
+    cancelLabel = "Cancel",
+    variant = "primary",
+    onConfirm,
+  }) => {
+    setConfirmDialog({
+      open: true,
+      title,
+      message,
+      confirmLabel,
+      cancelLabel,
+      variant,
+      onConfirm,
+    });
+  };
+
+  const closeConfirm = () =>
+    setConfirmDialog((prev) => ({ ...prev, open: false, onConfirm: null }));
+
+  const handleConfirmClick = () => {
+    const cb = confirmDialog.onConfirm;
+    closeConfirm();
+    if (typeof cb === "function") cb();
+  };
+
+  useEffect(() => {
+    return () => {
+      if (notificationTimerRef.current) {
+        clearTimeout(notificationTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     loadDashboardData();
@@ -137,6 +202,15 @@ function Dashboard({ token, user, onLogout }) {
   }, [activeTab, user.role]);
 
   useEffect(() => {
+    if (
+      user.role === "bac_admin" &&
+      (activeTab === "cse_app" || activeTab === "noncse_app")
+    ) {
+      loadAppWorkspace(activeTab === "cse_app" ? "cse" : "noncse");
+    }
+  }, [activeTab, user.role, consolidationYear]);
+
+  useEffect(() => {
     if (user.role === "end_user" && activeTab === "budget_allocation") {
       fetchUserOfficeBudget();
     }
@@ -175,7 +249,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const fetchOfficePpmps = async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/offices/ppmps", {
+      const res = await fetch("/api/offices/ppmps", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -189,7 +263,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const fetchPendingPpmps = async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/budget/pending", {
+      const res = await fetch("/api/budget/pending", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -204,8 +278,8 @@ function Dashboard({ token, user, onLogout }) {
   const fetchIndicativePpmps = async () => {
     try {
       const url = user.role === "budget_office"
-        ? "http://localhost:8000/api/budget/indicative"
-        : "http://localhost:8000/api/budget/indicative/pending";
+        ? "/api/budget/indicative"
+        : "/api/budget/indicative/pending";
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -220,7 +294,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const fetchFinalPpmps = async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/budget/final", {
+      const res = await fetch("/api/budget/final", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -234,7 +308,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const fetchApps = async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/bac/apps", {
+      const res = await fetch("/api/bac/apps", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -248,7 +322,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const fetchOffices = async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/offices", {
+      const res = await fetch("/api/offices", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -262,7 +336,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/auth/users", {
+      const res = await fetch("/api/auth/users", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -276,7 +350,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const fetchDbmClassification = async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/dbm/classifications", {
+      const res = await fetch("/api/dbm/classifications", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -291,7 +365,7 @@ function Dashboard({ token, user, onLogout }) {
   const handleAddDbmClassification = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch("http://localhost:8000/api/dbm/classifications", {
+      const res = await fetch("/api/dbm/classifications", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -329,7 +403,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleSelectPpmp = async (ppmpId) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/offices/ppmps/${ppmpId}`, {
+      const res = await fetch(`/api/offices/ppmps/${ppmpId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -350,7 +424,7 @@ function Dashboard({ token, user, onLogout }) {
   const fetchItemCatalog = async () => {
     if (itemCatalog.length > 0) return;
     try {
-      const res = await fetch("http://localhost:8000/api/offices/item-catalog", {
+      const res = await fetch("/api/offices/item-catalog", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
@@ -427,7 +501,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const loadAudit = async (ppmpId) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/budget/ppmps/${ppmpId}/audit`, {
+      const res = await fetch(`/api/budget/ppmps/${ppmpId}/audit`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -442,7 +516,7 @@ function Dashboard({ token, user, onLogout }) {
   const handleCreatePpmp = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch("http://localhost:8000/api/offices/ppmps", {
+      const res = await fetch("/api/offices/ppmps", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -471,7 +545,7 @@ function Dashboard({ token, user, onLogout }) {
     e.preventDefault();
     if (!selectedPpmp) return;
     try {
-      const res = await fetch(`http://localhost:8000/api/offices/ppmps/${selectedPpmp.ppmp.id}/items`, {
+      const res = await fetch(`/api/offices/ppmps/${selectedPpmp.ppmp.id}/items`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -514,7 +588,7 @@ function Dashboard({ token, user, onLogout }) {
   const handleDeletePpmpItem = async (itemId) => {
     if (!selectedPpmp) return;
     try {
-      const res = await fetch(`http://localhost:8000/api/offices/ppmps/${selectedPpmp.ppmp.id}/items/${itemId}`, {
+      const res = await fetch(`/api/offices/ppmps/${selectedPpmp.ppmp.id}/items/${itemId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -529,7 +603,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleSubmitPpmp = async (ppmpId) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/offices/ppmps/${ppmpId}/submit`, {
+      const res = await fetch(`/api/offices/ppmps/${ppmpId}/submit`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -543,11 +617,43 @@ function Dashboard({ token, user, onLogout }) {
     }
   };
 
+  const performDeletePpmp = async (ppmpId) => {
+    try {
+      const res = await fetch(`/api/offices/ppmps/${ppmpId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        showNotification("PPMP deleted successfully");
+        if (selectedPpmp && selectedPpmp.ppmp.id === ppmpId) {
+          setSelectedPpmp(null);
+        }
+        fetchOfficePpmps();
+      } else {
+        const err = await res.json().catch(() => ({ detail: "Delete failed" }));
+        showNotification(err.detail || "Failed to delete PPMP", "danger");
+      }
+    } catch (err) {
+      showNotification("Failed to delete PPMP", "danger");
+    }
+  };
+
+  const handleDeletePpmp = (ppmpId, title) => {
+    showConfirm({
+      title: "Delete PPMP",
+      message: `Are you sure you want to delete the PPMP "${title}"? This action cannot be undone and all line items will be removed.`,
+      confirmLabel: "Delete PPMP",
+      cancelLabel: "Cancel",
+      variant: "danger",
+      onConfirm: () => performDeletePpmp(ppmpId),
+    });
+  };
+
   const handleDownloadPpmpXlsx = async () => {
     if (!selectedPpmp) return;
     try {
       const res = await fetch(
-        `http://localhost:8000/api/offices/ppmps/${selectedPpmp.ppmp.id}/export`,
+        `/api/offices/ppmps/${selectedPpmp.ppmp.id}/export`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!res.ok) {
@@ -573,7 +679,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleReviewAction = async (ppmpId, action) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/budget/ppmps/${ppmpId}/review?action=${action}&remarks=${remarks}`, {
+      const res = await fetch(`/api/budget/ppmps/${ppmpId}/review?action=${action}&remarks=${remarks}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -591,7 +697,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handlePostIndicativePpmp = async (ppmpId) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/budget/indicative/ppmps/${ppmpId}/post`, {
+      const res = await fetch(`/api/budget/indicative/ppmps/${ppmpId}/post`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -606,7 +712,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleUnpostIndicativePpmp = async (ppmpId) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/budget/indicative/ppmps/${ppmpId}/unpost`, {
+      const res = await fetch(`/api/budget/indicative/ppmps/${ppmpId}/unpost`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -621,7 +727,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleApproveIndicativePpmp = async (ppmpId) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/bac/indicative/ppmps/${ppmpId}/approve`, {
+      const res = await fetch(`/api/bac/indicative/ppmps/${ppmpId}/approve`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -636,7 +742,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleRejectIndicativePpmp = async (ppmpId) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/bac/indicative/ppmps/${ppmpId}/reject`, {
+      const res = await fetch(`/api/bac/indicative/ppmps/${ppmpId}/reject`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -649,31 +755,90 @@ function Dashboard({ token, user, onLogout }) {
     }
   };
 
-  const handleCreateOffice = async (e) => {
+  const resetOfficeForm = () => {
+    setEditingOfficeId(null);
+    setNewOfficeName("");
+    setNewOfficeCode("");
+    setNewOfficeBudget(0);
+  };
+
+  const handleSaveOffice = async (e) => {
     e.preventDefault();
+    const payload = {
+      name: newOfficeName.trim(),
+      code: newOfficeCode.trim(),
+      budget_allocation: parseFloat(newOfficeBudget) || 0,
+    };
+    const isEdit = !!editingOfficeId;
     try {
-      const res = await fetch("http://localhost:8000/api/bac/offices", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          name: newOfficeName,
-          code: newOfficeCode,
-          budget_allocation: parseFloat(newOfficeBudget),
-        }),
-      });
+      const res = await fetch(
+        isEdit ? `/api/bac/offices/${editingOfficeId}` : "/api/bac/offices",
+        {
+          method: isEdit ? "PUT" : "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showNotification("Office created successfully");
-        setNewOfficeName("");
-        setNewOfficeCode("");
-        setNewOfficeBudget(0);
+        showNotification(isEdit ? "Office updated successfully" : "Office created successfully");
+        resetOfficeForm();
         fetchOffices();
+      } else {
+        const detail =
+          typeof data.detail === "string"
+            ? data.detail
+            : isEdit
+              ? "Failed to update office"
+              : "Failed to create office";
+        showNotification(detail, "danger");
       }
     } catch (err) {
-      showNotification("Failed to create office", "danger");
+      showNotification(isEdit ? "Failed to update office" : "Failed to create office", "danger");
     }
+  };
+
+  const handleEditOffice = (office) => {
+    setEditingOfficeId(office.id);
+    setNewOfficeName(office.name || "");
+    setNewOfficeCode(office.code || "");
+    setNewOfficeBudget(office.budget_allocation || 0);
+  };
+
+  const performDeleteOffice = async (officeId) => {
+    try {
+      const res = await fetch(`/api/bac/offices/${officeId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        showNotification("Office deleted successfully");
+        if (editingOfficeId === officeId) resetOfficeForm();
+        fetchOffices();
+        fetchUsers();
+      } else {
+        const err = await res.json().catch(() => ({ detail: "Delete failed" }));
+        const detail =
+          typeof err.detail === "string" ? err.detail : "Failed to delete office";
+        showNotification(detail, "danger");
+      }
+    } catch (err) {
+      showNotification("Failed to delete office", "danger");
+    }
+  };
+
+  const handleDeleteOffice = (office) => {
+    showConfirm({
+      title: "Delete Office",
+      message: `Are you sure you want to delete "${office.name}" (${office.code})? All PPMPs for this office will be removed, and assigned users will be unassigned.`,
+      confirmLabel: "Delete Office",
+      cancelLabel: "Cancel",
+      variant: "danger",
+      onConfirm: () => performDeleteOffice(office.id),
+    });
   };
 
   const handleRegisterUser = async (e) => {
@@ -684,7 +849,7 @@ function Dashboard({ token, user, onLogout }) {
     }
 
     try {
-      const res = await fetch("http://localhost:8000/api/auth/register", {
+      const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -717,10 +882,42 @@ function Dashboard({ token, user, onLogout }) {
     }
   };
 
-  const handleConsolidate = async (e) => {
-    e.preventDefault();
+  const loadAppWorkspace = async (kind) => {
+    setAppWorkspaceLoading(true);
     try {
-      const res = await fetch(`http://localhost:8000/api/bac/consolidate/${consolidationYear}`, {
+      const [ppmpsRes, appRes] = await Promise.all([
+        fetch(
+          `/api/bac/ppmps/approved?fiscal_year=${consolidationYear}&kind=${kind}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        ),
+        fetch(
+          `/api/bac/apps/by-year/${consolidationYear}?kind=${kind}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        ),
+      ]);
+      if (ppmpsRes.ok) {
+        setApprovedAppPpmps(await ppmpsRes.json());
+      } else {
+        setApprovedAppPpmps([]);
+      }
+      if (appRes.ok) {
+        setKindAppPayload(await appRes.json());
+      } else {
+        setKindAppPayload({ app: null, rows: [] });
+      }
+    } catch (err) {
+      setApprovedAppPpmps([]);
+      setKindAppPayload({ app: null, rows: [] });
+      showNotification("Failed to load APP workspace", "danger");
+    } finally {
+      setAppWorkspaceLoading(false);
+    }
+  };
+
+  const handleConsolidate = async (e) => {
+    if (e && typeof e.preventDefault === "function") e.preventDefault();
+    try {
+      const res = await fetch(`/api/bac/consolidate/${consolidationYear}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -728,6 +925,9 @@ function Dashboard({ token, user, onLogout }) {
       if (res.ok) {
         showNotification(`APP Consolidated successfully for FY ${consolidationYear}!`);
         fetchApps();
+        if (activeTab === "cse_app" || activeTab === "noncse_app") {
+          loadAppWorkspace(activeTab === "cse_app" ? "cse" : "noncse");
+        }
       } else {
         showNotification(data.detail || "Consolidation failed", "danger");
       }
@@ -739,7 +939,7 @@ function Dashboard({ token, user, onLogout }) {
   const handleExportApp = async (fiscalYear, kind) => {
     const labels = { cse: "CSE APP", noncse: "Non-CSE APP", combined: "Combined APP" };
     try {
-      const res = await fetch(`http://localhost:8000/api/bac/apps/${fiscalYear}/export/${kind}`, {
+      const res = await fetch(`/api/bac/apps/${fiscalYear}/export/${kind}`, {
         method: "GET",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -765,7 +965,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleSelectApp = async (appId) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/bac/apps/${appId}`, {
+      const res = await fetch(`/api/bac/apps/${appId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -792,6 +992,8 @@ function Dashboard({ token, user, onLogout }) {
     signatory: "Signatory Information",
     indicative: "Indicative PPMP Management",
     final: "Final PPMP",
+    cse_app: "CSE Annual Procurement Plan",
+    noncse_app: "nonCSE Annual Procurement Plan",
     offices: "Manage Offices",
     users: "Manage Users",
     dbm: "DBM Classification",
@@ -994,11 +1196,280 @@ function Dashboard({ token, user, onLogout }) {
     );
   };
 
+  const renderNgpaCseAppForm = (rows, fiscalYear) => {
+    const list = rows || [];
+    const total = list.reduce(
+      (sum, r) => sum + Number(r.total_estimated_budget || 0),
+      0
+    );
+    const padded = Array.from(
+      { length: Math.max(list.length, 6) },
+      (_, i) => list[i] || null
+    );
+
+    return (
+      <div className="ngpa-app-form ngpa-app-form--cse" role="document" aria-label="CSE APP Form">
+        <div className="ngpa-app-form__header">
+          <div className="ngpa-app-form__letterhead">[Agency Letterhead with Logo]</div>
+          <div className="ngpa-app-form__doc-title">
+            ANNUAL PROCUREMENT PLAN FOR FY {fiscalYear}
+          </div>
+          <div className="ngpa-app-form__type-row">
+            <span className="ngpa-app-form__type-mark">INDICATIVE</span>
+            <span className="ngpa-app-form__type-mark is-active">
+              <span className="ngpa-app-form__type-check" aria-hidden="true">{"\u2713"}</span>
+              FINAL
+            </span>
+            <span className="ngpa-app-form__type-mark">UPDATED</span>
+          </div>
+          <div className="ngpa-app-form__kind-label">Common-Use Supplies and Equipment (CSE)</div>
+        </div>
+        <div className="ngpa-app-form__table-wrapper">
+          <table className="ngpa-app-table">
+            <thead>
+              <tr>
+                <th colSpan={8} className="ngpa-app-table__group">PROCUREMENT PROJECT DETAILS</th>
+                <th colSpan={2} className="ngpa-app-table__group">PROJECTED TIMELINE</th>
+                <th colSpan={2} className="ngpa-app-table__group">FUNDING DETAILS</th>
+                <th className="ngpa-app-table__group">REMARKS</th>
+              </tr>
+              <tr>
+                <th>PAP Code</th>
+                <th>Project Title</th>
+                <th>End-User / Implementing Unit</th>
+                <th>General Description of the Project</th>
+                <th>General Description of the Procurement Project</th>
+                <th>Mode of Procurement</th>
+                <th>Early Procurement Activity? (Yes/No)</th>
+                <th>Quantity / Size</th>
+                <th>Start of Procurement Activity</th>
+                <th>End of Procurement Activity</th>
+                <th>Source of Fund</th>
+                <th>Estimated Budget / ABC (PhP)</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {padded.map((row, idx) => (
+                <tr key={row ? row.id : `cse-blank-${idx}`}>
+                  <td>{row?.project_type || ""}</td>
+                  <td>{row?.description || ""}</td>
+                  <td>{row?.end_user_offices || ""}</td>
+                  <td>{row?.description || ""}</td>
+                  <td>{row?.description || ""}</td>
+                  <td>{row?.procurement_mode || ""}</td>
+                  <td className="ngpa-app-table__center">{row ? ngpaYesNo(row.pre_proc_conf) : ""}</td>
+                  <td>{row?.quantity_size || ""}</td>
+                  <td className="ngpa-app-table__center">{row?.proc_start || ""}</td>
+                  <td className="ngpa-app-table__center">{row?.proc_end || ""}</td>
+                  <td>{row?.fund_source || ""}</td>
+                  <td className="ngpa-app-table__amount">{row ? ngpaMoney(row.total_estimated_budget) : ""}</td>
+                  <td>{row?.delivery_period || ""}</td>
+                </tr>
+              ))}
+              <tr className="ngpa-app-table__total">
+                <td colSpan={11} className="ngpa-app-table__total-label">
+                  TOTAL CSE ESTIMATED BUDGET (FY {fiscalYear})
+                </td>
+                <td className="ngpa-app-table__amount ngpa-app-table__total-value">
+                  {ngpaMoney(total)}
+                </td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const renderNgpaNonCseAppForm = (rows, fiscalYear) => {
+    const list = rows || [];
+    const total = list.reduce(
+      (sum, r) => sum + Number(r.total_estimated_budget || 0),
+      0
+    );
+    const padded = Array.from(
+      { length: Math.max(list.length, 6) },
+      (_, i) => list[i] || null
+    );
+
+    return (
+      <div className="ngpa-app-form ngpa-app-form--noncse" role="document" aria-label="nonCSE APP Form">
+        <div className="ngpa-app-form__header">
+          <div className="ngpa-app-form__letterhead">Ormoc City Government</div>
+          <div className="ngpa-app-form__doc-title">
+            Annual Procurement Plan for FY {fiscalYear}
+          </div>
+          <div className="ngpa-app-form__kind-label">Non-CSE Procurement Projects</div>
+        </div>
+        <div className="ngpa-app-form__table-wrapper">
+          <table className="ngpa-app-table">
+            <thead>
+              <tr>
+                <th rowSpan={2}>Code (PAP)</th>
+                <th rowSpan={2}>Procurement Project</th>
+                <th rowSpan={2}>PMO / End-User</th>
+                <th rowSpan={2}>Early Procurement Activity? (Yes/No)</th>
+                <th rowSpan={2}>Mode of Procurement</th>
+                <th colSpan={4} className="ngpa-app-table__group">Schedule for Each Procurement Activity</th>
+                <th rowSpan={2}>Source of Funds</th>
+                <th rowSpan={2}>Estimated Budget (PhP)</th>
+                <th rowSpan={2}>Remarks</th>
+              </tr>
+              <tr>
+                <th>Advertisement / Posting of IB/REI</th>
+                <th>Submission / Opening of Bids</th>
+                <th>Notice of Award</th>
+                <th>Contract Signing</th>
+              </tr>
+            </thead>
+            <tbody>
+              {padded.map((row, idx) => (
+                <tr key={row ? row.id : `noncse-blank-${idx}`}>
+                  <td>{row?.project_type || ""}</td>
+                  <td>{row?.description || ""}</td>
+                  <td>{row?.end_user_offices || ""}</td>
+                  <td className="ngpa-app-table__center">{row ? ngpaYesNo(row.pre_proc_conf) : ""}</td>
+                  <td>{row?.procurement_mode || ""}</td>
+                  <td className="ngpa-app-table__center">{row?.proc_start || ""}</td>
+                  <td className="ngpa-app-table__center">{row?.proc_start || ""}</td>
+                  <td className="ngpa-app-table__center">{row?.proc_end || ""}</td>
+                  <td className="ngpa-app-table__center">{row?.delivery_period || ""}</td>
+                  <td>{row?.fund_source || ""}</td>
+                  <td className="ngpa-app-table__amount">{row ? ngpaMoney(row.total_estimated_budget) : ""}</td>
+                  <td>{row?.quantity_size || ""}</td>
+                </tr>
+              ))}
+              <tr className="ngpa-app-table__total">
+                <td colSpan={10} className="ngpa-app-table__total-label">
+                  TOTAL nonCSE ESTIMATED BUDGET (FY {fiscalYear})
+                </td>
+                <td className="ngpa-app-table__amount ngpa-app-table__total-value">
+                  {ngpaMoney(total)}
+                </td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const renderAppWorkspace = (kind) => {
+    const isCse = kind === "cse";
+    const label = isCse ? "CSE" : "nonCSE";
+    const rows = kindAppPayload.rows || [];
+    const sourceTotal = approvedAppPpmps.reduce(
+      (sum, p) => sum + Number(p.total_estimated_budget || 0),
+      0
+    );
+
+    return (
+      <div className="app-workspace">
+        <div className="app-workspace-toolbar">
+          <div className="app-workspace-toolbar__meta">
+            <label className="form-label" htmlFor={`fy-${kind}`}>Fiscal Year</label>
+            <input
+              id={`fy-${kind}`}
+              type="number"
+              className="form-input app-workspace-fy"
+              value={consolidationYear}
+              onChange={(e) => setConsolidationYear(e.target.value)}
+            />
+          </div>
+          <div className="app-workspace-toolbar__actions">
+            <button type="button" className="btn" onClick={handleConsolidate}>
+              <i className="fas fa-layer-group" aria-hidden="true"></i>
+              Run Consolidation
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => handleExportApp(consolidationYear, kind)}
+              disabled={!kindAppPayload.app}
+            >
+              <i className="fas fa-file-excel" aria-hidden="true"></i>
+              Download {label} Excel
+            </button>
+          </div>
+        </div>
+
+        <section className="dashboard-card app-workspace-source">
+          <div className="app-workspace-section-head">
+            <h2 className="card-title">Approved PPMPs ({label})</h2>
+            <span className="app-workspace-stat">
+              {approvedAppPpmps.length} office PPMP(s) · ₱{ngpaMoney(sourceTotal)}
+            </span>
+          </div>
+          <p className="page-subtitle" style={{ marginBottom: "0.75rem" }}>
+            Budget-approved office PPMPs for FY {consolidationYear} that contain {label} line items.
+            Run consolidation to rebuild the {label} APP below.
+          </p>
+          <div className="table-wrapper">
+            <table className="custom-table">
+              <thead>
+                <tr>
+                  <th>Office</th>
+                  <th>Title</th>
+                  <th>Items</th>
+                  <th>Total Budget</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {appWorkspaceLoading ? (
+                  <tr>
+                    <td colSpan="5" style={{ textAlign: "center", color: "var(--text-muted)" }}>
+                      Loading…
+                    </td>
+                  </tr>
+                ) : approvedAppPpmps.length === 0 ? (
+                  <tr>
+                    <td colSpan="5" style={{ textAlign: "center", color: "var(--text-muted)" }}>
+                      No approved {label} PPMPs found for FY {consolidationYear}.
+                    </td>
+                  </tr>
+                ) : (
+                  approvedAppPpmps.map((p) => (
+                    <tr key={p.id}>
+                      <td>{p.office_name || p.office_code || "—"}</td>
+                      <td>{p.title}</td>
+                      <td>{p.item_count}</td>
+                      <td>₱{ngpaMoney(p.total_estimated_budget)}</td>
+                      <td>
+                        <span className="badge badge-success">{p.status}</span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="dashboard-card app-workspace-form-card">
+          <div className="app-workspace-section-head">
+            <h2 className="card-title">{label} APP — NGPA Form</h2>
+            <span className="app-workspace-stat">
+              {rows.length} consolidated row(s)
+              {!kindAppPayload.app ? " · Not consolidated yet" : ""}
+            </span>
+          </div>
+          {isCse
+            ? renderNgpaCseAppForm(rows, consolidationYear)
+            : renderNgpaNonCseAppForm(rows, consolidationYear)}
+        </section>
+      </div>
+    );
+  };
+
   const fetchSignatory = async () => {
     if (!user?.office_id) return;
     try {
       const res = await fetch(
-        `http://localhost:8000/api/offices/signatory?office_id=${user.office_id}`,
+        `/api/offices/signatory?office_id=${user.office_id}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!res.ok) return;
@@ -1018,7 +1489,7 @@ function Dashboard({ token, user, onLogout }) {
   const handleUpdateSignatory = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch("http://localhost:8000/api/offices/signatory", {
+      const res = await fetch("/api/offices/signatory", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1072,7 +1543,7 @@ function Dashboard({ token, user, onLogout }) {
       return;
     }
     try {
-      const res = await fetch(`http://localhost:8000/api/offices/budget/${user.office_id}`, {
+      const res = await fetch(`/api/offices/budget/${user.office_id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -1094,7 +1565,7 @@ function Dashboard({ token, user, onLogout }) {
       return;
     }
     try {
-      const res = await fetch(`http://localhost:8000/api/offices/budget/${user.office_id}`, {
+      const res = await fetch(`/api/offices/budget/${user.office_id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -1192,6 +1663,26 @@ function Dashboard({ token, user, onLogout }) {
             {user.role === "bac_admin" && (
               <button
                 type="button"
+                className={`nav-link ${activeTab === "cse_app" ? "active" : ""}`}
+                onClick={() => { setActiveTab("cse_app"); setSelectedPpmp(null); setSelectedApp(null); }}
+              >
+                <i className="fas fa-boxes" aria-hidden="true"></i>
+                CSE-APP
+              </button>
+            )}
+            {user.role === "bac_admin" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "noncse_app" ? "active" : ""}`}
+                onClick={() => { setActiveTab("noncse_app"); setSelectedPpmp(null); setSelectedApp(null); }}
+              >
+                <i className="fas fa-clipboard-list" aria-hidden="true"></i>
+                nonCSE-APP
+              </button>
+            )}
+            {user.role === "bac_admin" && (
+              <button
+                type="button"
                 className={`nav-link ${activeTab === "offices" ? "active" : ""}`}
                 onClick={() => { setActiveTab("offices"); }}
               >
@@ -1252,12 +1743,6 @@ function Dashboard({ token, user, onLogout }) {
           <h1 className="page-title">{pageTitles[activeTab] || "Dashboard"}</h1>
           <p className="page-subtitle">Ormoc City Government PPMP-APP Consolidation System</p>
         </div>
-
-        {notification.message && (
-          <div className={`alert alert-${notification.type}`}>
-            {notification.message}
-          </div>
-        )}
 
         <div className="workspace">
 
@@ -1364,7 +1849,17 @@ function Dashboard({ token, user, onLogout }) {
                                 )}
                               </td>
                               <td>
-                                <button className="btn" onClick={() => handleSelectPpmp(p.id)}>View/Edit</button>
+                                <div className="ppmp-row-actions">
+                                  <button className="btn" onClick={() => handleSelectPpmp(p.id)}>View/Edit</button>
+                                  {p.status === "Draft" && (
+                                    <button
+                                      className="btn btn-danger btn-sm"
+                                      onClick={() => handleDeletePpmp(p.id, p.title)}
+                                    >
+                                      Delete
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           ))
@@ -1510,6 +2005,10 @@ function Dashboard({ token, user, onLogout }) {
                   <div>
                     <div className="dashboard-card">
                       <h2 className="card-title">APP Consolidation</h2>
+                      <p className="page-subtitle" style={{ marginBottom: "0.75rem" }}>
+                        Quick consolidate for FY. Full CSE / nonCSE forms live under the{" "}
+                        <strong>CSE-APP</strong> and <strong>nonCSE-APP</strong> menus.
+                      </p>
                       <form onSubmit={handleConsolidate} style={{ display: "flex", gap: "10px" }}>
                         <input
                           type="number"
@@ -1872,7 +2371,17 @@ function Dashboard({ token, user, onLogout }) {
                           )}
                         </td>
                         <td>
-                          <button className="btn" onClick={() => handleSelectPpmp(p.id)}>View/Edit</button>
+                          <div className="ppmp-row-actions">
+                            <button className="btn" onClick={() => handleSelectPpmp(p.id)}>View/Edit</button>
+                            {p.status === "Draft" && (
+                              <button
+                                className="btn btn-danger btn-sm"
+                                onClick={() => handleDeletePpmp(p.id, p.title)}
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -2127,11 +2636,17 @@ function Dashboard({ token, user, onLogout }) {
               </form>
             </div>
           )}
+          {activeTab === "cse_app" && user.role === "bac_admin" && renderAppWorkspace("cse")}
+
+          {activeTab === "noncse_app" && user.role === "bac_admin" && renderAppWorkspace("noncse")}
+
           {activeTab === "offices" && user.role === "bac_admin" && (
             <div className="grid-2-wide">
               <div className="dashboard-card">
-                <h2 className="card-title">Add Department/Office</h2>
-                <form onSubmit={handleCreateOffice} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <h2 className="card-title">
+                  {editingOfficeId ? "Edit Department/Office" : "Add Department/Office"}
+                </h2>
+                <form onSubmit={handleSaveOffice} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                   <input
                     type="text"
                     placeholder="Office Name"
@@ -2148,7 +2663,17 @@ function Dashboard({ token, user, onLogout }) {
                     onChange={(e) => setNewOfficeCode(e.target.value)}
                     required
                   />
-                  <button type="submit" className="btn">Add Office</button>
+                
+                  <div className="ppmp-row-actions">
+                    <button type="submit" className="btn">
+                      {editingOfficeId ? "Update Office" : "Add Office"}
+                    </button>
+                    {editingOfficeId && (
+                      <button type="button" className="btn btn-secondary" onClick={resetOfficeForm}>
+                        Cancel
+                      </button>
+                    )}
+                  </div>
                 </form>
               </div>
 
@@ -2160,16 +2685,43 @@ function Dashboard({ token, user, onLogout }) {
                       <th>Code</th>
                       <th>Office Name</th>
                       <th>Budget Ceiling</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {offices.map((o) => (
-                      <tr key={o.id}>
-                        <td>{o.code}</td>
-                        <td>{o.name}</td>
-                        <td>₱{o.budget_allocation.toLocaleString()}</td>
+                    {offices.length === 0 ? (
+                      <tr>
+                        <td colSpan="4" style={{ textAlign: "center", color: "var(--text-muted)" }}>
+                          No offices registered yet.
+                        </td>
                       </tr>
-                    ))}
+                    ) : (
+                      offices.map((o) => (
+                        <tr key={o.id}>
+                          <td>{o.code}</td>
+                          <td>{o.name}</td>
+                          <td>₱{Number(o.budget_allocation || 0).toLocaleString()}</td>
+                          <td>
+                            <div className="ppmp-row-actions">
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                onClick={() => handleEditOffice(o)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm"
+                                onClick={() => handleDeleteOffice(o)}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -2514,12 +3066,6 @@ function Dashboard({ token, user, onLogout }) {
           </header>
 
           <div className="ppmp-fullscreen-body">
-            {notification.message && (
-              <div className={`alert alert-${notification.type}`}>
-                {notification.message}
-              </div>
-            )}
-
             {selectedPpmp.ppmp.status === "Returned" && selectedPpmp.ppmp.remarks && (
               <div className="dashboard-card" style={{
                 backgroundColor: "#fffafa",
@@ -2745,6 +3291,81 @@ function Dashboard({ token, user, onLogout }) {
                 </>
               )}
               </section>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {notification.message && (
+        <div
+          className={`notification-toast alert alert-${notification.type}`}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="notification-toast-body">
+            <i
+              className={`fas ${
+                notification.type === "danger" ? "fa-exclamation-circle" : "fa-check-circle"
+              }`}
+              aria-hidden="true"
+            ></i>
+            <span>{notification.message}</span>
+          </div>
+          <button
+            type="button"
+            className="notification-toast-close"
+            onClick={dismissNotification}
+            aria-label="Dismiss notification"
+          >
+            <i className="fas fa-times" aria-hidden="true"></i>
+          </button>
+        </div>
+      )}
+
+      {confirmDialog.open && (
+        <div
+          className="confirm-modal-overlay"
+          role="presentation"
+          onClick={closeConfirm}
+        >
+          <div
+            className="confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="confirm-modal-header">
+              <h2 id="confirm-modal-title" className="confirm-modal-title">
+                {confirmDialog.title}
+              </h2>
+              <button
+                type="button"
+                className="confirm-modal-close"
+                onClick={closeConfirm}
+                aria-label="Close"
+              >
+                <i className="fas fa-times" aria-hidden="true"></i>
+              </button>
+            </div>
+            <p className="confirm-modal-message">{confirmDialog.message}</p>
+            <div className="confirm-modal-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={closeConfirm}
+              >
+                {confirmDialog.cancelLabel}
+              </button>
+              <button
+                type="button"
+                className={`btn ${
+                  confirmDialog.variant === "danger" ? "btn-danger" : "btn-success"
+                }`}
+                onClick={handleConfirmClick}
+              >
+                {confirmDialog.confirmLabel}
+              </button>
             </div>
           </div>
         </div>
