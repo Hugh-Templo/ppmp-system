@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
 from pydantic import BaseModel
-from sqlmodel import Session, select, text
+from sqlmodel import Session, select
 from typing import List, Optional
 from datetime import datetime
 from app.database import get_session
@@ -21,9 +21,14 @@ class OfficeUpdate(BaseModel):
 def list_offices_bac(
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["bac_admin"])),
+    include_inactive: bool = False,
 ):
-    """List all offices (BAC admin CRUD read)."""
-    return session.exec(select(Office).order_by(Office.code)).all()
+    """List offices (active by default). Soft-deleted offices are hidden unless
+    ``include_inactive=true``."""
+    stmt = select(Office).order_by(Office.code)
+    if not include_inactive:
+        stmt = stmt.where(Office.is_active == True)  # noqa: E712
+    return session.exec(stmt).all()
 
 
 @router.post("/offices", response_model=Office)
@@ -32,22 +37,50 @@ def create_office(
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
-    """Add a new Office (for Ormoc City Hall's departments)."""
-    existing = session.exec(select(Office).where(Office.code == office_data.code)).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Office code already exists")
+    """Add a new office, or reactivate a soft-deleted office with the same code
+    so historical PPMPs and the local template folder remain linked."""
+    code = (office_data.code or "").strip()
+    name = (office_data.name or "").strip()
+    if not code or not name:
+        raise HTTPException(status_code=400, detail="Office name and code are required")
 
-    if office_data.name:
+    existing = session.exec(select(Office).where(Office.code == code)).first()
+    if existing:
+        if existing.is_active:
+            raise HTTPException(status_code=400, detail="Office code already exists")
+
+        # Reactivate soft-deleted office — keep same id so PPMPs stay attached.
         name_clash = session.exec(
-            select(Office).where(Office.name == office_data.name)
+            select(Office).where(
+                Office.name == name,
+                Office.id != existing.id,
+            )
         ).first()
-        if name_clash:
+        if name_clash and name_clash.is_active:
             raise HTTPException(status_code=400, detail="Office name already exists")
 
+        existing.name = name
+        existing.budget_allocation = office_data.budget_allocation or 0.0
+        existing.is_active = True
+        session.add(existing)
+        session.commit()
+        session.refresh(existing)
+        return existing
+
+    name_clash = session.exec(select(Office).where(Office.name == name)).first()
+    if name_clash:
+        if name_clash.is_active:
+            raise HTTPException(status_code=400, detail="Office name already exists")
+        # Inactive row holds this name under a different code — free the name.
+        name_clash.name = f"{name} (archived-{name_clash.id})"
+        session.add(name_clash)
+        session.flush()
+
     new_office = Office(
-        name=office_data.name,
-        code=office_data.code,
+        name=name,
+        code=code,
         budget_allocation=office_data.budget_allocation or 0.0,
+        is_active=True,
     )
     session.add(new_office)
     session.commit()
@@ -66,6 +99,11 @@ def update_office(
     office = session.get(Office, office_id)
     if not office:
         raise HTTPException(status_code=404, detail="Office not found")
+    if not office.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail="Office is inactive. Recreate it with the same code to restore.",
+        )
 
     if payload.code is not None and payload.code != office.code:
         clash = session.exec(select(Office).where(Office.code == payload.code)).first()
@@ -75,7 +113,7 @@ def update_office(
 
     if payload.name is not None and payload.name != office.name:
         clash = session.exec(select(Office).where(Office.name == payload.name)).first()
-        if clash:
+        if clash and clash.is_active:
             raise HTTPException(status_code=400, detail="Office name already exists")
         office.name = payload.name
 
@@ -94,44 +132,25 @@ def delete_office(
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
-    """Delete an office and its related PPMPs. Users assigned to the office
-    are unassigned (office_id cleared) rather than deleted."""
+    """Soft-delete an office. PPMPs, items, and the local template folder under
+    templates/end-users/{office_code}/ are retained. Assigned users are
+    unassigned so accounts can be recreated later against the same office."""
     office = session.get(Office, office_id)
     if not office:
         raise HTTPException(status_code=404, detail="Office not found")
+    if not office.is_active:
+        raise HTTPException(status_code=400, detail="Office is already inactive")
 
     try:
-        # Unassign users so FK constraints do not block the delete.
         assigned_users = session.exec(
             select(User).where(User.office_id == office_id)
         ).all()
-        for user in assigned_users:
-            user.office_id = None
-            session.add(user)
+        for user_row in assigned_users:
+            user_row.office_id = None
+            session.add(user_row)
 
-        # Delete related rows with SQL so schema drift on FinalPPMP/etc. cannot
-        # block office deletion (column mismatches on SELECT of ORM models).
-        session.exec(
-            text(
-                "DELETE FROM ppmpitem WHERE ppmp_id IN "
-                "(SELECT id FROM ppmp WHERE office_id = :oid)"
-            ).bindparams(oid=office_id)
-        )
-        session.exec(
-            text(
-                "DELETE FROM ppmpitem WHERE indicative_ppmp_id IN "
-                "(SELECT id FROM indicative_ppmp WHERE office_id = :oid)"
-            ).bindparams(oid=office_id)
-        )
-        session.exec(text("DELETE FROM ppmp WHERE office_id = :oid").bindparams(oid=office_id))
-        session.exec(
-            text("DELETE FROM indicative_ppmp WHERE office_id = :oid").bindparams(oid=office_id)
-        )
-        session.exec(
-            text("DELETE FROM final_ppmp WHERE office_id = :oid").bindparams(oid=office_id)
-        )
-
-        session.delete(office)
+        office.is_active = False
+        session.add(office)
         session.commit()
     except Exception as exc:  # noqa: BLE001
         session.rollback()
@@ -141,9 +160,14 @@ def delete_office(
         ) from exc
 
     return {
-        "message": "Office deleted successfully",
+        "message": (
+            "Office removed from active list. Created PPMPs and local template "
+            "files were kept. Recreate this office with the same code to restore access."
+        ),
         "office_id": office_id,
+        "office_code": office.code,
         "users_unassigned": len(assigned_users),
+        "ppmps_retained": True,
     }
 
 
@@ -166,14 +190,26 @@ def consolidate_ppmps(
         )
     ).all()
 
+    app = session.exec(select(APP).where(APP.fiscal_year == fiscal_year)).first()
+
+    # No approved sources: clear any leftover APP rows so CSE/nonCSE NGPA forms
+    # do not keep showing a prior consolidation after PPMPs were removed/changed.
     if not approved_ppmps:
+        if app:
+            existing_rows = session.exec(
+                select(APPRow).where(APPRow.app_id == app.id)
+            ).all()
+            for row in existing_rows:
+                session.delete(row)
+            session.commit()
+            session.refresh(app)
+            return app
         raise HTTPException(
             status_code=400,
             detail=f"No approved PPMPs found for fiscal year {fiscal_year} to consolidate",
         )
 
     # 2. Find or create the APP entity
-    app = session.exec(select(APP).where(APP.fiscal_year == fiscal_year)).first()
     if app:
         existing_rows = session.exec(select(APPRow).where(APPRow.app_id == app.id)).all()
         for row in existing_rows:
@@ -193,15 +229,33 @@ def consolidate_ppmps(
     ppmp_ids = [p.id for p in approved_ppmps]
     office_lookup = {o.id: o for o in session.exec(select(Office)).all()}
     ppmp_office_lookup = {p.id: office_lookup.get(p.office_id) for p in approved_ppmps}
+    ppmp_kind_lookup = {p.id: bool(p.is_cse) for p in approved_ppmps}
 
     all_items = session.exec(
         select(PPMPItem).where(PPMPItem.ppmp_id.in_(ppmp_ids))
     ).all()
 
+    # If a typed PPMP has items but none match its CSE/nonCSE kind (flag drift),
+    # treat those items as the PPMP kind so CSE/nonCSE APP stay aligned with sources.
+    items_by_ppmp: dict = {}
+    for item in all_items:
+        items_by_ppmp.setdefault(item.ppmp_id, []).append(item)
+
+    effective_is_cse: dict = {}
+    for ppmp_id, ppmp_items in items_by_ppmp.items():
+        want = bool(ppmp_kind_lookup.get(ppmp_id, False))
+        if ppmp_items and not any(bool(it.is_cse) == want for it in ppmp_items):
+            for it in ppmp_items:
+                effective_is_cse[it.id] = want
+        else:
+            for it in ppmp_items:
+                effective_is_cse[it.id] = bool(it.is_cse)
+
     consolidation_map: dict = {}
     for item in all_items:
+        item_is_cse = effective_is_cse.get(item.id, bool(item.is_cse))
         key = (
-            bool(item.is_cse),
+            item_is_cse,
             (item.description or "").strip().lower(),
             item.project_type or "",
             item.procurement_mode or "",
@@ -210,7 +264,7 @@ def consolidate_ppmps(
         if key not in consolidation_map:
             consolidation_map[key] = {
                 "description": item.description,
-                "is_cse": bool(item.is_cse),
+                "is_cse": item_is_cse,
                 "project_type": item.project_type,
                 "procurement_mode": item.procurement_mode or "Competitive Bidding",
                 "fund_source": item.fund_source,
@@ -282,7 +336,11 @@ def list_approved_ppmps_for_app(
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
-    """List budget-approved office PPMPs for a FY that have CSE or non-CSE items."""
+    """List budget-approved office PPMPs for a FY that belong to CSE or non-CSE.
+
+    A PPMP is included when it has matching line items (item.is_cse), or when the
+    PPMP itself was created as that kind (ppmp.is_cse) even if item flags drifted.
+    """
     kind_norm = (kind or "cse").strip().lower()
     if kind_norm not in ("cse", "noncse"):
         raise HTTPException(status_code=400, detail="kind must be 'cse' or 'noncse'")
@@ -304,6 +362,9 @@ def list_approved_ppmps_for_app(
             select(PPMPItem).where(PPMPItem.ppmp_id == ppmp.id)
         ).all()
         matching = [it for it in items if bool(it.is_cse) == want_cse]
+        # Fallback: PPMP typed as this kind but items missing/incorrect is_cse flags
+        if not matching and bool(ppmp.is_cse) == want_cse and items:
+            matching = list(items)
         if not matching:
             continue
         office = office_lookup.get(ppmp.office_id)
@@ -455,6 +516,57 @@ def trigger_sheets_sync(
         return {"success": True, "offices_synced": count, "message": message}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Sheets sync failed: {str(e)}")
+
+
+@router.post("/cse-catalog/sync")
+def sync_cse_catalog(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """Reload all CSE items from templates/APP-CSE 2027 Form .xlsx into the DB."""
+    try:
+        from app.cse_catalog import sync_cse_catalog_to_db
+
+        summary = sync_cse_catalog_to_db(session, also_write_json=True)
+        return {
+            "success": True,
+            "message": f"Synced {summary['count']} CSE items into the database",
+            **summary,
+        }
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"CSE catalog sync failed: {e}")
+
+
+@router.get("/cse-catalog")
+def list_cse_catalog(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """List CSE catalog rows currently stored in PostgreSQL."""
+    from app.models import CseCatalogItem
+
+    rows = session.exec(
+        select(CseCatalogItem).order_by(
+            CseCatalogItem.category, CseCatalogItem.description
+        )
+    ).all()
+    return {
+        "count": len(rows),
+        "source": "database",
+        "items": [
+            {
+                "id": r.id,
+                "code": r.code,
+                "description": r.description,
+                "unit_of_measure": r.unit_of_measure,
+                "category": r.category,
+                "is_cse": r.is_cse,
+            }
+            for r in rows
+        ],
+    }
 
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

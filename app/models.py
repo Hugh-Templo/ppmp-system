@@ -6,11 +6,16 @@ from sqlmodel import SQLModel, Field, Relationship, UniqueConstraint
 class Office(SQLModel, table=True):
     """
     Represents one of the 40+ departments/offices in Ormoc City Hall.
+
+    Soft-delete via ``is_active=False`` so PPMPs, signatory data, and the
+    per-office NGPA_PPMP.xlsx folder under templates/end-users/ are retained.
+    Recreating an office with the same code reactivates this row.
     """
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
     code: str = Field(unique=True)  # e.g., "O-HOPE", "O-BUDGET", "O-BAC", "O-CHO"
     budget_allocation: float = Field(default=0.0)
+    is_active: bool = Field(default=True, index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     # Signatory fields — mirrored into the office's NGPA_PPMP.xlsx footer on save.
@@ -276,3 +281,22 @@ class SyncLog(SQLModel, table=True):
     success: bool
     files_processed: int = 0
     message: Optional[str] = None
+
+
+class CseCatalogItem(SQLModel, table=True):
+    """
+    PS-DBM Common-Use Supplies and Equipment (CSE) catalogue row.
+    Sourced from templates/APP-CSE 2027 Form .xlsx — used by the end-user
+    item description combobox to classify entries as CSE vs nonCSE.
+    """
+    __tablename__ = "cse_catalog_item"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    code: str = Field(default="", index=True)
+    description: str = Field(index=True)
+    unit_of_measure: str = Field(default="piece")
+    category: str = Field(default="Common-Use Supplies and Equipment", index=True)
+    is_cse: bool = Field(default=True)
+    source: Optional[str] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

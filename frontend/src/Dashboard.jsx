@@ -79,6 +79,8 @@ function Dashboard({ token, user, onLogout }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [newUserRole, setNewUserRole] = useState("end_user");
   const [newUserOfficeId, setNewUserOfficeId] = useState("");
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [newUserActive, setNewUserActive] = useState(true);
   const [registeredUsers, setRegisteredUsers] = useState([]);
 
   const [notification, setNotification] = useState({ message: "", type: "" });
@@ -784,7 +786,11 @@ function Dashboard({ token, user, onLogout }) {
       );
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showNotification(isEdit ? "Office updated successfully" : "Office created successfully");
+        showNotification(
+          isEdit
+            ? "Office updated successfully"
+            : "Office saved. Past PPMPs for this code remain available."
+        );
         resetOfficeForm();
         fetchOffices();
       } else {
@@ -814,15 +820,19 @@ function Dashboard({ token, user, onLogout }) {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showNotification("Office deleted successfully");
+        showNotification(
+          typeof data.message === "string"
+            ? data.message
+            : "Office removed. PPMPs and local files were kept."
+        );
         if (editingOfficeId === officeId) resetOfficeForm();
         fetchOffices();
         fetchUsers();
       } else {
-        const err = await res.json().catch(() => ({ detail: "Delete failed" }));
         const detail =
-          typeof err.detail === "string" ? err.detail : "Failed to delete office";
+          typeof data.detail === "string" ? data.detail : "Failed to delete office";
         showNotification(detail, "danger");
       }
     } catch (err) {
@@ -832,54 +842,151 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleDeleteOffice = (office) => {
     showConfirm({
-      title: "Delete Office",
-      message: `Are you sure you want to delete "${office.name}" (${office.code})? All PPMPs for this office will be removed, and assigned users will be unassigned.`,
-      confirmLabel: "Delete Office",
+      title: "Remove Office",
+      message: `Remove "${office.name}" (${office.code}) from the active office list?\n\nCreated PPMPs and local template files for this office will NOT be deleted. Assigned user accounts will be unassigned. Recreate this office with the same code later to restore access to past PPMPs.`,
+      confirmLabel: "Remove Office",
       cancelLabel: "Cancel",
       variant: "danger",
       onConfirm: () => performDeleteOffice(office.id),
     });
   };
 
-  const handleRegisterUser = async (e) => {
+  const resetUserForm = () => {
+    setEditingUserId(null);
+    setNewUsername("");
+    setNewEmail("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setNewUserRole("end_user");
+    setNewUserOfficeId("");
+    setNewUserActive(true);
+  };
+
+  const handleEditUser = (u) => {
+    setEditingUserId(u.id);
+    setNewUsername(u.username || "");
+    setNewEmail(u.email || "");
+    setNewPassword("");
+    setConfirmPassword("");
+    setNewUserRole(u.role || "end_user");
+    setNewUserOfficeId(u.office_id ? String(u.office_id) : "");
+    setNewUserActive(u.is_active !== false);
+  };
+
+  const handleSaveUser = async (e) => {
     e.preventDefault();
-    if (newPassword !== confirmPassword) {
-      showNotification("Passwords do not match", "danger");
+    const isEdit = !!editingUserId;
+
+    if (!isEdit || newPassword || confirmPassword) {
+      if (newPassword !== confirmPassword) {
+        showNotification("Passwords do not match", "danger");
+        return;
+      }
+      if (!isEdit && !newPassword) {
+        showNotification("Password is required", "danger");
+        return;
+      }
+    }
+
+    if (newUserRole === "end_user" && !newUserOfficeId) {
+      showNotification("Please select an office for end-user accounts", "danger");
       return;
     }
 
     try {
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          username: newUsername,
-          email: newEmail,
-          hashed_password: newPassword,
+      let res;
+      if (isEdit) {
+        const body = {
+          username: newUsername.trim(),
+          email: newEmail.trim(),
           role: newUserRole,
-          office_id: newUserRole === "end_user" ? parseInt(newUserOfficeId) : null,
-        }),
-      });
+          office_id: newUserRole === "end_user" ? parseInt(newUserOfficeId, 10) : null,
+          is_active: newUserActive,
+        };
+        if (newPassword) body.password = newPassword;
+        res = await fetch(`/api/auth/users/${editingUserId}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(body),
+        });
+      } else {
+        res = await fetch("/api/auth/register", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            username: newUsername.trim(),
+            email: newEmail.trim(),
+            hashed_password: newPassword,
+            role: newUserRole,
+            office_id: newUserRole === "end_user" ? parseInt(newUserOfficeId, 10) : null,
+          }),
+        });
+      }
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showNotification("User registered successfully!");
-        setNewUsername("");
-        setNewEmail("");
-        setNewPassword("");
-        setConfirmPassword("");
-        setNewUserRole("end_user");
-        setNewUserOfficeId("");
+        showNotification(isEdit ? "User updated successfully!" : "User registered successfully!");
+        resetUserForm();
         fetchUsers();
       } else {
-        showNotification(data.detail || "Registration failed", "danger");
+        const detail =
+          typeof data.detail === "string"
+            ? data.detail
+            : isEdit
+              ? "Failed to update user"
+              : "Registration failed";
+        showNotification(detail, "danger");
       }
     } catch (err) {
       showNotification("Network error. Make sure the FastAPI backend is running.", "danger");
     }
+  };
+
+  const performDeleteUser = async (userId) => {
+    try {
+      const res = await fetch(`/api/auth/users/${userId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        showNotification(
+          typeof data.message === "string"
+            ? data.message
+            : "User account deleted. PPMPs were kept."
+        );
+        if (editingUserId === userId) resetUserForm();
+        fetchUsers();
+      } else {
+        showNotification(
+          typeof data.detail === "string" ? data.detail : "Failed to delete user",
+          "danger"
+        );
+      }
+    } catch (err) {
+      showNotification("Failed to delete user", "danger");
+    }
+  };
+
+  const handleDeleteUser = (u) => {
+    if (u.id === user.id) {
+      showNotification("You cannot delete your own account", "danger");
+      return;
+    }
+    showConfirm({
+      title: "Delete User Account",
+      message: `Delete the login account for "${u.username}"?\n\nThis removes only the user account. Office PPMP records and local template files will remain in the system. Creating a new user for the same office will still show past PPMPs.`,
+      confirmLabel: "Delete Account",
+      cancelLabel: "Cancel",
+      variant: "danger",
+      onConfirm: () => performDeleteUser(u.id),
+    });
   };
 
   const loadAppWorkspace = async (kind) => {
@@ -923,7 +1030,7 @@ function Dashboard({ token, user, onLogout }) {
       });
       const data = await res.json();
       if (res.ok) {
-        showNotification(`APP Consolidated successfully for FY ${consolidationYear}!`);
+        showNotification(`APP for FY ${consolidationYear} updated from approved PPMPs.`);
         fetchApps();
         if (activeTab === "cse_app" || activeTab === "noncse_app") {
           loadAppWorkspace(activeTab === "cse_app" ? "cse" : "noncse");
@@ -1365,6 +1472,7 @@ function Dashboard({ token, user, onLogout }) {
       (sum, p) => sum + Number(p.total_estimated_budget || 0),
       0
     );
+    const isStaleApp = !appWorkspaceLoading && rows.length > 0 && approvedAppPpmps.length === 0;
 
     return (
       <div className="app-workspace">
@@ -1382,19 +1490,28 @@ function Dashboard({ token, user, onLogout }) {
           <div className="app-workspace-toolbar__actions">
             <button type="button" className="btn" onClick={handleConsolidate}>
               <i className="fas fa-layer-group" aria-hidden="true"></i>
-              Run Consolidation
+              {isStaleApp ? "Clear / Rebuild APP" : "Run Consolidation"}
             </button>
             <button
               type="button"
               className="btn btn-secondary"
               onClick={() => handleExportApp(consolidationYear, kind)}
-              disabled={!kindAppPayload.app}
+              disabled={!kindAppPayload.app || rows.length === 0}
             >
               <i className="fas fa-file-excel" aria-hidden="true"></i>
               Download {label} Excel
             </button>
           </div>
         </div>
+
+        {isStaleApp && (
+          <div className="alert alert-danger app-workspace-stale" role="status">
+            The {label} NGPA form still has consolidated rows, but there are no
+            budget-approved {label} PPMPs for FY {consolidationYear}. This APP is
+            out of date (source PPMPs were removed or are no longer Approved).
+            Click <strong>Clear / Rebuild APP</strong> to clear the stale form.
+          </div>
+        )}
 
         <section className="dashboard-card app-workspace-source">
           <div className="app-workspace-section-head">
@@ -1455,6 +1572,7 @@ function Dashboard({ token, user, onLogout }) {
             <span className="app-workspace-stat">
               {rows.length} consolidated row(s)
               {!kindAppPayload.app ? " · Not consolidated yet" : ""}
+              {isStaleApp ? " · Stale" : ""}
             </span>
           </div>
           {isCse
@@ -2715,7 +2833,7 @@ function Dashboard({ token, user, onLogout }) {
                                 className="btn btn-danger btn-sm"
                                 onClick={() => handleDeleteOffice(o)}
                               >
-                                Delete
+                                Remove
                               </button>
                             </div>
                           </td>
@@ -2731,14 +2849,16 @@ function Dashboard({ token, user, onLogout }) {
           {activeTab === "users" && user.role === "bac_admin" && (
             <div className="grid-2-wide">
               <div className="dashboard-card">
-                <h2 className="card-title">Register New User</h2>
-                <form onSubmit={handleRegisterUser} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <h2 className="card-title">
+                  {editingUserId ? "Edit Registered User" : "Register New User"}
+                </h2>
+                <form onSubmit={handleSaveUser} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                   <input
                     type="text"
                     placeholder="Username"
                     className="form-input"
                     value={newUsername}
-                    onChange={(e) => setNewUsername(e.target.value)}
+                    onChange={(e) => setNewUsername(e.target.value.toUpperCase())}
                     required
                   />
                   <input
@@ -2751,19 +2871,19 @@ function Dashboard({ token, user, onLogout }) {
                   />
                   <input
                     type="password"
-                    placeholder="Password"
+                    placeholder={editingUserId ? "New Password (leave blank to keep)" : "Password"}
                     className="form-input"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    required
+                    required={!editingUserId}
                   />
                   <input
                     type="password"
-                    placeholder="Confirm Password"
+                    placeholder={editingUserId ? "Confirm New Password" : "Confirm Password"}
                     className="form-input"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    required
+                    required={!editingUserId}
                   />
                   <select
                     className="form-input"
@@ -2789,7 +2909,26 @@ function Dashboard({ token, user, onLogout }) {
                       ))}
                     </select>
                   )}
-                  <button type="submit" className="btn">Register User</button>
+                  {editingUserId && (
+                    <label className="form-label" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <input
+                        type="checkbox"
+                        checked={newUserActive}
+                        onChange={(e) => setNewUserActive(e.target.checked)}
+                      />
+                      Active account
+                    </label>
+                  )}
+                  <div className="ppmp-row-actions">
+                    <button type="submit" className="btn">
+                      {editingUserId ? "Update User" : "Register User"}
+                    </button>
+                    {editingUserId && (
+                      <button type="button" className="btn btn-secondary" onClick={resetUserForm}>
+                        Cancel
+                      </button>
+                    )}
+                  </div>
                 </form>
               </div>
 
@@ -2805,12 +2944,13 @@ function Dashboard({ token, user, onLogout }) {
                         <th>Office</th>
                         <th>Status</th>
                         <th>Created</th>
+                        <th>Action</th>
                       </tr>
                     </thead>
                     <tbody>
                       {registeredUsers.length === 0 ? (
                         <tr>
-                          <td colSpan="6">No users registered yet.</td>
+                          <td colSpan="7">No users registered yet.</td>
                         </tr>
                       ) : (
                         registeredUsers.map((u) => (
@@ -2825,6 +2965,26 @@ function Dashboard({ token, user, onLogout }) {
                               </span>
                             </td>
                             <td>{new Date(u.created_at).toLocaleDateString()}</td>
+                            <td>
+                              <div className="ppmp-row-actions">
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  onClick={() => handleEditUser(u)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-danger btn-sm"
+                                  onClick={() => handleDeleteUser(u)}
+                                  disabled={u.id === user.id}
+                                  title={u.id === user.id ? "You cannot delete your own account" : "Delete user"}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         ))
                       )}

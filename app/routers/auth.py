@@ -1,5 +1,8 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel
 from sqlmodel import Session, select
 from app.database import get_session
 from app.models import User, Office
@@ -12,6 +15,27 @@ from app.auth import (
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[str] = None
+    office_id: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+def _serialize_user(u: User) -> dict:
+    return {
+        "id": u.id,
+        "username": u.username,
+        "email": u.email,
+        "role": u.role,
+        "office_id": u.office_id,
+        "is_active": u.is_active,
+        "created_at": u.created_at,
+    }
 
 
 @router.post("/register")
@@ -59,19 +83,99 @@ def list_users(
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
-    users = session.exec(select(User)).all()
-    return [
-        {
-            "id": u.id,
-            "username": u.username,
-            "email": u.email,
-            "role": u.role,
-            "office_id": u.office_id,
-            "is_active": u.is_active,
-            "created_at": u.created_at,
-        }
-        for u in users
-    ]
+    users = session.exec(select(User).order_by(User.username)).all()
+    return [_serialize_user(u) for u in users]
+
+
+@router.put("/users/{user_id}")
+def update_user(
+    user_id: int,
+    payload: UserUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """Update a registered user (BAC admin CRUD)."""
+    target = session.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if payload.username is not None and payload.username != target.username:
+        clash = session.exec(
+            select(User).where(User.username == payload.username)
+        ).first()
+        if clash:
+            raise HTTPException(status_code=400, detail="Username already registered")
+        target.username = payload.username.strip()
+
+    if payload.email is not None and payload.email != target.email:
+        clash = session.exec(select(User).where(User.email == payload.email)).first()
+        if clash:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        target.email = payload.email.strip()
+
+    if payload.role is not None:
+        if payload.role not in ("end_user", "budget_office", "bac_admin"):
+            raise HTTPException(status_code=400, detail="Invalid role")
+        target.role = payload.role
+
+    effective_role = target.role
+    if effective_role == "end_user":
+        if payload.office_id is not None:
+            office = session.get(Office, payload.office_id)
+            if not office:
+                raise HTTPException(status_code=400, detail="Office not found")
+            target.office_id = payload.office_id
+    else:
+        # Budget / BAC accounts are not tied to a department office.
+        target.office_id = None
+
+    if payload.password:
+        target.hashed_password = get_password_hash(payload.password)
+
+    if payload.is_active is not None:
+        if target.id == current_user.id and payload.is_active is False:
+            raise HTTPException(
+                status_code=400,
+                detail="You cannot deactivate your own account",
+            )
+        target.is_active = payload.is_active
+
+    session.add(target)
+    session.commit()
+    session.refresh(target)
+    return {"message": "User updated successfully", "user": _serialize_user(target)}
+
+
+@router.delete("/users/{user_id}")
+def delete_user(
+    user_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """Delete a user account only. Office PPMPs and local template files are
+    never removed — a new user assigned to the same office can view them."""
+    target = session.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if target.id == current_user.id:
+        raise HTTPException(
+            status_code=400,
+            detail="You cannot delete your own account",
+        )
+
+    office_id = target.office_id
+    session.delete(target)
+    session.commit()
+    return {
+        "message": (
+            "User account deleted. Office PPMP records and local template files "
+            "were kept in the system."
+        ),
+        "user_id": user_id,
+        "office_id": office_id,
+        "ppmps_retained": True,
+    }
 
 
 @router.post("/token")

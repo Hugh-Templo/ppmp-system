@@ -11,8 +11,20 @@ engine = create_engine(DATABASE_URL, echo=False)
 
 def init_db():
     SQLModel.metadata.create_all(engine)
+    from sqlalchemy import text
     from sqlmodel import select
     from app.models import Office
+    from app.cse_catalog import ensure_cse_catalog_seeded
+
+    # Ensure soft-delete column exists on older databases (create_all won't ALTER).
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE office "
+                "ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+        )
+
     with Session(engine) as session:
         if session.exec(select(Office)).first() is None:
             sample_offices = [
@@ -25,6 +37,8 @@ def init_db():
             for o in sample_offices:
                 session.add(o)
             session.commit()
+
+        ensure_cse_catalog_seeded(session)
 
 
 def get_session():

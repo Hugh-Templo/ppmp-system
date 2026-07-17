@@ -48,8 +48,10 @@ def health():
 
 @app.get("/api/offices")
 def list_offices_public(session: Session = Depends(get_session)):
-    """Public endpoint for registration form to list offices."""
-    return session.exec(select(Office)).all()
+    """Public endpoint for registration form to list active offices."""
+    return session.exec(
+        select(Office).where(Office.is_active == True).order_by(Office.code)  # noqa: E712
+    ).all()
 
 
 # Register Routers

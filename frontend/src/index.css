@@ -724,6 +724,7 @@ textarea.form-input {
   font-size: 0.925rem;
   line-height: 1.55;
   color: var(--text-secondary);
+  white-space: pre-line;
 }
 
 .confirm-modal-actions {
@@ -2054,6 +2055,10 @@ pre.json-block {
   flex-direction: column;
   gap: 1rem;
   min-width: 0;
+}
+
+.app-workspace-stale {
+  margin-bottom: 0;
 }
 
 .app-workspace-toolbar {

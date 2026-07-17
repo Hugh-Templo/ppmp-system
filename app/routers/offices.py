@@ -1,6 +1,5 @@
 import json
 import logging
-from functools import lru_cache
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -17,34 +16,63 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/offices", tags=["offices"])
 
 
-# --- ITEM CATALOG (static JSON, cached in memory) ---
+# --- ITEM CATALOG (PostgreSQL cse_catalog_item, JSON fallback) ---
 _ITEM_CATALOG_PATH = (
     Path(__file__).resolve().parent.parent / "data" / "item_catalog.json"
 )
 
 
-@lru_cache(maxsize=1)
-def _load_item_catalog() -> dict:
+def _load_item_catalog_from_json() -> dict:
     try:
         with _ITEM_CATALOG_PATH.open("r", encoding="utf-8") as fh:
             data = json.load(fh)
     except FileNotFoundError:
         logger.warning("Item catalog missing at %s", _ITEM_CATALOG_PATH)
-        return {"version": 0, "items": []}
+        return {"version": 0, "items": [], "count": 0, "source": "json-missing"}
     items = data.get("items", [])
     return {
         "version": data.get("version", 1),
         "updated_at": data.get("updated_at"),
+        "source": data.get("source") or "json",
         "items": items,
         "count": len(items),
     }
 
 
 @router.get("/item-catalog")
-def get_item_catalog(current_user: User = Depends(get_current_user)):
-    """Return the static PPMP/APP item catalog used by the description
-    combobox on the end-user Dashboard. Cached in-process."""
-    return _load_item_catalog()
+def get_item_catalog(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the CSE item catalog used by the description combobox.
+    Prefer PostgreSQL ``cse_catalog_item``; fall back to JSON if empty."""
+    from app.models import CseCatalogItem
+
+    rows = session.exec(
+        select(CseCatalogItem).order_by(CseCatalogItem.category, CseCatalogItem.description)
+    ).all()
+    if rows:
+        items = [
+            {
+                "code": r.code or "",
+                "description": r.description,
+                "unit_of_measure": r.unit_of_measure or "piece",
+                "category": r.category,
+                "is_cse": True if r.is_cse is None else bool(r.is_cse),
+            }
+            for r in rows
+        ]
+        return {
+            "version": 2,
+            "source": "database",
+            "updated_at": (
+                max((r.updated_at for r in rows if r.updated_at), default=None)
+            ),
+            "items": items,
+            "count": len(items),
+        }
+
+    return _load_item_catalog_from_json()
 
 
 # --- SIGNATORY ENDPOINTS ---
