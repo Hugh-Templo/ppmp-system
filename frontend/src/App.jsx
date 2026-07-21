@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import Login from "./Login";
 import Dashboard from "./Dashboard";
+import { apiFetch } from "./api";
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem("token") || "");
@@ -24,7 +25,7 @@ function App() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-      const response = await fetch("/api/auth/me", {
+      const response = await apiFetch("/api/auth/me", {
         headers: {
           Authorization: `Bearer ${authToken}`,
         },

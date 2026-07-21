@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { apiFetch } from "./api";
 
 function Login({ onLogin }) {
   const [username, setUsername] = useState("");
@@ -20,7 +21,7 @@ function Login({ onLogin }) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-      const response = await fetch("/api/auth/token", {
+      const response = await apiFetch("/api/auth/token", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -52,15 +53,15 @@ function Login({ onLogin }) {
       {/* Left Pane: Visual branding with silhouette */}
       <div className="login-left-pane">
         <div className="dev-silhouette-container">
-          <img 
-            src="/Ormoc_City.png" 
-            alt="Background Logo" 
-            className="bg-logo" 
+          <img
+            src={`${import.meta.env.BASE_URL}Ormoc_City.png`}
+            alt="Background Logo"
+            className="bg-logo"
           />
-          <img 
-            //src="/dev.png" 
-            alt="Developer Silhouette" 
-            className="dev-silhouette" 
+          <img
+            //src={`${import.meta.env.BASE_URL}dev.png`}
+            alt="Developer Silhouette"
+            className="dev-silhouette"
           />
         </div>
         

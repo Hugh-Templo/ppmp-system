@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { apiFetch } from "./api";
 
 function Login({ onLogin }) {
   const [username, setUsername] = useState("");
@@ -17,7 +18,7 @@ function Login({ onLogin }) {
       formData.append("username", username);
       formData.append("password", password);
 
-      const response = await fetch("/api/auth/token", {
+      const response = await apiFetch("/api/auth/token", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",

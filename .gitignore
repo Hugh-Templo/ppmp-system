@@ -7,6 +7,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+!frontend/.env.electron.example
 
 # Local database & data
 data/
@@ -16,6 +17,7 @@ data/
 # Node / frontend build artifacts
 node_modules/
 frontend/dist/
+frontend/dist-electron/
 frontend/.vite/
 
 # Excel lock files

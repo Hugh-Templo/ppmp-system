@@ -1,16 +1,57 @@
-# React + Vite
+# PPMP frontend (React + Vite + Electron)
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Browser UI and Windows desktop shell for the Ormoc City PPMP-APP Consolidation System. The UI talks to the FastAPI backend over `/api`.
 
-Currently, two official plugins are available:
+## Prerequisites
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Node.js 20+
+- FastAPI backend running on `http://127.0.0.1:8000` (see repo root)
 
-## React Compiler
+## Browser (Vite)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+npm install
+npm run dev
+```
 
-## Expanding the Oxlint configuration
+Open the URL Vite prints (default `http://localhost:5173`). API calls use the Vite proxy to FastAPI.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+## Electron desktop
+
+### Dev
+
+1. Start FastAPI on port 8000.
+2. From the **repo root** or from `frontend`:
+
+```bash
+npm run electron:dev
+```
+
+(If you are already in `frontend`, the same command works there.)
+
+This starts Vite and opens an Electron window against `http://127.0.0.1:5173`. Login uses `POST /api/auth/token` (proxied to FastAPI), then `GET /api/auth/me`.
+
+### Windows installer
+
+```bash
+npm run electron:build
+```
+
+Builds the React app with `VITE_API_BASE_URL=http://127.0.0.1:8000`, then packages a Windows NSIS installer under `dist-electron/`.
+
+To point a packaged build at another API host, set `VITE_API_BASE_URL` before build (see `.env.electron.example`).
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `npm run dev` | Vite browser app |
+| `npm run build` | Production web build (`dist/`) |
+| `npm run electron:dev` | Electron + Vite HMR |
+| `npm run electron:build` | Windows `.exe` installer |
+
+## Notes
+
+- Packaged Electron loads `dist/index.html` via `loadFile` and calls FastAPI at `VITE_API_BASE_URL`.
+- Dev Electron leaves `VITE_API_BASE_URL` empty so relative `/api` paths go through the Vite proxy.
+- Backend (Postgres, Redis, Celery, Google APIs) stays on the server; it is not bundled into the desktop app.

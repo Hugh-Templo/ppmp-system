@@ -1,0 +1,10 @@
+{
+  "name": "ppmpsys-workspace",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix frontend",
+    "build": "npm run build --prefix frontend",
+    "electron:dev": "npm run electron:dev --prefix frontend",
+    "electron:build": "npm run electron:build --prefix frontend"
+  }
+}

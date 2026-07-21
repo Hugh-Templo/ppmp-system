@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { apiFetch } from "./api";
 
 function Dashboard({ token, user, onLogout }) {
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -251,7 +252,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const fetchOfficePpmps = async () => {
     try {
-      const res = await fetch("/api/offices/ppmps", {
+      const res = await apiFetch("/api/offices/ppmps", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -265,7 +266,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const fetchPendingPpmps = async () => {
     try {
-      const res = await fetch("/api/budget/pending", {
+      const res = await apiFetch("/api/budget/pending", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -282,7 +283,7 @@ function Dashboard({ token, user, onLogout }) {
       const url = user.role === "budget_office"
         ? "/api/budget/indicative"
         : "/api/budget/indicative/pending";
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -296,7 +297,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const fetchFinalPpmps = async () => {
     try {
-      const res = await fetch("/api/budget/final", {
+      const res = await apiFetch("/api/budget/final", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -310,7 +311,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const fetchApps = async () => {
     try {
-      const res = await fetch("/api/bac/apps", {
+      const res = await apiFetch("/api/bac/apps", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -324,7 +325,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const fetchOffices = async () => {
     try {
-      const res = await fetch("/api/offices", {
+      const res = await apiFetch("/api/offices", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -338,7 +339,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch("/api/auth/users", {
+      const res = await apiFetch("/api/auth/users", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -352,7 +353,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const fetchDbmClassification = async () => {
     try {
-      const res = await fetch("/api/dbm/classifications", {
+      const res = await apiFetch("/api/dbm/classifications", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -367,7 +368,7 @@ function Dashboard({ token, user, onLogout }) {
   const handleAddDbmClassification = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch("/api/dbm/classifications", {
+      const res = await apiFetch("/api/dbm/classifications", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -405,7 +406,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleSelectPpmp = async (ppmpId) => {
     try {
-      const res = await fetch(`/api/offices/ppmps/${ppmpId}`, {
+      const res = await apiFetch(`/api/offices/ppmps/${ppmpId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -426,7 +427,7 @@ function Dashboard({ token, user, onLogout }) {
   const fetchItemCatalog = async () => {
     if (itemCatalog.length > 0) return;
     try {
-      const res = await fetch("/api/offices/item-catalog", {
+      const res = await apiFetch("/api/offices/item-catalog", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
@@ -503,7 +504,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const loadAudit = async (ppmpId) => {
     try {
-      const res = await fetch(`/api/budget/ppmps/${ppmpId}/audit`, {
+      const res = await apiFetch(`/api/budget/ppmps/${ppmpId}/audit`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -518,7 +519,7 @@ function Dashboard({ token, user, onLogout }) {
   const handleCreatePpmp = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch("/api/offices/ppmps", {
+      const res = await apiFetch("/api/offices/ppmps", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -547,7 +548,7 @@ function Dashboard({ token, user, onLogout }) {
     e.preventDefault();
     if (!selectedPpmp) return;
     try {
-      const res = await fetch(`/api/offices/ppmps/${selectedPpmp.ppmp.id}/items`, {
+      const res = await apiFetch(`/api/offices/ppmps/${selectedPpmp.ppmp.id}/items`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -590,7 +591,7 @@ function Dashboard({ token, user, onLogout }) {
   const handleDeletePpmpItem = async (itemId) => {
     if (!selectedPpmp) return;
     try {
-      const res = await fetch(`/api/offices/ppmps/${selectedPpmp.ppmp.id}/items/${itemId}`, {
+      const res = await apiFetch(`/api/offices/ppmps/${selectedPpmp.ppmp.id}/items/${itemId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -605,7 +606,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleSubmitPpmp = async (ppmpId) => {
     try {
-      const res = await fetch(`/api/offices/ppmps/${ppmpId}/submit`, {
+      const res = await apiFetch(`/api/offices/ppmps/${ppmpId}/submit`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -621,7 +622,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const performDeletePpmp = async (ppmpId) => {
     try {
-      const res = await fetch(`/api/offices/ppmps/${ppmpId}`, {
+      const res = await apiFetch(`/api/offices/ppmps/${ppmpId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -654,7 +655,7 @@ function Dashboard({ token, user, onLogout }) {
   const handleDownloadPpmpXlsx = async () => {
     if (!selectedPpmp) return;
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/offices/ppmps/${selectedPpmp.ppmp.id}/export`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -681,7 +682,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleReviewAction = async (ppmpId, action) => {
     try {
-      const res = await fetch(`/api/budget/ppmps/${ppmpId}/review?action=${action}&remarks=${remarks}`, {
+      const res = await apiFetch(`/api/budget/ppmps/${ppmpId}/review?action=${action}&remarks=${remarks}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -699,7 +700,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handlePostIndicativePpmp = async (ppmpId) => {
     try {
-      const res = await fetch(`/api/budget/indicative/ppmps/${ppmpId}/post`, {
+      const res = await apiFetch(`/api/budget/indicative/ppmps/${ppmpId}/post`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -714,7 +715,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleUnpostIndicativePpmp = async (ppmpId) => {
     try {
-      const res = await fetch(`/api/budget/indicative/ppmps/${ppmpId}/unpost`, {
+      const res = await apiFetch(`/api/budget/indicative/ppmps/${ppmpId}/unpost`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -729,7 +730,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleApproveIndicativePpmp = async (ppmpId) => {
     try {
-      const res = await fetch(`/api/bac/indicative/ppmps/${ppmpId}/approve`, {
+      const res = await apiFetch(`/api/bac/indicative/ppmps/${ppmpId}/approve`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -744,7 +745,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleRejectIndicativePpmp = async (ppmpId) => {
     try {
-      const res = await fetch(`/api/bac/indicative/ppmps/${ppmpId}/reject`, {
+      const res = await apiFetch(`/api/bac/indicative/ppmps/${ppmpId}/reject`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -773,7 +774,7 @@ function Dashboard({ token, user, onLogout }) {
     };
     const isEdit = !!editingOfficeId;
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         isEdit ? `/api/bac/offices/${editingOfficeId}` : "/api/bac/offices",
         {
           method: isEdit ? "PUT" : "POST",
@@ -816,7 +817,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const performDeleteOffice = async (officeId) => {
     try {
-      const res = await fetch(`/api/bac/offices/${officeId}`, {
+      const res = await apiFetch(`/api/bac/offices/${officeId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -904,7 +905,7 @@ function Dashboard({ token, user, onLogout }) {
           is_active: newUserActive,
         };
         if (newPassword) body.password = newPassword;
-        res = await fetch(`/api/auth/users/${editingUserId}`, {
+        res = await apiFetch(`/api/auth/users/${editingUserId}`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -913,7 +914,7 @@ function Dashboard({ token, user, onLogout }) {
           body: JSON.stringify(body),
         });
       } else {
-        res = await fetch("/api/auth/register", {
+        res = await apiFetch("/api/auth/register", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -950,7 +951,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const performDeleteUser = async (userId) => {
     try {
-      const res = await fetch(`/api/auth/users/${userId}`, {
+      const res = await apiFetch(`/api/auth/users/${userId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -993,11 +994,11 @@ function Dashboard({ token, user, onLogout }) {
     setAppWorkspaceLoading(true);
     try {
       const [ppmpsRes, appRes] = await Promise.all([
-        fetch(
+        apiFetch(
           `/api/bac/ppmps/approved?fiscal_year=${consolidationYear}&kind=${kind}`,
           { headers: { Authorization: `Bearer ${token}` } }
         ),
-        fetch(
+        apiFetch(
           `/api/bac/apps/by-year/${consolidationYear}?kind=${kind}`,
           { headers: { Authorization: `Bearer ${token}` } }
         ),
@@ -1024,7 +1025,7 @@ function Dashboard({ token, user, onLogout }) {
   const handleConsolidate = async (e) => {
     if (e && typeof e.preventDefault === "function") e.preventDefault();
     try {
-      const res = await fetch(`/api/bac/consolidate/${consolidationYear}`, {
+      const res = await apiFetch(`/api/bac/consolidate/${consolidationYear}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -1046,7 +1047,7 @@ function Dashboard({ token, user, onLogout }) {
   const handleExportApp = async (fiscalYear, kind) => {
     const labels = { cse: "CSE APP", noncse: "Non-CSE APP", combined: "Combined APP" };
     try {
-      const res = await fetch(`/api/bac/apps/${fiscalYear}/export/${kind}`, {
+      const res = await apiFetch(`/api/bac/apps/${fiscalYear}/export/${kind}`, {
         method: "GET",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -1072,7 +1073,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleSelectApp = async (appId) => {
     try {
-      const res = await fetch(`/api/bac/apps/${appId}`, {
+      const res = await apiFetch(`/api/bac/apps/${appId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -1586,7 +1587,7 @@ function Dashboard({ token, user, onLogout }) {
   const fetchSignatory = async () => {
     if (!user?.office_id) return;
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/offices/signatory?office_id=${user.office_id}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -1607,7 +1608,7 @@ function Dashboard({ token, user, onLogout }) {
   const handleUpdateSignatory = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch("/api/offices/signatory", {
+      const res = await apiFetch("/api/offices/signatory", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1661,7 +1662,7 @@ function Dashboard({ token, user, onLogout }) {
       return;
     }
     try {
-      const res = await fetch(`/api/offices/budget/${user.office_id}`, {
+      const res = await apiFetch(`/api/offices/budget/${user.office_id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -1683,7 +1684,7 @@ function Dashboard({ token, user, onLogout }) {
       return;
     }
     try {
-      const res = await fetch(`/api/offices/budget/${user.office_id}`, {
+      const res = await apiFetch(`/api/offices/budget/${user.office_id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -1711,7 +1712,7 @@ function Dashboard({ token, user, onLogout }) {
       <aside className="sidebar">
         <div className="sidebar-header">
           <div className="sidebar-logo">
-            <img src="/Ormoc_City.png" alt="Ormoc City" />
+            <img src={`${import.meta.env.BASE_URL}Ormoc_City.png`} alt="Ormoc City" />
           </div>
           <h2 className="sidebar-title">PPMP System</h2>
           <p className="sidebar-subtitle">RA 12009 Consolidation</p>
