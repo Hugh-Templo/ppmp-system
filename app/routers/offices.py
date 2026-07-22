@@ -425,10 +425,26 @@ def add_ppmp_item(
             detail="PPMP is locked for revisions because it is approved or pending review"
         )
 
-    estimated = item_data.quantity * item_data.unit_cost
+    description = (item_data.description or "").strip()
+    if not description:
+        raise HTTPException(status_code=400, detail="Item description is required")
+
+    existing_items = session.exec(
+        select(PPMPItem).where(PPMPItem.ppmp_id == ppmp_id)
+    ).all()
+    target = description.lower()
+    if any((it.description or "").strip().lower() == target for it in existing_items):
+        raise HTTPException(
+            status_code=409,
+            detail="This item is already on the PPMP. Duplicate items are not allowed.",
+        )
+
+    qty = item_data.quantity or 0
+    unit_cost = item_data.unit_cost or 0.0
+    estimated = qty * unit_cost
     new_item = PPMPItem(
         ppmp_id=ppmp_id,
-        description=item_data.description,
+        description=description,
         category=item_data.category,
         is_cse=item_data.is_cse,
         quantity=item_data.quantity,
@@ -436,6 +452,15 @@ def add_ppmp_item(
         unit_cost=item_data.unit_cost,
         estimated_budget=estimated,
         procurement_mode=item_data.procurement_mode,
+        project_type=item_data.project_type,
+        quantity_size=item_data.quantity_size,
+        pre_proc_conf=item_data.pre_proc_conf,
+        proc_start=item_data.proc_start,
+        proc_end=item_data.proc_end,
+        delivery_period=item_data.delivery_period,
+        fund_source=item_data.fund_source,
+        supporting_docs=item_data.supporting_docs,
+        remarks=item_data.remarks,
         q1_qty=item_data.q1_qty,
         q2_qty=item_data.q2_qty,
         q3_qty=item_data.q3_qty,

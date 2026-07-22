@@ -209,23 +209,11 @@ def consolidate_ppmps(
             detail=f"No approved PPMPs found for fiscal year {fiscal_year} to consolidate",
         )
 
-    # 2. Find or create the APP entity
-    if app:
-        existing_rows = session.exec(select(APPRow).where(APPRow.app_id == app.id)).all()
-        for row in existing_rows:
-            session.delete(row)
-        session.commit()
-    else:
-        app = APP(
-            title=f"Consolidated Annual Procurement Plan (APP) FY {fiscal_year}",
-            fiscal_year=fiscal_year,
-        )
-        session.add(app)
-        session.commit()
-        session.refresh(app)
+    # 2-4. Rebuild APP rows from approved PPMP items
+    from app.app_consolidate import ensure_app_cleared, write_app_rows_from_item_dicts
 
-    # 3. Consolidate items grouped by NGPA dimensions (per RA 12009 APP layout).
-    #    Group key: (is_cse, description, project_type, procurement_mode, fund_source)
+    app = ensure_app_cleared(session, fiscal_year)
+
     ppmp_ids = [p.id for p in approved_ppmps]
     office_lookup = {o.id: o for o in session.exec(select(Office)).all()}
     ppmp_office_lookup = {p.id: office_lookup.get(p.office_id) for p in approved_ppmps}
@@ -235,8 +223,6 @@ def consolidate_ppmps(
         select(PPMPItem).where(PPMPItem.ppmp_id.in_(ppmp_ids))
     ).all()
 
-    # If a typed PPMP has items but none match its CSE/nonCSE kind (flag drift),
-    # treat those items as the PPMP kind so CSE/nonCSE APP stay aligned with sources.
     items_by_ppmp: dict = {}
     for item in all_items:
         items_by_ppmp.setdefault(item.ppmp_id, []).append(item)
@@ -251,82 +237,175 @@ def consolidate_ppmps(
             for it in ppmp_items:
                 effective_is_cse[it.id] = bool(it.is_cse)
 
-    consolidation_map: dict = {}
+    item_dicts = []
     for item in all_items:
-        item_is_cse = effective_is_cse.get(item.id, bool(item.is_cse))
-        key = (
-            item_is_cse,
-            (item.description or "").strip().lower(),
-            item.project_type or "",
-            item.procurement_mode or "",
-            item.fund_source or "",
-        )
-        if key not in consolidation_map:
-            consolidation_map[key] = {
+        office = ppmp_office_lookup.get(item.ppmp_id)
+        item_dicts.append(
+            {
                 "description": item.description,
-                "is_cse": item_is_cse,
+                "is_cse": effective_is_cse.get(item.id, bool(item.is_cse)),
                 "project_type": item.project_type,
-                "procurement_mode": item.procurement_mode or "Competitive Bidding",
+                "procurement_mode": item.procurement_mode,
                 "fund_source": item.fund_source,
                 "quantity_size": item.quantity_size,
                 "proc_start": item.proc_start,
                 "proc_end": item.proc_end,
                 "delivery_period": item.delivery_period,
                 "pre_proc_conf": bool(item.pre_proc_conf),
-                "total_estimated_budget": 0.0,
-                "offices": set(),
-                "total_quantity": 0,
-                "q1_qty": 0,
-                "q2_qty": 0,
-                "q3_qty": 0,
-                "q4_qty": 0,
+                "estimated_budget": item.estimated_budget or 0.0,
+                "quantity": item.quantity or 0,
+                "q1_qty": item.q1_qty or 0,
+                "q2_qty": item.q2_qty or 0,
+                "q3_qty": item.q3_qty or 0,
+                "q4_qty": item.q4_qty or 0,
                 "category": item.category,
                 "unit_of_measure": item.unit_of_measure,
                 "unit_cost": item.unit_cost,
+                "office_code": (office.code if office else None)
+                or (office.name if office else None)
+                or "",
             }
-
-        group = consolidation_map[key]
-        group["total_estimated_budget"] += item.estimated_budget or 0.0
-        group["total_quantity"] += item.quantity or 0
-        group["q1_qty"] += item.q1_qty or 0
-        group["q2_qty"] += item.q2_qty or 0
-        group["q3_qty"] += item.q3_qty or 0
-        group["q4_qty"] += item.q4_qty or 0
-
-        office = ppmp_office_lookup.get(item.ppmp_id)
-        if office is not None:
-            group["offices"].add(office.code or office.name or "")
-
-    # 4. Save consolidated rows
-    for group in consolidation_map.values():
-        row = APPRow(
-            app_id=app.id,
-            description=group["description"],
-            is_cse=group["is_cse"],
-            project_type=group["project_type"],
-            procurement_mode=group["procurement_mode"],
-            fund_source=group["fund_source"],
-            quantity_size=group["quantity_size"],
-            proc_start=group["proc_start"],
-            proc_end=group["proc_end"],
-            delivery_period=group["delivery_period"],
-            pre_proc_conf=group["pre_proc_conf"],
-            total_estimated_budget=group["total_estimated_budget"],
-            end_user_offices=", ".join(sorted(o for o in group["offices"] if o)) or None,
-            category=group["category"],
-            total_quantity=group["total_quantity"],
-            unit_of_measure=group["unit_of_measure"],
-            unit_cost=group["unit_cost"],
-            q1_qty=group["q1_qty"],
-            q2_qty=group["q2_qty"],
-            q3_qty=group["q3_qty"],
-            q4_qty=group["q4_qty"],
         )
-        session.add(row)
 
+    write_app_rows_from_item_dicts(session, app, item_dicts)
     session.commit()
     session.refresh(app)
     return app
+
+
+
+@router.get("/ppmps/from-files")
+def list_ppmps_from_files(
+    kind: str = "cse",
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """List office PPMP Excel files under IT_ppmps/CSE or IT_ppmps/nonCSE."""
+    kind_norm = (kind or "cse").strip().lower()
+    if kind_norm not in ("cse", "noncse"):
+        raise HTTPException(status_code=400, detail="kind must be 'cse' or 'noncse'")
+    from app.file_ppmps import list_file_ppmps
+
+    return list_file_ppmps(kind_norm)
+
+
+@router.post("/consolidate-from-files/{fiscal_year}")
+def consolidate_ppmps_from_files(
+    fiscal_year: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """
+    Consolidate PPMP Excel files from IT_ppmps/{CSE|nonCSE} into APP/APPRow,
+    export NGPA APP workbooks locally, and rclone-upload to Drive CSE-APP / nonCSE-APP.
+    """
+    from app.app_consolidate import ensure_app_cleared, write_app_rows_from_item_dicts
+    from app.app_export import export_cse_app, export_noncse_app
+    from app.config import LOCAL_APP_OUTPUT_FOLDER, drive_app_rclone_dest
+    from app.drive_sync import push_app_to_drive
+    from app.file_ppmps import list_file_ppmps, load_all_file_items
+
+    cse_files = list_file_ppmps("cse")
+    noncse_files = list_file_ppmps("noncse")
+    item_dicts = load_all_file_items()
+
+    app = session.exec(select(APP).where(APP.fiscal_year == fiscal_year)).first()
+
+    if not item_dicts:
+        if app:
+            existing_rows = session.exec(
+                select(APPRow).where(APPRow.app_id == app.id)
+            ).all()
+            for row in existing_rows:
+                session.delete(row)
+            session.commit()
+            session.refresh(app)
+            return {
+                "app": app,
+                "source_files": {"cse": len(cse_files), "noncse": len(noncse_files)},
+                "row_count": 0,
+                "exports": {},
+                "upload": {
+                    "uploaded_cse": False,
+                    "uploaded_noncse": False,
+                    "remotes": {
+                        "cse": drive_app_rclone_dest("cse"),
+                        "noncse": drive_app_rclone_dest("noncse"),
+                    },
+                    "files": [],
+                    "message": "No line items found in IT_ppmps; cleared APP rows.",
+                },
+            }
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"No PPMP Excel items found under IT_ppmps for FY {fiscal_year}. "
+                "Place files in IT_ppmps/CSE or IT_ppmps/nonCSE."
+            ),
+        )
+
+    app = ensure_app_cleared(session, fiscal_year)
+    write_app_rows_from_item_dicts(session, app, item_dicts)
+    session.commit()
+    session.refresh(app)
+
+    rows = session.exec(select(APPRow).where(APPRow.app_id == app.id)).all()
+    has_cse = any(bool(r.is_cse) for r in rows)
+    has_noncse = any(not bool(r.is_cse) for r in rows)
+
+    LOCAL_APP_OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
+    exports = {}
+    upload_files = []
+    uploaded_cse = False
+    uploaded_noncse = False
+    upload_errors = []
+
+    if has_cse:
+        cse_name = f"APP-CSE-FY{fiscal_year}.xlsx"
+        cse_path = LOCAL_APP_OUTPUT_FOLDER / cse_name
+        cse_path.write_bytes(export_cse_app(session, fiscal_year))
+        exports["cse"] = str(cse_path)
+        result = push_app_to_drive(cse_path, "cse")
+        upload_files.append(result)
+        uploaded_cse = bool(result.get("ok"))
+        if not result.get("ok"):
+            upload_errors.append(result.get("error") or "CSE upload failed")
+
+    if has_noncse:
+        non_name = f"APP-nonCSE-FY{fiscal_year}.xlsx"
+        non_path = LOCAL_APP_OUTPUT_FOLDER / non_name
+        non_path.write_bytes(export_noncse_app(session, fiscal_year))
+        exports["noncse"] = str(non_path)
+        result = push_app_to_drive(non_path, "noncse")
+        upload_files.append(result)
+        uploaded_noncse = bool(result.get("ok"))
+        if not result.get("ok"):
+            upload_errors.append(result.get("error") or "nonCSE upload failed")
+
+    message = "Consolidation complete."
+    if upload_errors:
+        message = (
+            "Consolidation complete, but Drive upload had issues: "
+            + "; ".join(upload_errors)
+        )
+    elif uploaded_cse or uploaded_noncse:
+        message = "Consolidation complete and APP uploaded to Google Drive."
+
+    return {
+        "app": app,
+        "source_files": {"cse": len(cse_files), "noncse": len(noncse_files)},
+        "row_count": len(rows),
+        "exports": exports,
+        "upload": {
+            "uploaded_cse": uploaded_cse,
+            "uploaded_noncse": uploaded_noncse,
+            "remotes": {
+                "cse": drive_app_rclone_dest("cse"),
+                "noncse": drive_app_rclone_dest("noncse"),
+            },
+            "files": upload_files,
+            "message": message,
+        },
+    }
 
 
 @router.get("/ppmps/approved")

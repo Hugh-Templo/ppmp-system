@@ -1498,9 +1498,16 @@ pre.json-block {
 
 .ppmp-fullscreen-columns {
   display: grid;
-  grid-template-columns: minmax(380px, 460px) 1fr;
+  grid-template-columns: minmax(420px, 520px) 1fr;
   gap: 1.5rem;
   align-items: start;
+}
+
+.ppmp-fullscreen-columns .ppmp-add-item-card {
+  max-height: calc(100vh - 10rem);
+  overflow-y: auto;
+  position: sticky;
+  top: 0;
 }
 
 .ppmp-fullscreen-columns .ppmp-items-card {
@@ -1847,6 +1854,12 @@ pre.json-block {
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.03em;
+}
+
+.ppmp-month-year-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
 }
 
 .ppmp-milestone-grid {

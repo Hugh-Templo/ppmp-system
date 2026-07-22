@@ -15,7 +15,7 @@ export default defineConfig({
       // Forward API calls to the FastAPI backend running on this machine.
       // This lets us expose only port 5173 while /api still reaches :8000.
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },

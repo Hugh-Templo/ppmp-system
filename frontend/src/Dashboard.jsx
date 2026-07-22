@@ -1,6 +1,59 @@
 import React, { useState, useEffect, useRef } from "react";
 import { apiFetch } from "./api";
 
+const PPMP_PROJECT_TYPES = ["Goods", "Infrastructure", "Consulting Services"];
+
+const PPMP_PROCUREMENT_MODES = [
+  "Competitive Bidding",
+  "Limited Source Bidding",
+  "Competitive Dialogue",
+  "Unsolicited Offer with Bid Matching",
+  "Direct Contracting",
+  "Direct Acquisition",
+  "Repeat Order",
+  "Small Value Procurement",
+  "Direct Sales",
+  "Direct Procurement for Science, Technology and Innovation",
+  "Negotiated Procurement",
+];
+
+const PPMP_NP_SUBTYPES = [
+  "NP - Two Failed Biddings",
+  "NP - Emergency Cases",
+  "NP - Take-over of Contracts",
+  "NP - Adjacent or Contiguous Projects",
+  "NP - Agency-to-Agency",
+  "NP - Highly Specialized Services",
+  "NP - Lease of Real Property and Venue",
+];
+
+const PPMP_FUND_SOURCES = ["General Fund", "Trust Fund", "Trust Liabilities"];
+
+const PPMP_SUPPORTING_DOCS = ["Market Scoping", "Technical Specification"];
+
+const PPMP_MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+const formatMonthYear = (month, year) => {
+  if (!month || !year) return "";
+  return `${month} ${year}`;
+};
+
+const composeQuantitySize = (qty, unit, name) =>
+  [qty, (unit || "").trim(), (name || "").trim()].filter(Boolean).join(" ").trim();
+
 function Dashboard({ token, user, onLogout }) {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [ppmps, setPpmps] = useState([]);
@@ -19,18 +72,34 @@ function Dashboard({ token, user, onLogout }) {
   const [descOpen, setDescOpen] = useState(false);
   const [descHighlight, setDescHighlight] = useState(-1);
 
-  // Item Form state
+  // Item Form state (NGPA columns)
   const [itemDesc, setItemDesc] = useState("");
-  const [itemCat, setItemCat] = useState("Office Supplies");
+  const [itemCat, setItemCat] = useState("");
   const [itemIsCse, setItemIsCse] = useState(false);
   const [itemQty, setItemQty] = useState(1);
   const [itemUnit, setItemUnit] = useState("pc");
   const [itemCost, setItemCost] = useState(0.0);
-  const [itemProcMode, setItemProcMode] = useState("Shopping");
-  const [q1, setQ1] = useState(0);
-  const [q2, setQ2] = useState(0);
-  const [q3, setQ3] = useState(0);
-  const [q4, setQ4] = useState(0);
+  const [itemProjectType, setItemProjectType] = useState(PPMP_PROJECT_TYPES[0]);
+  const [itemProcMode, setItemProcMode] = useState(PPMP_PROCUREMENT_MODES[0]);
+  const [itemNpSubtype, setItemNpSubtype] = useState(PPMP_NP_SUBTYPES[0]);
+  const [itemPreProc, setItemPreProc] = useState(false);
+  const [itemStartMonth, setItemStartMonth] = useState("");
+  const [itemStartYear, setItemStartYear] = useState("");
+  const [itemEndMonth, setItemEndMonth] = useState("");
+  const [itemEndYear, setItemEndYear] = useState("");
+  const [itemDeliveryMonth, setItemDeliveryMonth] = useState("");
+  const [itemDeliveryYear, setItemDeliveryYear] = useState("");
+  const [itemFundSource, setItemFundSource] = useState(PPMP_FUND_SOURCES[0]);
+  const [itemSupportingDocs, setItemSupportingDocs] = useState(PPMP_SUPPORTING_DOCS[0]);
+  const [itemRemarks, setItemRemarks] = useState("");
+
+  const ppmpYearOptions = (() => {
+    const base =
+      Number(selectedPpmp?.ppmp?.fiscal_year) ||
+      Number(newPpmpYear) ||
+      new Date().getFullYear() + 1;
+    return [base - 1, base, base + 1, base + 2];
+  })();
 
   // Budget Office state
   const [pendingPpmps, setPendingPpmps] = useState([]);
@@ -547,6 +616,31 @@ function Dashboard({ token, user, onLogout }) {
   const handleAddPpmpItem = async (e) => {
     e.preventDefault();
     if (!selectedPpmp) return;
+
+    const normalizedDesc = (itemDesc || "").trim().toLowerCase();
+    if (!normalizedDesc) {
+      showNotification("Item description is required", "danger");
+      return;
+    }
+
+    const alreadyOnPpmp = (selectedPpmp.items || []).some(
+      (it) => (it.description || "").trim().toLowerCase() === normalizedDesc
+    );
+    if (alreadyOnPpmp) {
+      showNotification(
+        "This item is already on the PPMP. Duplicate items are not allowed.",
+        "danger"
+      );
+      return;
+    }
+
+    const qty = parseInt(itemQty, 10) || 0;
+    const unit = (itemUnit || "").trim();
+    const name = itemDesc.trim();
+    const quantitySize = composeQuantitySize(qty, unit, name);
+    const procurementMode =
+      itemProcMode === "Negotiated Procurement" ? itemNpSubtype : itemProcMode;
+
     try {
       const res = await apiFetch(`/api/offices/ppmps/${selectedPpmp.ppmp.id}/items`, {
         method: "POST",
@@ -555,28 +649,51 @@ function Dashboard({ token, user, onLogout }) {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          description: itemDesc,
-          category: itemCat,
+          description: name,
+          category: (itemCat || "").trim(),
           is_cse: itemIsCse,
-          quantity: parseInt(itemQty),
-          unit_of_measure: itemUnit,
+          quantity: qty,
+          unit_of_measure: unit,
           unit_cost: parseFloat(itemCost),
-          procurement_mode: itemProcMode,
-          q1_qty: parseInt(q1),
-          q2_qty: parseInt(q2),
-          q3_qty: parseInt(q3),
-          q4_qty: parseInt(q4),
+          procurement_mode: procurementMode,
+          project_type: itemProjectType,
+          quantity_size: quantitySize,
+          pre_proc_conf: itemPreProc,
+          proc_start: formatMonthYear(itemStartMonth, itemStartYear),
+          proc_end: formatMonthYear(itemEndMonth, itemEndYear),
+          delivery_period: formatMonthYear(itemDeliveryMonth, itemDeliveryYear),
+          fund_source: itemFundSource,
+          supporting_docs: itemSupportingDocs,
+          remarks: itemRemarks || null,
+          q1_qty: 0,
+          q2_qty: 0,
+          q3_qty: 0,
+          q4_qty: 0,
         }),
       });
       if (res.ok) {
         showNotification("Item added to PPMP!");
         setItemDesc("");
+        setItemCat("");
         setDescSuggestions([]);
         setDescOpen(false);
         setDescHighlight(-1);
         setItemQty(1);
+        setItemUnit("pc");
         setItemCost(0.0);
-        setQ1(0); setQ2(0); setQ3(0); setQ4(0);
+        setItemProjectType(PPMP_PROJECT_TYPES[0]);
+        setItemProcMode(PPMP_PROCUREMENT_MODES[0]);
+        setItemNpSubtype(PPMP_NP_SUBTYPES[0]);
+        setItemPreProc(false);
+        setItemStartMonth("");
+        setItemStartYear("");
+        setItemEndMonth("");
+        setItemEndYear("");
+        setItemDeliveryMonth("");
+        setItemDeliveryYear("");
+        setItemFundSource(PPMP_FUND_SOURCES[0]);
+        setItemSupportingDocs(PPMP_SUPPORTING_DOCS[0]);
+        setItemRemarks("");
         setItemIsCse(false);
         handleSelectPpmp(selectedPpmp.ppmp.id);
       } else {
@@ -994,10 +1111,9 @@ function Dashboard({ token, user, onLogout }) {
     setAppWorkspaceLoading(true);
     try {
       const [ppmpsRes, appRes] = await Promise.all([
-        apiFetch(
-          `/api/bac/ppmps/approved?fiscal_year=${consolidationYear}&kind=${kind}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        ),
+        apiFetch(`/api/bac/ppmps/from-files?kind=${kind}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
         apiFetch(
           `/api/bac/apps/by-year/${consolidationYear}?kind=${kind}`,
           { headers: { Authorization: `Bearer ${token}` } }
@@ -1024,16 +1140,30 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleConsolidate = async (e) => {
     if (e && typeof e.preventDefault === "function") e.preventDefault();
+    const fromFiles = activeTab === "cse_app" || activeTab === "noncse_app";
     try {
-      const res = await apiFetch(`/api/bac/consolidate/${consolidationYear}`, {
+      const url = fromFiles
+        ? `/api/bac/consolidate-from-files/${consolidationYear}`
+        : `/api/bac/consolidate/${consolidationYear}`;
+      const res = await apiFetch(url, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (res.ok) {
-        showNotification(`APP for FY ${consolidationYear} updated from approved PPMPs.`);
+        if (fromFiles) {
+          const uploadMsg = data?.upload?.message;
+          showNotification(
+            uploadMsg ||
+              `APP for FY ${consolidationYear} rebuilt from IT_ppmps files.`
+          );
+        } else {
+          showNotification(
+            `APP for FY ${consolidationYear} updated from approved PPMPs.`
+          );
+        }
         fetchApps();
-        if (activeTab === "cse_app" || activeTab === "noncse_app") {
+        if (fromFiles) {
           loadAppWorkspace(activeTab === "cse_app" ? "cse" : "noncse");
         }
       } else {
@@ -1117,10 +1247,15 @@ function Dashboard({ token, user, onLogout }) {
 
   const ngpaQuantitySize = (item) => {
     if (item.quantity_size) return item.quantity_size;
-    const qty = item.quantity == null ? "" : String(item.quantity);
-    const uom = (item.unit_of_measure || "").trim();
-    return `${qty} ${uom}`.trim();
+    return composeQuantitySize(
+      item.quantity,
+      item.unit_of_measure,
+      item.description
+    );
   };
+
+  const ngpaTitleCategory = (item) =>
+    (item?.category || "").trim() || item?.description || "";
 
   const ngpaYesNo = (value) => {
     if (value === null || value === undefined) return "";
@@ -1203,7 +1338,7 @@ function Dashboard({ token, user, onLogout }) {
                   PROCUREMENT PROJECT DETAILS
                 </th>
                 <th colSpan={3} className="ngpa-ppmp-table__group">
-                  PROJECTED TIMELINE (MM/YYYY)
+                  PROJECTED TIMELINE (Month Year)
                 </th>
                 <th colSpan={2} className="ngpa-ppmp-table__group">
                   FUNDING DETAILS
@@ -1216,9 +1351,9 @@ function Dashboard({ token, user, onLogout }) {
                 </th>
               </tr>
               <tr>
-                <th>General Description and Objective of the Project to be Procured</th>
+                <th>Title / Category of Items</th>
                 <th>Type of the Project to be Procured (Goods / Infrastructure / Consulting Services)</th>
-                <th>Quantity and Size of the Project to be Procured</th>
+                <th>Items (Quantity, Unit, Name)</th>
                 <th>Recommended Mode of Procurement</th>
                 <th>Pre-Procurement Conference (Yes/No)</th>
                 <th>Start of Procurement Activity</th>
@@ -1236,7 +1371,7 @@ function Dashboard({ token, user, onLogout }) {
             <tbody>
               {paddedItems.map((item, idx) => (
                 <tr key={item ? item.id : `blank-${idx}`}>
-                  <td>{item?.description || ""}</td>
+                  <td>{item ? ngpaTitleCategory(item) : ""}</td>
                   <td>{item?.project_type || ""}</td>
                   <td>{item ? ngpaQuantitySize(item) : ""}</td>
                   <td>{item?.procurement_mode || ""}</td>
@@ -1508,9 +1643,9 @@ function Dashboard({ token, user, onLogout }) {
         {isStaleApp && (
           <div className="alert alert-danger app-workspace-stale" role="status">
             The {label} NGPA form still has consolidated rows, but there are no
-            budget-approved {label} PPMPs for FY {consolidationYear}. This APP is
-            out of date (source PPMPs were removed or are no longer Approved).
-            Click <strong>Clear / Rebuild APP</strong> to clear the stale form.
+            {label} PPMP files under IT_ppmps/{label === "CSE" ? "CSE" : "nonCSE"}.
+            This APP is out of date. Click <strong>Clear / Rebuild APP</strong> to
+            clear the stale form (or add Excel files and consolidate again).
           </div>
         )}
 
@@ -1522,8 +1657,10 @@ function Dashboard({ token, user, onLogout }) {
             </span>
           </div>
           <p className="page-subtitle" style={{ marginBottom: "0.75rem" }}>
-            Budget-approved office PPMPs for FY {consolidationYear} that contain {label} line items.
-            Run consolidation to rebuild the {label} APP below.
+            Office PPMP Excel files from{" "}
+            <code>IT_ppmps/{label === "CSE" ? "CSE" : "nonCSE"}</code> for FY{" "}
+            {consolidationYear}. Run consolidation to rebuild the {label} APP below
+            and upload it to Google Drive ({label === "CSE" ? "CSE-APP" : "nonCSE-APP"}).
           </p>
           <div className="table-wrapper">
             <table className="custom-table">
@@ -1546,7 +1683,8 @@ function Dashboard({ token, user, onLogout }) {
                 ) : approvedAppPpmps.length === 0 ? (
                   <tr>
                     <td colSpan="5" style={{ textAlign: "center", color: "var(--text-muted)" }}>
-                      No approved {label} PPMPs found for FY {consolidationYear}.
+                      No {label} PPMP files found in IT_ppmps/
+                      {label === "CSE" ? "CSE" : "nonCSE"}.
                     </td>
                   </tr>
                 ) : (
@@ -1557,7 +1695,7 @@ function Dashboard({ token, user, onLogout }) {
                       <td>{p.item_count}</td>
                       <td>₱{ngpaMoney(p.total_estimated_budget)}</td>
                       <td>
-                        <span className="badge badge-success">{p.status}</span>
+                        <span className="badge badge-success">{p.status || "File"}</span>
                       </td>
                     </tr>
                   ))
@@ -3264,8 +3402,20 @@ function Dashboard({ token, user, onLogout }) {
                 <h2 className="card-title">Add Line Item</h2>
                 <form onSubmit={handleAddPpmpItem} className="ppmp-add-item-form">
                   <div className="form-field form-field-full">
+                    <label className="form-label">Title / Category of Items (Col 1)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Office Supplies, ICT Equipment"
+                      className="form-input"
+                      value={itemCat}
+                      onChange={(e) => setItemCat(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-field form-field-full">
                     <label className="form-label" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span>Item Description</span>
+                      <span>Item Name (Col 3)</span>
                       {renderPpmpTypeBadge(itemIsCse)}
                       <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: 400 }}>
                         {itemIsCse
@@ -3327,16 +3477,6 @@ function Dashboard({ token, user, onLogout }) {
                   </div>
 
                   <div className="form-field">
-                    <label className="form-label">Category</label>
-                    <select className="form-input" value={itemCat} onChange={(e) => setItemCat(e.target.value)}>
-                      <option value="Office Supplies">Office Supplies</option>
-                      <option value="IT Equipment">IT Equipment</option>
-                      <option value="Catering Services">Catering Services</option>
-                      <option value="Services">Services / Repair</option>
-                    </select>
-                  </div>
-
-                  <div className="form-field">
                     <label className="form-label">Quantity</label>
                     <input
                       type="number"
@@ -3374,22 +3514,173 @@ function Dashboard({ token, user, onLogout }) {
                   </div>
 
                   <div className="form-field">
-                    <label className="form-label">Procurement Mode</label>
-                    <select className="form-input" value={itemProcMode} onChange={(e) => setItemProcMode(e.target.value)}>
-                      <option value="Shopping">Shopping</option>
-                      <option value="SVP">Small Value Procurement</option>
-                      <option value="Competitive Bidding">Competitive Bidding</option>
+                    <label className="form-label">Type of Project (Col 2)</label>
+                    <select
+                      className="form-input"
+                      value={itemProjectType}
+                      onChange={(e) => setItemProjectType(e.target.value)}
+                    >
+                      {PPMP_PROJECT_TYPES.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
                     </select>
                   </div>
 
-                  <div className="form-field form-field-full">
-                    <label className="form-label">Milestone Distribution (Quantity per Quarter)</label>
-                    <div className="ppmp-milestone-grid">
-                      <input type="number" placeholder="Q1" className="form-input" value={q1} onChange={(e) => setQ1(e.target.value)} />
-                      <input type="number" placeholder="Q2" className="form-input" value={q2} onChange={(e) => setQ2(e.target.value)} />
-                      <input type="number" placeholder="Q3" className="form-input" value={q3} onChange={(e) => setQ3(e.target.value)} />
-                      <input type="number" placeholder="Q4" className="form-input" value={q4} onChange={(e) => setQ4(e.target.value)} />
+                  <div className="form-field">
+                    <label className="form-label">Mode of Procurement (Col 4)</label>
+                    <select
+                      className="form-input"
+                      value={itemProcMode}
+                      onChange={(e) => setItemProcMode(e.target.value)}
+                    >
+                      {PPMP_PROCUREMENT_MODES.map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {itemProcMode === "Negotiated Procurement" && (
+                    <div className="form-field form-field-full">
+                      <label className="form-label">Negotiated Procurement Type</label>
+                      <select
+                        className="form-input"
+                        value={itemNpSubtype}
+                        onChange={(e) => setItemNpSubtype(e.target.value)}
+                        required
+                      >
+                        {PPMP_NP_SUBTYPES.map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
                     </div>
+                  )}
+
+                  <div className="form-field">
+                    <label className="form-label">Pre-Procurement Conference (Col 5)</label>
+                    <select
+                      className="form-input"
+                      value={itemPreProc ? "Yes" : "No"}
+                      onChange={(e) => setItemPreProc(e.target.value === "Yes")}
+                    >
+                      <option value="No">No</option>
+                      <option value="Yes">Yes</option>
+                    </select>
+                  </div>
+
+                  <div className="form-field">
+                    <label className="form-label">Start of Procurement (Col 6)</label>
+                    <div className="ppmp-month-year-row">
+                      <select
+                        className="form-input"
+                        value={itemStartMonth}
+                        onChange={(e) => setItemStartMonth(e.target.value)}
+                      >
+                        <option value="">Month</option>
+                        {PPMP_MONTHS.map((m) => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                      </select>
+                      <select
+                        className="form-input"
+                        value={itemStartYear}
+                        onChange={(e) => setItemStartYear(e.target.value)}
+                      >
+                        <option value="">Year</option>
+                        {ppmpYearOptions.map((y) => (
+                          <option key={y} value={String(y)}>{y}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="form-field">
+                    <label className="form-label">End of Procurement (Col 7)</label>
+                    <div className="ppmp-month-year-row">
+                      <select
+                        className="form-input"
+                        value={itemEndMonth}
+                        onChange={(e) => setItemEndMonth(e.target.value)}
+                      >
+                        <option value="">Month</option>
+                        {PPMP_MONTHS.map((m) => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                      </select>
+                      <select
+                        className="form-input"
+                        value={itemEndYear}
+                        onChange={(e) => setItemEndYear(e.target.value)}
+                      >
+                        <option value="">Year</option>
+                        {ppmpYearOptions.map((y) => (
+                          <option key={y} value={String(y)}>{y}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="form-field">
+                    <label className="form-label">Expected Delivery Period (Col 8)</label>
+                    <div className="ppmp-month-year-row">
+                      <select
+                        className="form-input"
+                        value={itemDeliveryMonth}
+                        onChange={(e) => setItemDeliveryMonth(e.target.value)}
+                      >
+                        <option value="">Month</option>
+                        {PPMP_MONTHS.map((m) => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                      </select>
+                      <select
+                        className="form-input"
+                        value={itemDeliveryYear}
+                        onChange={(e) => setItemDeliveryYear(e.target.value)}
+                      >
+                        <option value="">Year</option>
+                        {ppmpYearOptions.map((y) => (
+                          <option key={y} value={String(y)}>{y}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="form-field">
+                    <label className="form-label">Source of Funds (Col 9)</label>
+                    <select
+                      className="form-input"
+                      value={itemFundSource}
+                      onChange={(e) => setItemFundSource(e.target.value)}
+                    >
+                      {PPMP_FUND_SOURCES.map((f) => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="form-field">
+                    <label className="form-label">Attached Supporting Documents (Col 11)</label>
+                    <select
+                      className="form-input"
+                      value={itemSupportingDocs}
+                      onChange={(e) => setItemSupportingDocs(e.target.value)}
+                    >
+                      {PPMP_SUPPORTING_DOCS.map((d) => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="form-field">
+                    <label className="form-label">Remarks (Col 12)</label>
+                    <select
+                      className="form-input"
+                      value={itemRemarks}
+                      onChange={(e) => setItemRemarks(e.target.value)}
+                    >
+                      <option value="">—</option>
+                      <option value="Revised">Revised</option>
+                    </select>
                   </div>
 
                   <div className="form-field form-field-full ppmp-add-item-actions">
@@ -3413,13 +3704,13 @@ function Dashboard({ token, user, onLogout }) {
                     <table className="custom-table">
                       <thead>
                         <tr>
-                          <th>Description</th>
-                          <th>Qty</th>
-                          <th>Unit</th>
-                          <th>Unit Cost</th>
-                          <th>Subtotal</th>
+                          <th>Title / Category</th>
+                          <th>Items</th>
+                          <th>Type</th>
                           <th>Mode</th>
-                          <th>Q1/Q2/Q3/Q4</th>
+                          <th>Fund</th>
+                          <th>Subtotal</th>
+                          <th>Remarks</th>
                           <th>Actions</th>
                         </tr>
                       </thead>
@@ -3433,13 +3724,13 @@ function Dashboard({ token, user, onLogout }) {
                         ) : (
                           selectedPpmp.items.map((item) => (
                             <tr key={item.id}>
-                              <td>{item.description}</td>
-                              <td>{item.quantity}</td>
-                              <td>{item.unit_of_measure}</td>
-                              <td>₱{(item.unit_cost || 0).toLocaleString()}</td>
-                              <td>₱{(item.estimated_budget || 0).toLocaleString()}</td>
+                              <td>{item.category || "—"}</td>
+                              <td>{ngpaQuantitySize(item)}</td>
+                              <td>{item.project_type || "—"}</td>
                               <td>{item.procurement_mode}</td>
-                              <td>{item.q1_qty}/{item.q2_qty}/{item.q3_qty}/{item.q4_qty}</td>
+                              <td>{item.fund_source || "—"}</td>
+                              <td>₱{(item.estimated_budget || 0).toLocaleString()}</td>
+                              <td>{item.remarks || "—"}</td>
                               <td>
                                 <button type="button" className="btn btn-danger btn-sm" onClick={() => handleDeletePpmpItem(item.id)}>Remove</button>
                               </td>

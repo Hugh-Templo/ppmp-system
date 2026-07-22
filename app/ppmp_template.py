@@ -133,15 +133,24 @@ def _yes_no(value) -> str:
 
 
 def _item_quantity_size(item: "PPMPItem") -> str:
-    """Prefer the NGPA free-text field, but fall back to legacy web fields."""
+    """Prefer the NGPA free-text field, but fall back to qty + unit + name."""
     if item.quantity_size:
         return item.quantity_size
     qty = item.quantity
     uom = (item.unit_of_measure or "").strip()
-    if qty is None and not uom:
+    name = (item.description or "").strip()
+    if qty is None and not uom and not name:
         return ""
     qty_str = "" if qty is None else str(qty)
-    return f"{qty_str} {uom}".strip()
+    return " ".join(p for p in (qty_str, uom, name) if p).strip()
+
+
+def _item_title_category(item: "PPMPItem") -> str:
+    """NGPA Col 1: title/category, falling back to description for legacy rows."""
+    category = (item.category or "").strip()
+    if category:
+        return category
+    return item.description or ""
 
 
 def _clone_row_style(ws, src_row: int, dst_row: int, last_col: int) -> None:
@@ -162,7 +171,7 @@ def _clone_row_style(ws, src_row: int, dst_row: int, last_col: int) -> None:
 
 
 def _write_item_row(ws, row: int, item: "PPMPItem") -> None:
-    ws.cell(row=row, column=1, value=item.description or "")
+    ws.cell(row=row, column=1, value=_item_title_category(item))
     ws.cell(row=row, column=2, value=item.project_type or "")
     ws.cell(row=row, column=3, value=_item_quantity_size(item))
     ws.cell(row=row, column=4, value=item.procurement_mode or "")
