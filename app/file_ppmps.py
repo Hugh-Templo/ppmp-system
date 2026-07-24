@@ -1,6 +1,10 @@
 """
 Scan and parse office PPMP Excel files under IT_ppmps/{CSE|nonCSE}.
 
+Drive layout (mirrored locally):
+  CSE-PPMP/{office}/…    → IT_ppmps/CSE/{office}/…
+  nonCSE-PPMP/{office}/… → IT_ppmps/nonCSE/{office}/…
+
 Supports:
 - NGPA layout (preferred): header "Column 1".."Column 12" then data rows
 - Legacy PPMP sheet: AIP REF. CODE / GENERAL DESCRIPTION / Quantity / Budget / METHOD
@@ -69,6 +73,24 @@ def _iter_excel_files(folder: Path) -> List[Path]:
 def _office_from_filename(stem: str) -> str:
     cleaned = re.sub(r"(?i)\s*ppmp\s*$", "", stem).strip(" -_")
     return cleaned or stem or "office"
+
+
+def _office_from_path(path: Path, kind_root: Path) -> str:
+    """
+    Office identity from the first path segment under the kind root
+    (e.g. IT_ppmps/CSE/BAC/file.xls → BAC). Flat files at the kind root
+    fall back to the filename stem (legacy layout).
+    """
+    try:
+        rel = path.resolve().relative_to(kind_root.resolve())
+    except ValueError:
+        return _office_from_filename(path.stem)
+    parts = rel.parts
+    if len(parts) >= 2:
+        folder = (parts[0] or "").strip()
+        if folder:
+            return folder
+    return _office_from_filename(path.stem)
 
 
 def _file_id(path: Path) -> str:
@@ -299,9 +321,14 @@ def _extract_meta(rows: List[List[Any]]) -> dict:
     }
 
 
-def load_file_ppmp_items(path: Path | str, is_cse: bool) -> List[dict]:
+def load_file_ppmp_items(
+    path: Path | str,
+    is_cse: bool,
+    kind_root: Optional[Path] = None,
+) -> List[dict]:
     path = Path(path)
-    office_code = _office_from_filename(path.stem)
+    root = kind_root if kind_root is not None else path.parent
+    office_code = _office_from_path(path, root)
     all_items: List[dict] = []
     try:
         for _name, rows in _iter_workbook_rows(path):
@@ -325,7 +352,7 @@ def load_file_ppmp_items(path: Path | str, is_cse: bool) -> List[dict]:
 
 
 def list_file_ppmps(kind: str) -> List[dict]:
-    """List Excel PPMP files for CSE or nonCSE under IT_ppmps/{CSE|nonCSE}."""
+    """List Excel PPMP files under IT_ppmps/{CSE|nonCSE}/{office}/… (recursive)."""
     ensure_it_ppmps_dirs()
     folder = _kind_dir(kind)
     want_cse = (kind or "cse").strip().lower() == "cse"
@@ -334,7 +361,8 @@ def list_file_ppmps(kind: str) -> List[dict]:
 
     results: List[dict] = []
     for path in _iter_excel_files(folder):
-        office_name = _office_from_filename(path.stem)
+        office_code = _office_from_path(path, folder)
+        office_name = office_code
         title = path.stem
         fiscal_year = None
         try:
@@ -346,10 +374,10 @@ def list_file_ppmps(kind: str) -> List[dict]:
                     title = meta["title"]
                 if meta.get("fiscal_year"):
                     fiscal_year = meta["fiscal_year"]
-                items_probe = _parse_ngpa_items(rows, is_cse=want_cse, office_code=office_name)
+                items_probe = _parse_ngpa_items(rows, is_cse=want_cse, office_code=office_code)
                 if items_probe or meta.get("end_user") or meta.get("fiscal_year"):
                     break
-            items = load_file_ppmp_items(path, is_cse=want_cse)
+            items = load_file_ppmp_items(path, is_cse=want_cse, kind_root=folder)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Skipping unreadable PPMP %s: %s", path, exc)
             items = []
@@ -365,7 +393,7 @@ def list_file_ppmps(kind: str) -> List[dict]:
                 "filename": path.name,
                 "relative_path": rel,
                 "office_name": office_name,
-                "office_code": _office_from_filename(path.stem),
+                "office_code": office_code,
                 "title": title,
                 "item_count": len(items),
                 "total_estimated_budget": total,
@@ -383,11 +411,13 @@ def list_file_ppmps(kind: str) -> List[dict]:
 def load_file_items_for_kind(kind: str) -> List[dict]:
     """Load item dicts from one IT_ppmps kind folder only."""
     want_cse = (kind or "cse").strip().lower() == "cse"
+    kind_key = "cse" if want_cse else "noncse"
+    kind_root = _kind_dir(kind_key)
     items: List[dict] = []
-    for entry in list_file_ppmps("cse" if want_cse else "noncse"):
+    for entry in list_file_ppmps(kind_key):
         path = Path(entry["path"])
         try:
-            items.extend(load_file_ppmp_items(path, is_cse=want_cse))
+            items.extend(load_file_ppmp_items(path, is_cse=want_cse, kind_root=kind_root))
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not load items from %s: %s", path, exc)
     return items

@@ -78,7 +78,7 @@ def push_app_to_drive(local_path: str | Path, kind: str) -> dict:
 
 
 def _sync_one_ppmp_kind(kind: str) -> dict:
-    """rclone sync one Drive PPMP folder into the matching local IT_ppmps kind dir."""
+    """rclone sync one Drive PPMP tree (office subfolders) into local IT_ppmps/{CSE|nonCSE}."""
     from app.file_ppmps import ensure_it_ppmps_dirs
 
     key = (kind or "cse").strip().lower()
@@ -128,7 +128,10 @@ def _sync_one_ppmp_kind(kind: str) -> dict:
 
 def pull_ppmps_from_drive(kind: Optional[str] = None) -> dict:
     """
-    Pull office PPMP Excel files from Drive CSE-PPMP / nonCSE-PPMP into IT_ppmps.
+    Pull office PPMP Excel files from Drive into IT_ppmps.
+
+    Drive layout: CSE-PPMP/{office}/… and nonCSE-PPMP/{office}/…
+    Local mirror: IT_ppmps/CSE/{office}/… and IT_ppmps/nonCSE/{office}/…
 
     kind=cse|noncse syncs one side; omit / None syncs both.
     """

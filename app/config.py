@@ -40,6 +40,7 @@ DRIVE_APP_ROOT_FOLDER_ID = os.getenv(
 DRIVE_CSE_APP_SUBFOLDER = os.getenv("DRIVE_CSE_APP_SUBFOLDER", "CSE-APP")
 DRIVE_NONCSE_APP_SUBFOLDER = os.getenv("DRIVE_NONCSE_APP_SUBFOLDER", "nonCSE-APP")
 # Office PPMP source folders (Drive → local IT_ppmps)
+# Layout: CSE-PPMP/{office}/… and nonCSE-PPMP/{office}/… (e.g. BAC, ADMIN, IT)
 DRIVE_CSE_PPMP_SUBFOLDER = os.getenv("DRIVE_CSE_PPMP_SUBFOLDER", "CSE-PPMP")
 DRIVE_NONCSE_PPMP_SUBFOLDER = os.getenv("DRIVE_NONCSE_PPMP_SUBFOLDER", "nonCSE-PPMP")
 
@@ -55,7 +56,7 @@ def drive_app_rclone_dest(kind: str) -> str:
 
 
 def drive_ppmp_rclone_source(kind: str) -> str:
-    """rclone source for office PPMP Excel files (Drive CSE-PPMP / nonCSE-PPMP)."""
+    """rclone source for office PPMP Excel files under Drive CSE-PPMP/{office} or nonCSE-PPMP/{office}."""
     sub = (
         DRIVE_CSE_PPMP_SUBFOLDER
         if (kind or "").strip().lower() == "cse"

@@ -124,6 +124,7 @@ function Dashboard({ token, user, onLogout }) {
   const [appWorkspaceLoading, setAppWorkspaceLoading] = useState(false);
   const [appDriveSyncing, setAppDriveSyncing] = useState(false);
   const [appFormPage, setAppFormPage] = useState(1);
+  const [appNgpaPreviewOpen, setAppNgpaPreviewOpen] = useState(false);
   const APP_FORM_PAGE_SIZE = 10;
 
   // DBM Classification form state
@@ -283,6 +284,7 @@ function Dashboard({ token, user, onLogout }) {
     ) {
       loadAppWorkspace(activeTab === "cse_app" ? "cse" : "noncse");
     }
+    setAppNgpaPreviewOpen(false);
   }, [activeTab, user.role, consolidationYear]);
 
   useEffect(() => {
@@ -1547,6 +1549,7 @@ function Dashboard({ token, user, onLogout }) {
   };
 
   const renderNgpaCseAppForm = (rows, fiscalYear, grandTotal = null) => {
+    // Layout mirrors templates/NGPA_CSE-APP.xlsx (APP sheet + Guide columns 1–12).
     const list = rows || [];
     const total =
       grandTotal == null
@@ -1560,7 +1563,7 @@ function Dashboard({ token, user, onLogout }) {
     return (
       <div className="ngpa-app-form ngpa-app-form--cse" role="document" aria-label="CSE APP Form">
         <div className="ngpa-app-form__header">
-          <div className="ngpa-app-form__letterhead">[Agency Letterhead with Logo]</div>
+          <div className="ngpa-app-form__letterhead">Ormoc City Government</div>
           <div className="ngpa-app-form__doc-title">
             ANNUAL PROCUREMENT PLAN FOR FY {fiscalYear}
           </div>
@@ -1570,70 +1573,189 @@ function Dashboard({ token, user, onLogout }) {
               <span className="ngpa-app-form__type-check" aria-hidden="true">{"\u2713"}</span>
               FINAL
             </span>
-            <span className="ngpa-app-form__type-mark">UPDATED</span>
+            <span className="ngpa-app-form__type-mark">
+              UPDATED [Version No. _____]
+            </span>
           </div>
-          <div className="ngpa-app-form__kind-label">Common-Use Supplies and Equipment (CSE)</div>
         </div>
         <div className="ngpa-app-form__table-wrapper">
-          <table className="ngpa-app-table">
+          <table className="ngpa-app-table ngpa-app-table--cse">
             <thead>
               <tr>
-                <th colSpan={8} className="ngpa-app-table__group">PROCUREMENT PROJECT DETAILS</th>
-                <th colSpan={2} className="ngpa-app-table__group">PROJECTED TIMELINE</th>
-                <th colSpan={2} className="ngpa-app-table__group">FUNDING DETAILS</th>
-                <th className="ngpa-app-table__group">REMARKS</th>
+                <th rowSpan={2}>PAP Code</th>
+                <th rowSpan={2}>
+                  Object Code, as applicable
+                  <span className="ngpa-app-table__th-note">
+                    (funding code as specified in the Technical GAA)
+                  </span>
+                </th>
+                <th colSpan={7} className="ngpa-app-table__group">
+                  PROCUREMENT PROJECT DETAILS
+                </th>
+                <th colSpan={2} className="ngpa-app-table__group">
+                  PROJECTED TIMELINE (MM/YYYY)
+                </th>
+                <th colSpan={2} className="ngpa-app-table__group">
+                  FUNDING DETAILS
+                </th>
+                <th rowSpan={2} className="ngpa-app-table__group">
+                  PROCUREMENT STRATEGY OR TOOLS
+                </th>
+                <th rowSpan={2} className="ngpa-app-table__group">
+                  REMARKS
+                  <span className="ngpa-app-table__th-note">
+                    (Other relevant descriptions of the procurement project, if applicable)
+                  </span>
+                </th>
               </tr>
               <tr>
-                <th>PAP Code</th>
-                <th>Project Title</th>
-                <th>End-User / Implementing Unit</th>
-                <th>General Description of the Project</th>
-                <th>General Description of the Procurement Project</th>
-                <th>Mode of Procurement</th>
-                <th>Early Procurement Activity? (Yes/No)</th>
-                <th>Quantity / Size</th>
-                <th>Start of Procurement Activity</th>
-                <th>End of Procurement Activity</th>
-                <th>Source of Fund</th>
-                <th>Estimated Budget / ABC (PhP)</th>
-                <th>Remarks</th>
+                <th>
+                  Project Title
+                  <span className="ngpa-app-table__col-no">Column 1</span>
+                </th>
+                <th>
+                  End-User or Implementing Unit
+                  <span className="ngpa-app-table__col-no">Column 2</span>
+                </th>
+                <th>
+                  General Description of the Project
+                  <span className="ngpa-app-table__col-no">Column 3</span>
+                </th>
+                <th>
+                  General Description of the Procurement Project
+                  <span className="ngpa-app-table__th-note">
+                    (IRR of RA 12009 — Section 7.7.2c)
+                  </span>
+                  <span className="ngpa-app-table__col-no">Column 4</span>
+                </th>
+                <th>
+                  Mode of Procurement
+                  <span className="ngpa-app-table__col-no">Column 4</span>
+                </th>
+                <th>
+                  To be covered by an Early Procurement Activity? (Yes/No)
+                  <span className="ngpa-app-table__col-no">Column 5</span>
+                </th>
+                <th>
+                  Criteria for Bid Evaluation
+                  <span className="ngpa-app-table__th-note">
+                    (Including Sustainability and Domestic Preference)
+                  </span>
+                  <span className="ngpa-app-table__col-no">Column 6</span>
+                </th>
+                <th>
+                  Start of Procurement Activity
+                  <span className="ngpa-app-table__col-no">Column 7</span>
+                </th>
+                <th>
+                  End of Procurement Activity
+                  <span className="ngpa-app-table__col-no">Column 8</span>
+                </th>
+                <th>
+                  Source of Fund
+                  <span className="ngpa-app-table__col-no">Column 9</span>
+                </th>
+                <th>
+                  Estimated Budget / Approved Budget for the Contract (PhP)
+                  <span className="ngpa-app-table__col-no">Column 10</span>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {padded.map((row, idx) => (
-                <tr key={row ? row.id : `cse-blank-${idx}`}>
-                  <td>{row?.project_type || ""}</td>
-                  <td>{row?.description || ""}</td>
-                  <td>{row?.end_user_offices || ""}</td>
-                  <td>{row?.description || ""}</td>
-                  <td>{row?.description || ""}</td>
-                  <td>{row?.procurement_mode || ""}</td>
-                  <td className="ngpa-app-table__center">{row ? ngpaYesNo(row.pre_proc_conf) : ""}</td>
-                  <td>{row?.quantity_size || ""}</td>
-                  <td className="ngpa-app-table__center">{row?.proc_start || ""}</td>
-                  <td className="ngpa-app-table__center">{row?.proc_end || ""}</td>
-                  <td>{row?.fund_source || ""}</td>
-                  <td className="ngpa-app-table__amount">{row ? ngpaMoney(row.total_estimated_budget) : ""}</td>
-                  <td>{row?.delivery_period || ""}</td>
-                </tr>
-              ))}
+              <tr className="ngpa-app-table__section">
+                <td colSpan={15}>
+                  Common Use Supplies and Equipment (CSE) to be purchased from
+                  PS-DBM (kindly indicate the summary/total amounts only)
+                </td>
+              </tr>
+              {padded.map((row, idx) => {
+                const title = row?.description || "";
+                const qty = row?.quantity_size || "";
+                const projectDesc = row?.category || title;
+                const procurementDesc = qty || title;
+                const remarks = row?.delivery_period || qty || "";
+                return (
+                  <tr key={row ? row.id : `cse-blank-${idx}`}>
+                    <td>{row?.project_type || ""}</td>
+                    <td></td>
+                    <td>{title}</td>
+                    <td>{row?.end_user_offices || ""}</td>
+                    <td>{row ? projectDesc : ""}</td>
+                    <td>{row ? procurementDesc : ""}</td>
+                    <td>{row?.procurement_mode || ""}</td>
+                    <td className="ngpa-app-table__center">
+                      {row ? ngpaYesNo(row.pre_proc_conf) : ""}
+                    </td>
+                    <td></td>
+                    <td className="ngpa-app-table__center">{row?.proc_start || ""}</td>
+                    <td className="ngpa-app-table__center">{row?.proc_end || ""}</td>
+                    <td>{row?.fund_source || ""}</td>
+                    <td className="ngpa-app-table__amount">
+                      {row ? ngpaMoney(row.total_estimated_budget) : ""}
+                    </td>
+                    <td></td>
+                    <td>{row ? remarks : ""}</td>
+                  </tr>
+                );
+              })}
               <tr className="ngpa-app-table__total">
-                <td colSpan={11} className="ngpa-app-table__total-label">
-                  TOTAL CSE ESTIMATED BUDGET (FY {fiscalYear})
+                <td colSpan={12} className="ngpa-app-table__total-label">
+                  Total Amount of CSEs to be purchased from PS-DBM:
                 </td>
                 <td className="ngpa-app-table__amount ngpa-app-table__total-value">
                   {ngpaMoney(total)}
                 </td>
-                <td></td>
+                <td colSpan={2}></td>
+              </tr>
+              <tr className="ngpa-app-table__total">
+                <td colSpan={12} className="ngpa-app-table__total-label">
+                  Total Amount of Estimated Budget:
+                </td>
+                <td className="ngpa-app-table__amount ngpa-app-table__total-value">
+                  {ngpaMoney(total)}
+                </td>
+                <td colSpan={2}></td>
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <div className="ngpa-app-form__signatories">
+          <div className="ngpa-app-form__sig-block">
+            <div className="ngpa-app-form__sig-role">Prepared by:</div>
+            <div className="ngpa-app-form__sig-line">Signature over Printed Name</div>
+            <div className="ngpa-app-form__sig-caption">Position/Designation</div>
+            <div className="ngpa-app-form__sig-unit">
+              Bids and Awards Committee Secretariat
+            </div>
+            <div className="ngpa-app-form__sig-date">Date : _________________</div>
+          </div>
+          <div className="ngpa-app-form__sig-block">
+            <div className="ngpa-app-form__sig-role">Recommended by:</div>
+            <div className="ngpa-app-form__sig-authority">
+              By the Authority of the Bids and Awards Committee:
+            </div>
+            <div className="ngpa-app-form__sig-line">Signature over Printed Name</div>
+            <div className="ngpa-app-form__sig-caption">Position/Designation</div>
+            <div className="ngpa-app-form__sig-unit">
+              Bids and Awards Committee Chairperson
+            </div>
+            <div className="ngpa-app-form__sig-date">Date : _________________</div>
+          </div>
+          <div className="ngpa-app-form__sig-block">
+            <div className="ngpa-app-form__sig-role">Approved by:</div>
+            <div className="ngpa-app-form__sig-line">Signature over Printed Name</div>
+            <div className="ngpa-app-form__sig-caption">Position/Designation</div>
+            <div className="ngpa-app-form__sig-unit">Head of the Procuring Entity</div>
+            <div className="ngpa-app-form__sig-date">Date : _________________</div>
+          </div>
         </div>
       </div>
     );
   };
 
   const renderNgpaNonCseAppForm = (rows, fiscalYear, grandTotal = null) => {
+    // Layout mirrors templates/NGPA_nonCSE-APP.xlsx (app sheet + how_to_fill_out guide).
     const list = rows || [];
     const total =
       grandTotal == null
@@ -1647,61 +1769,133 @@ function Dashboard({ token, user, onLogout }) {
     return (
       <div className="ngpa-app-form ngpa-app-form--noncse" role="document" aria-label="nonCSE APP Form">
         <div className="ngpa-app-form__header">
-          <div className="ngpa-app-form__letterhead">Ormoc City Government</div>
           <div className="ngpa-app-form__doc-title">
-            Annual Procurement Plan for FY {fiscalYear}
+            (Ormoc City Government) Annual Procurement Plan for FY {fiscalYear}
           </div>
-          <div className="ngpa-app-form__kind-label">Non-CSE Procurement Projects</div>
         </div>
         <div className="ngpa-app-form__table-wrapper">
-          <table className="ngpa-app-table">
+          <table className="ngpa-app-table ngpa-app-table--noncse">
             <thead>
               <tr>
-                <th rowSpan={2}>Code (PAP)</th>
-                <th rowSpan={2}>Procurement Project</th>
-                <th rowSpan={2}>PMO / End-User</th>
-                <th rowSpan={2}>Early Procurement Activity? (Yes/No)</th>
+                <th rowSpan={2}>
+                  Code (PAP)
+                  <span className="ngpa-app-table__th-note">
+                    PAP Code / internal numbering system
+                  </span>
+                </th>
+                <th rowSpan={2}>
+                  Procurement Project
+                  <span className="ngpa-app-table__th-note">
+                    Align with budget documents
+                  </span>
+                </th>
+                <th rowSpan={2}>
+                  PMO/End-User
+                  <span className="ngpa-app-table__th-note">
+                    Implementing / utilizing unit
+                  </span>
+                </th>
+                <th rowSpan={2}>
+                  Is this an Early Procurement Activity? (Yes/No)
+                </th>
                 <th rowSpan={2}>Mode of Procurement</th>
-                <th colSpan={4} className="ngpa-app-table__group">Schedule for Each Procurement Activity</th>
-                <th rowSpan={2}>Source of Funds</th>
-                <th rowSpan={2}>Estimated Budget (PhP)</th>
-                <th rowSpan={2}>Remarks</th>
+                <th colSpan={4} className="ngpa-app-table__group">
+                  Schedule for Each Procurement Activity
+                </th>
+                <th rowSpan={2}>
+                  Source of Funds
+                  <span className="ngpa-app-table__th-note">
+                    If Others, specify under Remarks
+                  </span>
+                </th>
+                <th colSpan={3} className="ngpa-app-table__group">
+                  Estimated Budget (PhP)
+                </th>
+                <th rowSpan={2}>
+                  Remarks
+                  <span className="ngpa-app-table__th-note">
+                    (brief description of Project)
+                  </span>
+                </th>
               </tr>
               <tr>
-                <th>Advertisement / Posting of IB/REI</th>
-                <th>Submission / Opening of Bids</th>
+                <th>Advertisement/Posting of IB/REI</th>
+                <th>Submission/Opening of Bids</th>
                 <th>Notice of Award</th>
                 <th>Contract Signing</th>
+                <th>Total</th>
+                <th>MOOE</th>
+                <th>CO</th>
               </tr>
             </thead>
             <tbody>
-              {padded.map((row, idx) => (
-                <tr key={row ? row.id : `noncse-blank-${idx}`}>
-                  <td>{row?.project_type || ""}</td>
-                  <td>{row?.description || ""}</td>
-                  <td>{row?.end_user_offices || ""}</td>
-                  <td className="ngpa-app-table__center">{row ? ngpaYesNo(row.pre_proc_conf) : ""}</td>
-                  <td>{row?.procurement_mode || ""}</td>
-                  <td className="ngpa-app-table__center">{row?.proc_start || ""}</td>
-                  <td className="ngpa-app-table__center">{row?.proc_start || ""}</td>
-                  <td className="ngpa-app-table__center">{row?.proc_end || ""}</td>
-                  <td className="ngpa-app-table__center">{row?.delivery_period || ""}</td>
-                  <td>{row?.fund_source || ""}</td>
-                  <td className="ngpa-app-table__amount">{row ? ngpaMoney(row.total_estimated_budget) : ""}</td>
-                  <td>{row?.quantity_size || ""}</td>
-                </tr>
-              ))}
+              {padded.map((row, idx) => {
+                // Export places the consolidated amount under MOOE; CO left blank;
+                // Total mirrors MOOE + CO (same as template formula).
+                const amount = row ? Number(row.total_estimated_budget || 0) : null;
+                return (
+                  <tr key={row ? row.id : `noncse-blank-${idx}`}>
+                    <td>{row?.project_type || ""}</td>
+                    <td>{row?.description || ""}</td>
+                    <td>{row?.end_user_offices || ""}</td>
+                    <td className="ngpa-app-table__center">
+                      {row ? ngpaYesNo(row.pre_proc_conf) : ""}
+                    </td>
+                    <td>{row?.procurement_mode || ""}</td>
+                    <td className="ngpa-app-table__center">{row?.proc_start || ""}</td>
+                    <td className="ngpa-app-table__center">{row?.proc_start || ""}</td>
+                    <td className="ngpa-app-table__center">{row?.proc_end || ""}</td>
+                    <td className="ngpa-app-table__center">
+                      {row?.delivery_period || ""}
+                    </td>
+                    <td>{row?.fund_source || ""}</td>
+                    <td className="ngpa-app-table__amount">
+                      {amount == null ? "" : ngpaMoney(amount)}
+                    </td>
+                    <td className="ngpa-app-table__amount">
+                      {amount == null ? "" : ngpaMoney(amount)}
+                    </td>
+                    <td className="ngpa-app-table__amount"></td>
+                    <td>{row?.quantity_size || ""}</td>
+                  </tr>
+                );
+              })}
               <tr className="ngpa-app-table__total">
-                <td colSpan={10} className="ngpa-app-table__total-label">
-                  TOTAL nonCSE ESTIMATED BUDGET (FY {fiscalYear})
+                <td className="ngpa-app-table__total-label">Total</td>
+                <td colSpan={9}></td>
+                <td className="ngpa-app-table__amount ngpa-app-table__total-value">
+                  {ngpaMoney(total)}
                 </td>
                 <td className="ngpa-app-table__amount ngpa-app-table__total-value">
                   {ngpaMoney(total)}
+                </td>
+                <td className="ngpa-app-table__amount ngpa-app-table__total-value">
+                  {ngpaMoney(0)}
                 </td>
                 <td></td>
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <div className="ngpa-app-form__signatories">
+          <div className="ngpa-app-form__sig-block">
+            <div className="ngpa-app-form__sig-role">Prepared by:</div>
+            <div className="ngpa-app-form__sig-line">Signature over Printed Name</div>
+            <div className="ngpa-app-form__sig-unit">
+              Bids and Awards Committee Secretariat
+            </div>
+          </div>
+          <div className="ngpa-app-form__sig-block">
+            <div className="ngpa-app-form__sig-role">Recommended by:</div>
+            <div className="ngpa-app-form__sig-line">Signature over Printed Name</div>
+            <div className="ngpa-app-form__sig-unit">Bids and Awards Committee</div>
+          </div>
+          <div className="ngpa-app-form__sig-block">
+            <div className="ngpa-app-form__sig-role">Approved by:</div>
+            <div className="ngpa-app-form__sig-line">Signature over Printed Name</div>
+            <div className="ngpa-app-form__sig-unit">Head of the Procuring Entity</div>
+          </div>
         </div>
       </div>
     );
@@ -1789,11 +1983,14 @@ function Dashboard({ token, user, onLogout }) {
             Office PPMP Excel files from{" "}
             <code>
               {label === "CSE"
-                ? "C:\\xampp\\htdocs\\ppmpsys\\IT_ppmps\\CSE"
-                : "C:\\xampp\\htdocs\\ppmpsys\\IT_ppmps\\nonCSE"}
+                ? "C:\\xampp\\htdocs\\ppmpsys\\IT_ppmps\\CSE\\{office}"
+                : "C:\\xampp\\htdocs\\ppmpsys\\IT_ppmps\\nonCSE\\{office}"}
             </code>{" "}
-            for FY {consolidationYear}. Run consolidation to rebuild this {label} APP
-            and upload it to Google Drive ({label === "CSE" ? "CSE-APP" : "nonCSE-APP"}).
+            (synced from Drive{" "}
+            {label === "CSE" ? "CSE-PPMP" : "nonCSE-PPMP"}
+            /{"{office}"}) for FY {consolidationYear}. Run consolidation to rebuild
+            this {label} APP and upload it to Google Drive (
+            {label === "CSE" ? "CSE-APP" : "nonCSE-APP"}).
           </p>
           <div className="table-wrapper">
             <table className="custom-table">
@@ -1816,10 +2013,10 @@ function Dashboard({ token, user, onLogout }) {
                 ) : approvedAppPpmps.length === 0 ? (
                   <tr>
                     <td colSpan="5" style={{ textAlign: "center", color: "var(--text-muted)" }}>
-                      No {label} PPMP files found in{" "}
+                      No {label} PPMP files found under{" "}
                       {label === "CSE"
-                        ? "C:\\xampp\\htdocs\\ppmpsys\\IT_ppmps\\CSE"
-                        : "C:\\xampp\\htdocs\\ppmpsys\\IT_ppmps\\nonCSE"}
+                        ? "IT_ppmps\\CSE\\{office}"
+                        : "IT_ppmps\\nonCSE\\{office}"}
                       .
                     </td>
                   </tr>
@@ -1844,14 +2041,25 @@ function Dashboard({ token, user, onLogout }) {
         <section className="dashboard-card app-workspace-form-card">
           <div className="app-workspace-section-head">
             <h2 className="card-title">{label} APP — NGPA Form</h2>
-            <span className="app-workspace-stat">
-              {rows.length} consolidated row(s)
-              {!kindAppPayload.app ? " · Not consolidated yet" : ""}
-              {isStaleApp ? " · Stale" : ""}
-              {rows.length > 0
-                ? ` · Page ${safePage} of ${totalPages}`
-                : ""}
-            </span>
+            <div className="app-workspace-section-head__aside">
+              <span className="app-workspace-stat">
+                {rows.length} consolidated row(s)
+                {!kindAppPayload.app ? " · Not consolidated yet" : ""}
+                {isStaleApp ? " · Stale" : ""}
+                {rows.length > 0
+                  ? ` · Page ${safePage} of ${totalPages}`
+                  : ""}
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setAppNgpaPreviewOpen(true)}
+                disabled={rows.length === 0}
+              >
+                <i className="fas fa-eye" aria-hidden="true"></i>
+                Preview
+              </button>
+            </div>
           </div>
           {isCse
             ? renderNgpaCseAppForm(pageRows, consolidationYear, grandTotal)
@@ -1883,6 +2091,61 @@ function Dashboard({ token, user, onLogout }) {
             </div>
           )}
         </section>
+
+        {appNgpaPreviewOpen && (
+          <div
+            className="ppmp-fullscreen app-ngpa-preview"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${label} APP NGPA Form Preview`}
+          >
+            <header className="ppmp-fullscreen-header">
+              <button
+                type="button"
+                className="btn btn-secondary ppmp-fullscreen-back"
+                onClick={() => setAppNgpaPreviewOpen(false)}
+              >
+                <i className="fas fa-arrow-left" aria-hidden="true"></i>
+                Close Preview
+              </button>
+              <div className="ppmp-fullscreen-title">
+                <h1>{label} APP — NGPA Form</h1>
+                <div className="ppmp-fullscreen-meta">
+                  <span className="ppmp-fullscreen-year">
+                    Fiscal Year {consolidationYear}
+                  </span>
+                  <span className="app-workspace-stat">
+                    {rows.length} consolidated row(s)
+                  </span>
+                </div>
+              </div>
+              <div className="ppmp-fullscreen-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => window.print()}
+                >
+                  <i className="fas fa-print" aria-hidden="true"></i>
+                  Print
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => handleExportApp(consolidationYear, kind)}
+                  disabled={!kindAppPayload.app || rows.length === 0}
+                >
+                  <i className="fas fa-file-excel" aria-hidden="true"></i>
+                  Download Excel
+                </button>
+              </div>
+            </header>
+            <div className="ppmp-fullscreen-body app-ngpa-preview__body">
+              {isCse
+                ? renderNgpaCseAppForm(rows, consolidationYear, grandTotal)
+                : renderNgpaNonCseAppForm(rows, consolidationYear, grandTotal)}
+            </div>
+          </div>
+        )}
       </div>
     );
   };

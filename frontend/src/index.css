@@ -2123,6 +2123,21 @@ pre.json-block {
   margin-bottom: 0.35rem;
 }
 
+.app-workspace-section-head__aside {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.app-ngpa-preview__body {
+  overflow: auto;
+}
+
+.app-ngpa-preview__body .ngpa-app-form__table-wrapper {
+  max-height: none;
+}
+
 .app-workspace-section-head .card-title {
   margin-bottom: 0;
 }
@@ -2307,6 +2322,93 @@ pre.json-block {
   font-size: 0.82rem;
 }
 
+.ngpa-app-table--cse {
+  min-width: 1600px;
+}
+
+.ngpa-app-table--noncse {
+  min-width: 1400px;
+}
+
+.ngpa-app-table__th-note {
+  display: block;
+  font-weight: 400;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+  margin-top: 0.15rem;
+}
+
+.ngpa-app-table__col-no {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.ngpa-app-table__section td {
+  background: #e8eef6;
+  font-weight: 700;
+  text-align: left;
+  font-size: 0.78rem;
+}
+
+.ngpa-app-form__signatories {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--ngpa-border);
+}
+
+.ngpa-app-form__sig-block {
+  text-align: center;
+  font-size: 0.78rem;
+}
+
+.ngpa-app-form__sig-role {
+  font-weight: 700;
+  margin-bottom: 1.4rem;
+}
+
+.ngpa-app-form__sig-authority {
+  font-size: 0.7rem;
+  font-style: italic;
+  color: var(--text-secondary);
+  margin: -0.9rem 0 1.1rem;
+}
+
+.ngpa-app-form__sig-line {
+  border-top: 1px solid var(--ngpa-border);
+  margin: 0.35rem 0.75rem 0.2rem;
+  padding-top: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.ngpa-app-form__sig-caption {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  margin-bottom: 0.35rem;
+}
+
+.ngpa-app-form__sig-unit {
+  font-weight: 600;
+  margin-bottom: 0.55rem;
+  min-height: 1.1em;
+}
+
+.ngpa-app-form__sig-date {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
 @media (max-width: 900px) {
   .app-workspace-toolbar {
     align-items: stretch;
@@ -2320,12 +2422,36 @@ pre.json-block {
   .ngpa-app-form__table-wrapper {
     max-height: none;
   }
+
+  .ngpa-app-form__signatories {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media print {
   .app-workspace-toolbar,
-  .app-workspace-source {
+  .app-workspace-source,
+  .app-workspace-section-head,
+  .app-form-pagination,
+  .app-ngpa-preview .ppmp-fullscreen-header {
     display: none !important;
+  }
+
+  body:has(.app-ngpa-preview) .sidebar,
+  body:has(.app-ngpa-preview) .dashboard-main-header,
+  body:has(.app-ngpa-preview) .topbar {
+    display: none !important;
+  }
+
+  .app-ngpa-preview,
+  .app-ngpa-preview__body {
+    position: static !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #ffffff !important;
   }
 
   .ngpa-app-form__table-wrapper {

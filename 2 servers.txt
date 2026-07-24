@@ -22,9 +22,9 @@ FILE-BASED CSE / nonCSE APP CONSOLIDATION
 #   (folder id 1WwsC0Le5uo71jSzZlYsEnQT5MGWTnjq6 — rclone remote "gdrive"):
 #
 # Sources (office PPMPs — synced into local IT_ppmps on CSE-APP / nonCSE-APP load):
-#   Drive CSE-PPMP    →  C:\xampp\htdocs\ppmpsys\IT_ppmps\CSE
-#   Drive nonCSE-PPMP →  C:\xampp\htdocs\ppmpsys\IT_ppmps\nonCSE
-#
+#   Drive CSE-PPMP/{office}    →  C:\xampp\htdocs\ppmpsys\IT_ppmps\CSE\{office}
+#   Drive nonCSE-PPMP/{office} →  C:\xampp\htdocs\ppmpsys\IT_ppmps\nonCSE\{office}
+#   (office folders e.g. BAC, ADMIN, IT — Excel files listed recursively)#
 # Outputs (consolidated APP uploaded after Run Consolidation):
 #   local export → Drive CSE-APP / nonCSE-APP
 #

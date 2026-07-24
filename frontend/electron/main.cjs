@@ -40,6 +40,15 @@ function getApiBaseUrl() {
 ipcMain.handle("ppmp:get-app-version", () => app.getVersion());
 ipcMain.handle("ppmp:get-api-base-url", () => getApiBaseUrl());
 
+function resolveAppIcon() {
+  // Packaged: Vite copies public/ into dist/
+  const packaged = path.join(__dirname, "..", "dist", "Ormoc_City.png");
+  const fromPublic = path.join(__dirname, "..", "public", "Ormoc_City.png");
+  if (fs.existsSync(packaged)) return packaged;
+  if (fs.existsSync(fromPublic)) return fromPublic;
+  return undefined;
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -48,6 +57,7 @@ function createWindow() {
     minHeight: 640,
     show: false,
     title: "PPMP System",
+    icon: resolveAppIcon(),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

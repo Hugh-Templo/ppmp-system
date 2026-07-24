@@ -279,7 +279,7 @@ def list_ppmps_from_files(
     kind: str = "cse",
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
-    """List office PPMP Excel files under IT_ppmps/CSE or IT_ppmps/nonCSE."""
+    """List office PPMP Excel files under IT_ppmps/CSE/{office} or IT_ppmps/nonCSE/{office}."""
     kind_norm = (kind or "cse").strip().lower()
     if kind_norm not in ("cse", "noncse"):
         raise HTTPException(status_code=400, detail="kind must be 'cse' or 'noncse'")
@@ -302,8 +302,9 @@ def sync_ppmps_from_drive(
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
     """
-    rclone-sync Drive CSE-PPMP / nonCSE-PPMP into local IT_ppmps/CSE / nonCSE,
-    then return the file listing for the requested kind (or both if omitted).
+    rclone-sync Drive CSE-PPMP/{office} / nonCSE-PPMP/{office} into local
+    IT_ppmps/CSE/{office} / nonCSE/{office}, then return the file listing for
+    the requested kind (or both if omitted).
     """
     from app.drive_sync import pull_ppmps_from_drive
     from app.file_ppmps import ensure_it_ppmps_dirs, list_file_ppmps
@@ -354,8 +355,9 @@ def consolidate_ppmps_from_files(
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
     """
-    Consolidate PPMP Excel files from IT_ppmps/CSE and/or IT_ppmps/nonCSE into APP/APPRow,
-    export NGPA APP workbooks locally, and rclone-upload to Drive CSE-APP / nonCSE-APP.
+    Consolidate PPMP Excel files from IT_ppmps/CSE/{office} and/or
+    IT_ppmps/nonCSE/{office} into APP/APPRow, export NGPA APP workbooks locally,
+    and rclone-upload to Drive CSE-APP / nonCSE-APP.
 
     Optional ``kind=cse|noncse`` rebuilds only that side from its folder and keeps the
     other side's existing APP rows. Omit ``kind`` to rebuild from both folders.

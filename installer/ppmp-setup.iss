@@ -63,7 +63,7 @@ Filename: "powershell.exe"; \
 var
   ConfigPage: TInputQueryWizardPage;
 
-function InitializeWizard(): Boolean;
+procedure InitializeWizard;
 begin
   ConfigPage := CreateInputQueryPage(wpSelectDir,
     'API and database',
@@ -73,7 +73,6 @@ begin
   ConfigPage.Add('DATABASE_URL:', False);
   ConfigPage.Values[0] := '8000';
   ConfigPage.Values[1] := 'postgresql://postgres:postgres@localhost:5432/ppmpbacdb';
-  Result := True;
 end;
 
 function GetApiPort(Param: String): String;
