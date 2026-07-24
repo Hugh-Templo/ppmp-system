@@ -122,6 +122,9 @@ function Dashboard({ token, user, onLogout }) {
   const [approvedAppPpmps, setApprovedAppPpmps] = useState([]);
   const [kindAppPayload, setKindAppPayload] = useState({ app: null, rows: [] });
   const [appWorkspaceLoading, setAppWorkspaceLoading] = useState(false);
+  const [appDriveSyncing, setAppDriveSyncing] = useState(false);
+  const [appFormPage, setAppFormPage] = useState(1);
+  const APP_FORM_PAGE_SIZE = 10;
 
   // DBM Classification form state
   const [newDbmCode, setNewDbmCode] = useState("");
@@ -1107,43 +1110,147 @@ function Dashboard({ token, user, onLogout }) {
     });
   };
 
-  const loadAppWorkspace = async (kind) => {
+  const loadAppWorkspace = async (kind, { syncFromDrive = true } = {}) => {
     setAppWorkspaceLoading(true);
+    setAppFormPage(1);
+    let filesLoaded = false;
     try {
-      const [ppmpsRes, appRes] = await Promise.all([
-        apiFetch(`/api/bac/ppmps/from-files?kind=${kind}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
+      if (syncFromDrive) {
+        setAppDriveSyncing(true);
+        try {
+          const syncRes = await apiFetch(
+            `/api/bac/ppmps/sync-from-drive?kind=${kind}`,
+            {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+          if (syncRes.ok) {
+            const syncPayload = await syncRes.json();
+            setApprovedAppPpmps(
+              Array.isArray(syncPayload.files) ? syncPayload.files : []
+            );
+            filesLoaded = true;
+            if (!syncPayload.ok) {
+              const kindSync = syncPayload?.sync?.kinds?.[kind];
+              showNotification(
+                kindSync?.error ||
+                  "Drive sync had issues; showing local IT_ppmps files.",
+                "danger"
+              );
+            }
+          } else {
+            const errBody = await syncRes.json().catch(() => ({}));
+            showNotification(
+              errBody.detail ||
+                "Could not sync from Drive; loading local files.",
+              "danger"
+            );
+          }
+        } catch (syncErr) {
+          showNotification(
+            "Could not sync from Drive; loading local files.",
+            "danger"
+          );
+        } finally {
+          setAppDriveSyncing(false);
+        }
+      }
+
+      const requests = [
         apiFetch(
           `/api/bac/apps/by-year/${consolidationYear}?kind=${kind}`,
           { headers: { Authorization: `Bearer ${token}` } }
         ),
-      ]);
-      if (ppmpsRes.ok) {
-        setApprovedAppPpmps(await ppmpsRes.json());
-      } else {
-        setApprovedAppPpmps([]);
+      ];
+      if (!filesLoaded) {
+        requests.unshift(
+          apiFetch(`/api/bac/ppmps/from-files?kind=${kind}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+        );
       }
-      if (appRes.ok) {
-        setKindAppPayload(await appRes.json());
+
+      const results = await Promise.all(requests);
+      if (!filesLoaded) {
+        const ppmpsRes = results[0];
+        const appRes = results[1];
+        if (ppmpsRes.ok) {
+          const payload = await ppmpsRes.json();
+          setApprovedAppPpmps(
+            Array.isArray(payload) ? payload : payload.files || []
+          );
+        } else {
+          setApprovedAppPpmps([]);
+        }
+        if (appRes.ok) {
+          setKindAppPayload(await appRes.json());
+        } else {
+          setKindAppPayload({ app: null, rows: [] });
+        }
       } else {
-        setKindAppPayload({ app: null, rows: [] });
+        const appRes = results[0];
+        if (appRes.ok) {
+          setKindAppPayload(await appRes.json());
+        } else {
+          setKindAppPayload({ app: null, rows: [] });
+        }
       }
     } catch (err) {
-      setApprovedAppPpmps([]);
+      if (!filesLoaded) setApprovedAppPpmps([]);
       setKindAppPayload({ app: null, rows: [] });
       showNotification("Failed to load APP workspace", "danger");
     } finally {
       setAppWorkspaceLoading(false);
+      setAppDriveSyncing(false);
+    }
+  };
+
+  const handleSyncPpmpsFromDrive = async (kind) => {
+    setAppDriveSyncing(true);
+    try {
+      const syncRes = await apiFetch(
+        `/api/bac/ppmps/sync-from-drive?kind=${kind}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (syncRes.ok) {
+        const syncPayload = await syncRes.json();
+        setApprovedAppPpmps(
+          Array.isArray(syncPayload.files) ? syncPayload.files : []
+        );
+        if (syncPayload.ok) {
+          showNotification(
+            `Synced ${syncPayload.count ?? 0} PPMP file(s) from Drive.`
+          );
+        } else {
+          const kindSync = syncPayload?.sync?.kinds?.[kind];
+          showNotification(
+            kindSync?.error ||
+              "Drive sync had issues; showing local IT_ppmps files.",
+            "danger"
+          );
+        }
+      } else {
+        const errBody = await syncRes.json().catch(() => ({}));
+        showNotification(errBody.detail || "Drive sync failed", "danger");
+      }
+    } catch (err) {
+      showNotification("Drive sync failed", "danger");
+    } finally {
+      setAppDriveSyncing(false);
     }
   };
 
   const handleConsolidate = async (e) => {
     if (e && typeof e.preventDefault === "function") e.preventDefault();
     const fromFiles = activeTab === "cse_app" || activeTab === "noncse_app";
+    const kind = activeTab === "cse_app" ? "cse" : activeTab === "noncse_app" ? "noncse" : null;
     try {
       const url = fromFiles
-        ? `/api/bac/consolidate-from-files/${consolidationYear}`
+        ? `/api/bac/consolidate-from-files/${consolidationYear}?kind=${kind}`
         : `/api/bac/consolidate/${consolidationYear}`;
       const res = await apiFetch(url, {
         method: "POST",
@@ -1155,7 +1262,7 @@ function Dashboard({ token, user, onLogout }) {
           const uploadMsg = data?.upload?.message;
           showNotification(
             uploadMsg ||
-              `APP for FY ${consolidationYear} rebuilt from IT_ppmps files.`
+              `APP for FY ${consolidationYear} rebuilt from IT_ppmps/${kind === "cse" ? "CSE" : "nonCSE"}.`
           );
         } else {
           showNotification(
@@ -1164,7 +1271,7 @@ function Dashboard({ token, user, onLogout }) {
         }
         fetchApps();
         if (fromFiles) {
-          loadAppWorkspace(activeTab === "cse_app" ? "cse" : "noncse");
+          loadAppWorkspace(kind);
         }
       } else {
         showNotification(data.detail || "Consolidation failed", "danger");
@@ -1439,12 +1546,12 @@ function Dashboard({ token, user, onLogout }) {
     );
   };
 
-  const renderNgpaCseAppForm = (rows, fiscalYear) => {
+  const renderNgpaCseAppForm = (rows, fiscalYear, grandTotal = null) => {
     const list = rows || [];
-    const total = list.reduce(
-      (sum, r) => sum + Number(r.total_estimated_budget || 0),
-      0
-    );
+    const total =
+      grandTotal == null
+        ? list.reduce((sum, r) => sum + Number(r.total_estimated_budget || 0), 0)
+        : Number(grandTotal || 0);
     const padded = Array.from(
       { length: Math.max(list.length, 6) },
       (_, i) => list[i] || null
@@ -1526,12 +1633,12 @@ function Dashboard({ token, user, onLogout }) {
     );
   };
 
-  const renderNgpaNonCseAppForm = (rows, fiscalYear) => {
+  const renderNgpaNonCseAppForm = (rows, fiscalYear, grandTotal = null) => {
     const list = rows || [];
-    const total = list.reduce(
-      (sum, r) => sum + Number(r.total_estimated_budget || 0),
-      0
-    );
+    const total =
+      grandTotal == null
+        ? list.reduce((sum, r) => sum + Number(r.total_estimated_budget || 0), 0)
+        : Number(grandTotal || 0);
     const padded = Array.from(
       { length: Math.max(list.length, 6) },
       (_, i) => list[i] || null
@@ -1610,6 +1717,16 @@ function Dashboard({ token, user, onLogout }) {
     );
     const isStaleApp = !appWorkspaceLoading && rows.length > 0 && approvedAppPpmps.length === 0;
 
+    const totalPages = Math.max(1, Math.ceil(rows.length / APP_FORM_PAGE_SIZE));
+    const safePage = Math.min(Math.max(1, appFormPage), totalPages);
+    const pageStart = (safePage - 1) * APP_FORM_PAGE_SIZE;
+    const pageRows = rows.slice(pageStart, pageStart + APP_FORM_PAGE_SIZE);
+    const pageEnd = pageStart + pageRows.length;
+    const grandTotal = rows.reduce(
+      (sum, r) => sum + Number(r.total_estimated_budget || 0),
+      0
+    );
+
     return (
       <div className="app-workspace">
         <div className="app-workspace-toolbar">
@@ -1620,10 +1737,22 @@ function Dashboard({ token, user, onLogout }) {
               type="number"
               className="form-input app-workspace-fy"
               value={consolidationYear}
-              onChange={(e) => setConsolidationYear(e.target.value)}
+              onChange={(e) => {
+                setConsolidationYear(e.target.value);
+                setAppFormPage(1);
+              }}
             />
           </div>
           <div className="app-workspace-toolbar__actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => handleSyncPpmpsFromDrive(kind)}
+              disabled={appDriveSyncing || appWorkspaceLoading}
+            >
+              <i className="fas fa-cloud-download-alt" aria-hidden="true"></i>
+              {appDriveSyncing ? "Syncing…" : "Sync from Drive"}
+            </button>
             <button type="button" className="btn" onClick={handleConsolidate}>
               <i className="fas fa-layer-group" aria-hidden="true"></i>
               {isStaleApp ? "Clear / Rebuild APP" : "Run Consolidation"}
@@ -1658,8 +1787,12 @@ function Dashboard({ token, user, onLogout }) {
           </div>
           <p className="page-subtitle" style={{ marginBottom: "0.75rem" }}>
             Office PPMP Excel files from{" "}
-            <code>IT_ppmps/{label === "CSE" ? "CSE" : "nonCSE"}</code> for FY{" "}
-            {consolidationYear}. Run consolidation to rebuild the {label} APP below
+            <code>
+              {label === "CSE"
+                ? "C:\\xampp\\htdocs\\ppmpsys\\IT_ppmps\\CSE"
+                : "C:\\xampp\\htdocs\\ppmpsys\\IT_ppmps\\nonCSE"}
+            </code>{" "}
+            for FY {consolidationYear}. Run consolidation to rebuild this {label} APP
             and upload it to Google Drive ({label === "CSE" ? "CSE-APP" : "nonCSE-APP"}).
           </p>
           <div className="table-wrapper">
@@ -1683,8 +1816,11 @@ function Dashboard({ token, user, onLogout }) {
                 ) : approvedAppPpmps.length === 0 ? (
                   <tr>
                     <td colSpan="5" style={{ textAlign: "center", color: "var(--text-muted)" }}>
-                      No {label} PPMP files found in IT_ppmps/
-                      {label === "CSE" ? "CSE" : "nonCSE"}.
+                      No {label} PPMP files found in{" "}
+                      {label === "CSE"
+                        ? "C:\\xampp\\htdocs\\ppmpsys\\IT_ppmps\\CSE"
+                        : "C:\\xampp\\htdocs\\ppmpsys\\IT_ppmps\\nonCSE"}
+                      .
                     </td>
                   </tr>
                 ) : (
@@ -1712,11 +1848,40 @@ function Dashboard({ token, user, onLogout }) {
               {rows.length} consolidated row(s)
               {!kindAppPayload.app ? " · Not consolidated yet" : ""}
               {isStaleApp ? " · Stale" : ""}
+              {rows.length > 0
+                ? ` · Page ${safePage} of ${totalPages}`
+                : ""}
             </span>
           </div>
           {isCse
-            ? renderNgpaCseAppForm(rows, consolidationYear)
-            : renderNgpaNonCseAppForm(rows, consolidationYear)}
+            ? renderNgpaCseAppForm(pageRows, consolidationYear, grandTotal)
+            : renderNgpaNonCseAppForm(pageRows, consolidationYear, grandTotal)}
+
+          {rows.length > APP_FORM_PAGE_SIZE && (
+            <div className="app-form-pagination" role="navigation" aria-label="APP form pages">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={safePage <= 1}
+                onClick={() => setAppFormPage((p) => Math.max(1, p - 1))}
+              >
+                <i className="fas fa-chevron-left" aria-hidden="true"></i>
+                Previous
+              </button>
+              <span className="app-form-pagination__status">
+                Showing {pageStart + 1}–{pageEnd} of {rows.length} rows
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={safePage >= totalPages}
+                onClick={() => setAppFormPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Next
+                <i className="fas fa-chevron-right" aria-hidden="true"></i>
+              </button>
+            </div>
+          )}
         </section>
       </div>
     );
@@ -1935,46 +2100,6 @@ function Dashboard({ token, user, onLogout }) {
               >
                 <i className="fas fa-clipboard-list" aria-hidden="true"></i>
                 nonCSE-APP
-              </button>
-            )}
-            {user.role === "bac_admin" && (
-              <button
-                type="button"
-                className={`nav-link ${activeTab === "offices" ? "active" : ""}`}
-                onClick={() => { setActiveTab("offices"); }}
-              >
-                <i className="fas fa-building" aria-hidden="true"></i>
-                Manage Offices
-              </button>
-            )}
-            {user.role === "bac_admin" && (
-              <button
-                type="button"
-                className={`nav-link ${activeTab === "users" ? "active" : ""}`}
-                onClick={() => { setActiveTab("users"); }}
-              >
-                <i className="fas fa-users" aria-hidden="true"></i>
-                Manage Users
-              </button>
-            )}
-            {user.role === "bac_admin" && (
-              <button
-                type="button"
-                className={`nav-link ${activeTab === "dbm" ? "active" : ""}`}
-                onClick={() => { setActiveTab("dbm"); }}
-              >
-                <i className="fas fa-file-alt" aria-hidden="true"></i>
-                DBM Classification
-              </button>
-            )}
-            {user.role === "bac_admin" && (
-              <button
-                type="button"
-                className={`nav-link ${activeTab === "audit" ? "active" : ""}`}
-                onClick={() => { setActiveTab("audit"); setSelectedPpmp(null); setAuditDetails(null); }}
-              >
-                <i className="fas fa-clipboard-check" aria-hidden="true"></i>
-                Pending PPMP Review
               </button>
             )}
           </div>

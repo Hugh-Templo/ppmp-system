@@ -29,3 +29,8 @@ templates/~$*.xlsx
 templates/end-users/*/
 
 token.txt
+
+# Windows installer payload / output
+installer/payload/
+installer/vendor/
+dist-installer/

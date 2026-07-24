@@ -2,11 +2,14 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+# Prefer install-root .env (Windows service / packaged deploy)
+load_dotenv(REPO_ROOT / ".env")
 load_dotenv()
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
 RCLONE_REMOTE = os.getenv("RCLONE_REMOTE", "gdrive")
+# Absolute path to rclone.exe when not on PATH (Windows installer bundles tools/rclone)
+RCLONE_PATH = os.getenv("RCLONE_PATH", "rclone")
 DRIVE_INPUT_FOLDER = os.getenv("DRIVE_INPUT_FOLDER", "inputs")
 LOCAL_INPUT_FOLDER = os.getenv("LOCAL_INPUT_FOLDER", "./data/inputs")
 SYNC_INTERVAL_MINUTES = int(os.getenv("SYNC_INTERVAL_MINUTES", "60"))
@@ -28,12 +31,17 @@ LOCAL_APP_OUTPUT_FOLDER = Path(
     os.getenv("LOCAL_APP_OUTPUT_FOLDER", str(REPO_ROOT / "data" / "app_outputs"))
 ).resolve()
 
-# Google Drive APP SYSTEM FILES (CSE-APP / nonCSE-APP upload targets)
+# Google Drive APP SYSTEM FILES
+# Root: https://drive.google.com/drive/folders/1WwsC0Le5uo71jSzZlYsEnQT5MGWTnjq6
 DRIVE_APP_ROOT_FOLDER_ID = os.getenv(
     "DRIVE_APP_ROOT_FOLDER_ID", "1WwsC0Le5uo71jSzZlYsEnQT5MGWTnjq6"
 )
+# Consolidated APP upload targets
 DRIVE_CSE_APP_SUBFOLDER = os.getenv("DRIVE_CSE_APP_SUBFOLDER", "CSE-APP")
 DRIVE_NONCSE_APP_SUBFOLDER = os.getenv("DRIVE_NONCSE_APP_SUBFOLDER", "nonCSE-APP")
+# Office PPMP source folders (Drive → local IT_ppmps)
+DRIVE_CSE_PPMP_SUBFOLDER = os.getenv("DRIVE_CSE_PPMP_SUBFOLDER", "CSE-PPMP")
+DRIVE_NONCSE_PPMP_SUBFOLDER = os.getenv("DRIVE_NONCSE_PPMP_SUBFOLDER", "nonCSE-PPMP")
 
 
 def drive_app_rclone_dest(kind: str) -> str:
@@ -42,6 +50,16 @@ def drive_app_rclone_dest(kind: str) -> str:
         DRIVE_CSE_APP_SUBFOLDER
         if (kind or "").strip().lower() == "cse"
         else DRIVE_NONCSE_APP_SUBFOLDER
+    )
+    return f"{RCLONE_REMOTE},root_folder_id={DRIVE_APP_ROOT_FOLDER_ID}:{sub}"
+
+
+def drive_ppmp_rclone_source(kind: str) -> str:
+    """rclone source for office PPMP Excel files (Drive CSE-PPMP / nonCSE-PPMP)."""
+    sub = (
+        DRIVE_CSE_PPMP_SUBFOLDER
+        if (kind or "").strip().lower() == "cse"
+        else DRIVE_NONCSE_PPMP_SUBFOLDER
     )
     return f"{RCLONE_REMOTE},root_folder_id={DRIVE_APP_ROOT_FOLDER_ID}:{sub}"
 

@@ -1,11 +1,44 @@
 const { app, BrowserWindow, shell, ipcMain } = require("electron");
+const fs = require("fs");
 const path = require("path");
 
 const DEV_SERVER_URL =
   process.env.VITE_DEV_SERVER_URL || "http://127.0.0.1:5173";
 
+function resolveApiConfigPaths() {
+  const exeDir = path.dirname(app.getPath("exe"));
+  const programData = process.env.PROGRAMDATA || process.env.ProgramData || "";
+  return [
+    path.join(exeDir, "api-config.json"),
+    path.join(exeDir, "..", "api-config.json"),
+    path.join(exeDir, "..", "..", "api-config.json"),
+    programData ? path.join(programData, "PPMP System", "api-config.json") : null,
+  ].filter(Boolean);
+}
+
+function readApiBaseFromConfig() {
+  for (const candidate of resolveApiConfigPaths()) {
+    try {
+      if (!fs.existsSync(candidate)) continue;
+      const raw = fs.readFileSync(candidate, "utf8");
+      const parsed = JSON.parse(raw);
+      const base = (parsed.apiBaseUrl || parsed.api_base_url || "").trim();
+      if (base) return base.replace(/\/$/, "");
+    } catch (_) {
+      // try next candidate
+    }
+  }
+  return "";
+}
+
+function getApiBaseUrl() {
+  const fromEnv = (process.env.VITE_API_BASE_URL || "").trim().replace(/\/$/, "");
+  const fromFile = readApiBaseFromConfig();
+  return fromFile || fromEnv || "http://127.0.0.1:8000";
+}
+
 ipcMain.handle("ppmp:get-app-version", () => app.getVersion());
-ipcMain.handle("ppmp:get-api-base-url", () => process.env.VITE_API_BASE_URL || "");
+ipcMain.handle("ppmp:get-api-base-url", () => getApiBaseUrl());
 
 function createWindow() {
   const win = new BrowserWindow({

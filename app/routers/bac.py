@@ -283,44 +283,179 @@ def list_ppmps_from_files(
     kind_norm = (kind or "cse").strip().lower()
     if kind_norm not in ("cse", "noncse"):
         raise HTTPException(status_code=400, detail="kind must be 'cse' or 'noncse'")
-    from app.file_ppmps import list_file_ppmps
+    from app.file_ppmps import ensure_it_ppmps_dirs, list_file_ppmps
 
-    return list_file_ppmps(kind_norm)
+    folders = ensure_it_ppmps_dirs()
+    files = list_file_ppmps(kind_norm)
+    return {
+        "kind": kind_norm,
+        "folder": folders[kind_norm],
+        "root": folders["root"],
+        "count": len(files),
+        "files": files,
+    }
+
+
+@router.post("/ppmps/sync-from-drive")
+def sync_ppmps_from_drive(
+    kind: Optional[str] = None,
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """
+    rclone-sync Drive CSE-PPMP / nonCSE-PPMP into local IT_ppmps/CSE / nonCSE,
+    then return the file listing for the requested kind (or both if omitted).
+    """
+    from app.drive_sync import pull_ppmps_from_drive
+    from app.file_ppmps import ensure_it_ppmps_dirs, list_file_ppmps
+
+    kind_norm = (kind or "").strip().lower() or None
+    if kind_norm is not None and kind_norm not in ("cse", "noncse"):
+        raise HTTPException(status_code=400, detail="kind must be 'cse' or 'noncse'")
+
+    sync_result = pull_ppmps_from_drive(kind_norm)
+    folders = ensure_it_ppmps_dirs()
+
+    if kind_norm:
+        files = list_file_ppmps(kind_norm)
+        return {
+            "ok": sync_result.get("ok", False),
+            "sync": sync_result,
+            "kind": kind_norm,
+            "folder": folders[kind_norm],
+            "root": folders["root"],
+            "count": len(files),
+            "files": files,
+        }
+
+    cse_files = list_file_ppmps("cse")
+    noncse_files = list_file_ppmps("noncse")
+    return {
+        "ok": sync_result.get("ok", False),
+        "sync": sync_result,
+        "root": folders["root"],
+        "cse": {
+            "folder": folders["cse"],
+            "count": len(cse_files),
+            "files": cse_files,
+        },
+        "noncse": {
+            "folder": folders["noncse"],
+            "count": len(noncse_files),
+            "files": noncse_files,
+        },
+    }
 
 
 @router.post("/consolidate-from-files/{fiscal_year}")
 def consolidate_ppmps_from_files(
     fiscal_year: int,
+    kind: Optional[str] = None,
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
     """
-    Consolidate PPMP Excel files from IT_ppmps/{CSE|nonCSE} into APP/APPRow,
+    Consolidate PPMP Excel files from IT_ppmps/CSE and/or IT_ppmps/nonCSE into APP/APPRow,
     export NGPA APP workbooks locally, and rclone-upload to Drive CSE-APP / nonCSE-APP.
+
+    Optional ``kind=cse|noncse`` rebuilds only that side from its folder and keeps the
+    other side's existing APP rows. Omit ``kind`` to rebuild from both folders.
     """
     from app.app_consolidate import ensure_app_cleared, write_app_rows_from_item_dicts
     from app.app_export import export_cse_app, export_noncse_app
     from app.config import LOCAL_APP_OUTPUT_FOLDER, drive_app_rclone_dest
     from app.drive_sync import push_app_to_drive
-    from app.file_ppmps import list_file_ppmps, load_all_file_items
+    from app.file_ppmps import (
+        ensure_it_ppmps_dirs,
+        list_file_ppmps,
+        load_all_file_items,
+        load_file_items_for_kind,
+    )
+
+    folders = ensure_it_ppmps_dirs()
+    kind_norm = (kind or "").strip().lower() or None
+    if kind_norm is not None and kind_norm not in ("cse", "noncse"):
+        raise HTTPException(status_code=400, detail="kind must be 'cse' or 'noncse'")
 
     cse_files = list_file_ppmps("cse")
     noncse_files = list_file_ppmps("noncse")
-    item_dicts = load_all_file_items()
 
     app = session.exec(select(APP).where(APP.fiscal_year == fiscal_year)).first()
+    existing_rows = []
+    if app:
+        existing_rows = session.exec(
+            select(APPRow).where(APPRow.app_id == app.id)
+        ).all()
+
+    if kind_norm == "cse":
+        item_dicts = load_file_items_for_kind("cse")
+        keep_other = [
+            {
+                "description": r.description,
+                "is_cse": False,
+                "project_type": r.project_type,
+                "procurement_mode": r.procurement_mode,
+                "fund_source": r.fund_source,
+                "quantity_size": r.quantity_size,
+                "proc_start": r.proc_start,
+                "proc_end": r.proc_end,
+                "delivery_period": r.delivery_period,
+                "pre_proc_conf": bool(r.pre_proc_conf),
+                "estimated_budget": r.total_estimated_budget or 0.0,
+                "quantity": r.total_quantity or 0,
+                "q1_qty": r.q1_qty or 0,
+                "q2_qty": r.q2_qty or 0,
+                "q3_qty": r.q3_qty or 0,
+                "q4_qty": r.q4_qty or 0,
+                "category": r.category,
+                "unit_of_measure": r.unit_of_measure,
+                "unit_cost": r.unit_cost,
+                "office_code": r.end_user_offices or "",
+            }
+            for r in existing_rows
+            if not bool(r.is_cse)
+        ]
+        item_dicts = item_dicts + keep_other
+    elif kind_norm == "noncse":
+        item_dicts = load_file_items_for_kind("noncse")
+        keep_other = [
+            {
+                "description": r.description,
+                "is_cse": True,
+                "project_type": r.project_type,
+                "procurement_mode": r.procurement_mode,
+                "fund_source": r.fund_source,
+                "quantity_size": r.quantity_size,
+                "proc_start": r.proc_start,
+                "proc_end": r.proc_end,
+                "delivery_period": r.delivery_period,
+                "pre_proc_conf": bool(r.pre_proc_conf),
+                "estimated_budget": r.total_estimated_budget or 0.0,
+                "quantity": r.total_quantity or 0,
+                "q1_qty": r.q1_qty or 0,
+                "q2_qty": r.q2_qty or 0,
+                "q3_qty": r.q3_qty or 0,
+                "q4_qty": r.q4_qty or 0,
+                "category": r.category,
+                "unit_of_measure": r.unit_of_measure,
+                "unit_cost": r.unit_cost,
+                "office_code": r.end_user_offices or "",
+            }
+            for r in existing_rows
+            if bool(r.is_cse)
+        ]
+        item_dicts = item_dicts + keep_other
+    else:
+        item_dicts = load_all_file_items()
 
     if not item_dicts:
         if app:
-            existing_rows = session.exec(
-                select(APPRow).where(APPRow.app_id == app.id)
-            ).all()
             for row in existing_rows:
                 session.delete(row)
             session.commit()
             session.refresh(app)
             return {
                 "app": app,
+                "folders": folders,
                 "source_files": {"cse": len(cse_files), "noncse": len(noncse_files)},
                 "row_count": 0,
                 "exports": {},
@@ -332,7 +467,10 @@ def consolidate_ppmps_from_files(
                         "noncse": drive_app_rclone_dest("noncse"),
                     },
                     "files": [],
-                    "message": "No line items found in IT_ppmps; cleared APP rows.",
+                    "message": (
+                        "No line items found under IT_ppmps/CSE or IT_ppmps/nonCSE; "
+                        "cleared APP rows."
+                    ),
                 },
             }
         raise HTTPException(
@@ -352,6 +490,10 @@ def consolidate_ppmps_from_files(
     has_cse = any(bool(r.is_cse) for r in rows)
     has_noncse = any(not bool(r.is_cse) for r in rows)
 
+    # When consolidating one kind, only export/upload that kind
+    export_cse = has_cse and (kind_norm in (None, "cse"))
+    export_non = has_noncse and (kind_norm in (None, "noncse"))
+
     LOCAL_APP_OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
     exports = {}
     upload_files = []
@@ -359,7 +501,7 @@ def consolidate_ppmps_from_files(
     uploaded_noncse = False
     upload_errors = []
 
-    if has_cse:
+    if export_cse:
         cse_name = f"APP-CSE-FY{fiscal_year}.xlsx"
         cse_path = LOCAL_APP_OUTPUT_FOLDER / cse_name
         cse_path.write_bytes(export_cse_app(session, fiscal_year))
@@ -370,7 +512,7 @@ def consolidate_ppmps_from_files(
         if not result.get("ok"):
             upload_errors.append(result.get("error") or "CSE upload failed")
 
-    if has_noncse:
+    if export_non:
         non_name = f"APP-nonCSE-FY{fiscal_year}.xlsx"
         non_path = LOCAL_APP_OUTPUT_FOLDER / non_name
         non_path.write_bytes(export_noncse_app(session, fiscal_year))
@@ -392,6 +534,7 @@ def consolidate_ppmps_from_files(
 
     return {
         "app": app,
+        "folders": folders,
         "source_files": {"cse": len(cse_files), "noncse": len(noncse_files)},
         "row_count": len(rows),
         "exports": exports,

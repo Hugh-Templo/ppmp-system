@@ -2142,6 +2142,31 @@ pre.json-block {
   padding-bottom: 1rem;
 }
 
+.app-form-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+
+.app-form-pagination__status {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.app-form-pagination .btn {
+  min-width: 7.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
 .ngpa-app-form {
   --ngpa-border: #1f2937;
   --ngpa-header-bg: #eef2f7;

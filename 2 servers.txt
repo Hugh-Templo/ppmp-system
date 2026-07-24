@@ -1,0 +1,51 @@
+BACKEND SERVER FastAPI
+
+# Navigate to the backend directory
+cd c:\xampp\htdocs\ppmpsys
+
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+FRONTEND SERVER Vite/React
+
+# Navigate to the frontend directory
+cd c:\xampp\htdocs\ppmpsys\frontend
+
+# Install Node.js dependencies (if not already installed)
+npm install
+
+# Start the Vite development server
+npm run dev
+
+FILE-BASED CSE / nonCSE APP CONSOLIDATION
+
+# Drive layout under APP SYSTEM FILES
+#   (folder id 1WwsC0Le5uo71jSzZlYsEnQT5MGWTnjq6 — rclone remote "gdrive"):
+#
+# Sources (office PPMPs — synced into local IT_ppmps on CSE-APP / nonCSE-APP load):
+#   Drive CSE-PPMP    →  C:\xampp\htdocs\ppmpsys\IT_ppmps\CSE
+#   Drive nonCSE-PPMP →  C:\xampp\htdocs\ppmpsys\IT_ppmps\nonCSE
+#
+# Outputs (consolidated APP uploaded after Run Consolidation):
+#   local export → Drive CSE-APP / nonCSE-APP
+#
+# CSE-APP tab lists CSE folder; nonCSE-APP tab lists nonCSE folder.
+# Opening either tab (or clicking Sync from Drive) runs:
+#   POST /api/bac/ppmps/sync-from-drive?kind=cse|noncse
+# which rclone-syncs the matching Drive PPMP folder into IT_ppmps.
+
+WINDOWS SERVER INSTALLER (new PC)
+
+# You install PostgreSQL yourself first, then run PPMP-System-Setup.exe as Administrator.
+# Setup prompts for API port + DATABASE_URL before registering the always-on PPMP-API service.
+# Bundles: embedded Python, project files, rclone, WinSW service, Electron UI.
+#
+# Build Setup.exe on this machine:
+#   powershell -ExecutionPolicy Bypass -File .\installer\scripts\prepare-runtime.ps1
+#   powershell -ExecutionPolicy Bypass -File .\installer\scripts\build-installer.ps1
+# Output: dist-installer\PPMP-System-Setup.exe
+# Docs: installer\README.md
+#
+# Note: Install Inno Setup 6 to compile Setup.exe:
+#   https://jrsoftware.org/isinfo.php
+# Then: npm run installer:build
+# (prepare-runtime.ps1 already stages payload under installer\payload)

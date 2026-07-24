@@ -1,0 +1,20 @@
+PPMP System — before you continue
+
+1. Install PostgreSQL on this computer first.
+2. Create a database (default name: ppmpbacdb) and note the connection URL.
+3. On the next screens you will choose:
+   - API port (default 8000) — the backend service will keep running on this port
+   - DATABASE_URL — e.g. postgresql://postgres:YOURPASSWORD@localhost:5432/ppmpbacdb
+
+After install, configure Google Drive once:
+  Start Menu → PPMP System → Configure rclone
+  Create a remote named "gdrive" (or match RCLONE_REMOTE in the install .env).
+
+Setup must run as Administrator so the always-on PPMP-API Windows service can be registered.
+
+
+# If payload is stale:
+powershell -ExecutionPolicy Bypass -File .\installer\scripts\prepare-runtime.ps1
+
+# After installing Inno Setup 6:
+powershell -ExecutionPolicy Bypass -File .\installer\scripts\build-installer.ps1
