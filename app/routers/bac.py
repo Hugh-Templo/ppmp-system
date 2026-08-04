@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 from typing import List, Optional
 from datetime import datetime
 from app.database import get_session
-from app.models import User, APP, APPRow, Office, PPMP, PPMPItem, IndicativePPMP, FinalPPMP
+from app.models import User, APP, APPRow, Office, PPMP, PPMPItem, IndicativePPMP, FinalPPMP, AppSignatory
 from app.auth import check_role, get_current_user
 
 router = APIRouter(prefix="/api/bac", tags=["bac"])
@@ -15,6 +15,83 @@ class OfficeUpdate(BaseModel):
     name: Optional[str] = None
     code: Optional[str] = None
     budget_allocation: Optional[float] = None
+
+
+class AppSignatoryPayload(BaseModel):
+    prepared_by: Optional[str] = None
+    prepared_by_designation: Optional[str] = None
+    recommended_by: Optional[str] = None
+    recommended_by_designation: Optional[str] = None
+    approved_by_name: Optional[str] = None
+    approved_by_designation: Optional[str] = None
+
+
+def _serialize_app_signatory(row: Optional[AppSignatory]) -> dict:
+    if row is None:
+        return {
+            "id": 1,
+            "prepared_by": "",
+            "prepared_by_designation": "",
+            "recommended_by": "",
+            "recommended_by_designation": "",
+            "approved_by_name": "",
+            "approved_by_designation": "",
+        }
+    return {
+        "id": row.id,
+        "prepared_by": row.prepared_by or "",
+        "prepared_by_designation": row.prepared_by_designation or "",
+        "recommended_by": row.recommended_by or "",
+        "recommended_by_designation": row.recommended_by_designation or "",
+        "approved_by_name": row.approved_by_name or "",
+        "approved_by_designation": row.approved_by_designation or "",
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _get_or_create_app_signatory(session: Session) -> AppSignatory:
+    row = session.get(AppSignatory, 1)
+    if row is None:
+        row = AppSignatory(id=1)
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+    return row
+
+
+@router.get("/app-signatory")
+def get_app_signatory(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """Return the shared CSE/nonCSE APP footer signatories."""
+    return _serialize_app_signatory(_get_or_create_app_signatory(session))
+
+
+@router.put("/app-signatory")
+def update_app_signatory(
+    payload: AppSignatoryPayload,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """Upsert agency-wide APP signatory names/designations (singleton id=1)."""
+    row = _get_or_create_app_signatory(session)
+    row.prepared_by = (payload.prepared_by or "").strip() or None
+    row.prepared_by_designation = (payload.prepared_by_designation or "").strip() or None
+    row.recommended_by = (payload.recommended_by or "").strip() or None
+    row.recommended_by_designation = (
+        payload.recommended_by_designation or ""
+    ).strip() or None
+    row.approved_by_name = (payload.approved_by_name or "").strip() or None
+    row.approved_by_designation = (payload.approved_by_designation or "").strip() or None
+    row.updated_at = datetime.utcnow()
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return {
+        "message": "APP signatory updated successfully",
+        "signatory": _serialize_app_signatory(row),
+    }
 
 
 @router.get("/offices", response_model=List[Office])

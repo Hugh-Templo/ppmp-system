@@ -133,18 +133,21 @@ function Dashboard({ token, user, onLogout }) {
   const [newDbmClassification, setNewDbmClassification] = useState("");
   const [newDbmDescription, setNewDbmDescription] = useState("");
 
-  // Signatory state
-  const [submittedBy, setSubmittedBy] = useState("");
-  const [submittedByDesignation, setSubmittedByDesignation] = useState("");
-  const [preparedBy, setPreparedBy] = useState("");
-  const [preparedByDesignation, setPreparedByDesignation] = useState("");
-  const [aipReference, setAipReference] = useState("");
-  const [responsibilityCenterNo, setResponsibilityCenterNo] = useState("");
-  const [officeCodeFromPR, setOfficeCodeFromPR] = useState("");
+  // BAC APP signatory (shared CSE + nonCSE footer)
+  const [appSigPreparedBy, setAppSigPreparedBy] = useState("");
+  const [appSigPreparedDesig, setAppSigPreparedDesig] = useState("");
+  const [appSigRecommendedBy, setAppSigRecommendedBy] = useState("");
+  const [appSigRecommendedDesig, setAppSigRecommendedDesig] = useState("");
+  const [appSigApprovedBy, setAppSigApprovedBy] = useState("");
+  const [appSigApprovedDesig, setAppSigApprovedDesig] = useState("");
+  const [appSignatoryLoaded, setAppSignatoryLoaded] = useState(false);
 
-  // Budget Allocation state (for end users)
-  const [userBudgetAllocation, setUserBudgetAllocation] = useState(0);
-  const [userOfficeBudget, setUserOfficeBudget] = useState(0);
+  // End-user Excel upload
+  const [uploadFiscalYear, setUploadFiscalYear] = useState(new Date().getFullYear() + 1);
+  const [uploadIsCse, setUploadIsCse] = useState(false);
+  const [uploadTitle, setUploadTitle] = useState("");
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
 
   // Registration state
   const [newUsername, setNewUsername] = useState("");
@@ -283,27 +286,16 @@ function Dashboard({ token, user, onLogout }) {
       (activeTab === "cse_app" || activeTab === "noncse_app")
     ) {
       loadAppWorkspace(activeTab === "cse_app" ? "cse" : "noncse");
+      fetchAppSignatory();
     }
     setAppNgpaPreviewOpen(false);
   }, [activeTab, user.role, consolidationYear]);
 
   useEffect(() => {
-    if (user.role === "end_user" && activeTab === "budget_allocation") {
-      fetchUserOfficeBudget();
+    if (user.role === "bac_admin" && activeTab === "app_signatory") {
+      fetchAppSignatory();
     }
   }, [activeTab, user.role]);
-
-  useEffect(() => {
-    if (user.role === "end_user" && activeTab === "signatory") {
-      fetchSignatory();
-    }
-  }, [activeTab, user.role]);
-
-  useEffect(() => {
-    if (user.role === "end_user") {
-      fetchSignatory();
-    }
-  }, [user.role]);
 
   useEffect(() => {
     if (user.role === "end_user" && selectedPpmp) {
@@ -590,32 +582,116 @@ function Dashboard({ token, user, onLogout }) {
     }
   };
 
-  const handleCreatePpmp = async (e) => {
+  const handleUploadPpmp = async (e) => {
+    e.preventDefault();
+    if (!uploadFile) {
+      showNotification("Choose an Excel PPMP file to upload", "danger");
+      return;
+    }
+    setUploadBusy(true);
+    try {
+      const form = new FormData();
+      form.append("file", uploadFile);
+      form.append("fiscal_year", String(uploadFiscalYear));
+      form.append("is_cse", uploadIsCse ? "true" : "false");
+      if (uploadTitle.trim()) form.append("title", uploadTitle.trim());
+
+      const res = await apiFetch("/api/offices/ppmps/upload", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showNotification(
+          `PPMP uploaded (${data.item_count || 0} items). Submit it when ready.`
+        );
+        setUploadFile(null);
+        setUploadTitle("");
+        fetchOfficePpmps();
+      } else {
+        let detail = "Failed to upload PPMP";
+        try {
+          const err = await res.json();
+          detail = err.detail || detail;
+        } catch (_) {
+          /* ignore */
+        }
+        showNotification(detail, "danger");
+      }
+    } catch (err) {
+      showNotification("Failed to upload PPMP", "danger");
+    } finally {
+      setUploadBusy(false);
+    }
+  };
+
+  const fetchAppSignatory = async () => {
+    try {
+      const res = await apiFetch("/api/bac/app-signatory", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAppSigPreparedBy(data.prepared_by || "");
+        setAppSigPreparedDesig(data.prepared_by_designation || "");
+        setAppSigRecommendedBy(data.recommended_by || "");
+        setAppSigRecommendedDesig(data.recommended_by_designation || "");
+        setAppSigApprovedBy(data.approved_by_name || "");
+        setAppSigApprovedDesig(data.approved_by_designation || "");
+        setAppSignatoryLoaded(true);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleUpdateAppSignatory = async (e) => {
     e.preventDefault();
     try {
-      const res = await apiFetch("/api/offices/ppmps", {
-        method: "POST",
+      const res = await apiFetch("/api/bac/app-signatory", {
+        method: "PUT",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          title: newPpmpTitle,
-          fiscal_year: newPpmpYear,
-          type: newPpmpType,
-          is_cse: newPpmpIsCse,
-          office_id: user.office_id,
+          prepared_by: appSigPreparedBy,
+          prepared_by_designation: appSigPreparedDesig,
+          recommended_by: appSigRecommendedBy,
+          recommended_by_designation: appSigRecommendedDesig,
+          approved_by_name: appSigApprovedBy,
+          approved_by_designation: appSigApprovedDesig,
         }),
       });
       if (res.ok) {
-        showNotification("PPMP created successfully!");
-        setNewPpmpTitle("");
-        setNewPpmpIsCse(false);
-        fetchOfficePpmps();
+        const data = await res.json();
+        const sig = data.signatory || data;
+        setAppSigPreparedBy(sig.prepared_by || "");
+        setAppSigPreparedDesig(sig.prepared_by_designation || "");
+        setAppSigRecommendedBy(sig.recommended_by || "");
+        setAppSigRecommendedDesig(sig.recommended_by_designation || "");
+        setAppSigApprovedBy(sig.approved_by_name || "");
+        setAppSigApprovedDesig(sig.approved_by_designation || "");
+        showNotification("APP signatory updated successfully!");
+      } else {
+        let detail = "Failed to update APP signatory";
+        try {
+          const err = await res.json();
+          detail = err.detail || detail;
+        } catch (_) {
+          /* ignore */
+        }
+        showNotification(detail, "danger");
       }
     } catch (err) {
-      showNotification("Failed to create PPMP", "danger");
+      showNotification("Failed to update APP signatory", "danger");
     }
+  };
+
+  const handleCreatePpmp = async (e) => {
+    e.preventDefault();
+    showNotification("Upload an Excel PPMP file instead of creating a blank plan", "danger");
   };
 
   const handleAddPpmpItem = async (e) => {
@@ -1336,16 +1412,15 @@ function Dashboard({ token, user, onLogout }) {
   const pageTitles = {
     dashboard: "Dashboard",
     view_ppmps: "View PPMPs",
-    signatory: "Signatory Information",
     indicative: "Indicative PPMP Management",
     final: "Final PPMP",
     cse_app: "CSE Annual Procurement Plan",
     noncse_app: "nonCSE Annual Procurement Plan",
+    app_signatory: "APP Signatory",
     offices: "Manage Offices",
     users: "Manage Users",
     dbm: "DBM Classification",
     audit: "Pending PPMP Review",
-    budget_allocation: "Budget Allocation",
   };
 
   const renderPpmpTypeBadge = (isCse) => (
@@ -1548,8 +1623,14 @@ function Dashboard({ token, user, onLogout }) {
     );
   };
 
-  const renderNgpaCseAppForm = (rows, fiscalYear, grandTotal = null) => {
-    // Layout mirrors templates/NGPA_CSE-APP.xlsx (APP sheet + Guide columns 1–12).
+  const renderNgpaCseAppForm = (
+    rows,
+    fiscalYear,
+    grandTotal = null,
+    isFinal = false
+  ) => {
+    // Layout mirrors templates/NGPA_CSE-APP.xlsx — APP sheet Guide columns 1–12.
+    // FINAL only when every active office has submitted a CSE PPMP file.
     const list = rows || [];
     const total =
       grandTotal == null
@@ -1568,9 +1649,16 @@ function Dashboard({ token, user, onLogout }) {
             ANNUAL PROCUREMENT PLAN FOR FY {fiscalYear}
           </div>
           <div className="ngpa-app-form__type-row">
-            <span className="ngpa-app-form__type-mark">INDICATIVE</span>
-            <span className="ngpa-app-form__type-mark is-active">
-              <span className="ngpa-app-form__type-check" aria-hidden="true">{"\u2713"}</span>
+            <span className={`ngpa-app-form__type-mark${!isFinal ? " is-active" : ""}`}>
+              <span className="ngpa-app-form__type-check" aria-hidden="true">
+                {!isFinal ? "\u2713" : ""}
+              </span>
+              INDICATIVE
+            </span>
+            <span className={`ngpa-app-form__type-mark${isFinal ? " is-active" : ""}`}>
+              <span className="ngpa-app-form__type-check" aria-hidden="true">
+                {isFinal ? "\u2713" : ""}
+              </span>
               FINAL
             </span>
             <span className="ngpa-app-form__type-mark">
@@ -1582,14 +1670,7 @@ function Dashboard({ token, user, onLogout }) {
           <table className="ngpa-app-table ngpa-app-table--cse">
             <thead>
               <tr>
-                <th rowSpan={2}>PAP Code</th>
-                <th rowSpan={2}>
-                  Object Code, as applicable
-                  <span className="ngpa-app-table__th-note">
-                    (funding code as specified in the Technical GAA)
-                  </span>
-                </th>
-                <th colSpan={7} className="ngpa-app-table__group">
+                <th colSpan={6} className="ngpa-app-table__group">
                   PROCUREMENT PROJECT DETAILS
                 </th>
                 <th colSpan={2} className="ngpa-app-table__group">
@@ -1600,12 +1681,14 @@ function Dashboard({ token, user, onLogout }) {
                 </th>
                 <th rowSpan={2} className="ngpa-app-table__group">
                   PROCUREMENT STRATEGY OR TOOLS
+                  <span className="ngpa-app-table__col-no">Column 11</span>
                 </th>
                 <th rowSpan={2} className="ngpa-app-table__group">
                   REMARKS
                   <span className="ngpa-app-table__th-note">
                     (Other relevant descriptions of the procurement project, if applicable)
                   </span>
+                  <span className="ngpa-app-table__col-no">Column 12</span>
                 </th>
               </tr>
               <tr>
@@ -1620,13 +1703,6 @@ function Dashboard({ token, user, onLogout }) {
                 <th>
                   General Description of the Project
                   <span className="ngpa-app-table__col-no">Column 3</span>
-                </th>
-                <th>
-                  General Description of the Procurement Project
-                  <span className="ngpa-app-table__th-note">
-                    (IRR of RA 12009 — Section 7.7.2c)
-                  </span>
-                  <span className="ngpa-app-table__col-no">Column 4</span>
                 </th>
                 <th>
                   Mode of Procurement
@@ -1663,7 +1739,7 @@ function Dashboard({ token, user, onLogout }) {
             </thead>
             <tbody>
               <tr className="ngpa-app-table__section">
-                <td colSpan={15}>
+                <td colSpan={12}>
                   Common Use Supplies and Equipment (CSE) to be purchased from
                   PS-DBM (kindly indicate the summary/total amounts only)
                 </td>
@@ -1672,16 +1748,12 @@ function Dashboard({ token, user, onLogout }) {
                 const title = row?.description || "";
                 const qty = row?.quantity_size || "";
                 const projectDesc = row?.category || title;
-                const procurementDesc = qty || title;
                 const remarks = row?.delivery_period || qty || "";
                 return (
                   <tr key={row ? row.id : `cse-blank-${idx}`}>
-                    <td>{row?.project_type || ""}</td>
-                    <td></td>
                     <td>{title}</td>
                     <td>{row?.end_user_offices || ""}</td>
                     <td>{row ? projectDesc : ""}</td>
-                    <td>{row ? procurementDesc : ""}</td>
                     <td>{row?.procurement_mode || ""}</td>
                     <td className="ngpa-app-table__center">
                       {row ? ngpaYesNo(row.pre_proc_conf) : ""}
@@ -1699,7 +1771,7 @@ function Dashboard({ token, user, onLogout }) {
                 );
               })}
               <tr className="ngpa-app-table__total">
-                <td colSpan={12} className="ngpa-app-table__total-label">
+                <td colSpan={9} className="ngpa-app-table__total-label">
                   Total Amount of CSEs to be purchased from PS-DBM:
                 </td>
                 <td className="ngpa-app-table__amount ngpa-app-table__total-value">
@@ -1708,7 +1780,7 @@ function Dashboard({ token, user, onLogout }) {
                 <td colSpan={2}></td>
               </tr>
               <tr className="ngpa-app-table__total">
-                <td colSpan={12} className="ngpa-app-table__total-label">
+                <td colSpan={9} className="ngpa-app-table__total-label">
                   Total Amount of Estimated Budget:
                 </td>
                 <td className="ngpa-app-table__amount ngpa-app-table__total-value">
@@ -1723,8 +1795,12 @@ function Dashboard({ token, user, onLogout }) {
         <div className="ngpa-app-form__signatories">
           <div className="ngpa-app-form__sig-block">
             <div className="ngpa-app-form__sig-role">Prepared by:</div>
-            <div className="ngpa-app-form__sig-line">Signature over Printed Name</div>
-            <div className="ngpa-app-form__sig-caption">Position/Designation</div>
+            <div className="ngpa-app-form__sig-line">
+              {appSigPreparedBy || "Signature over Printed Name"}
+            </div>
+            <div className="ngpa-app-form__sig-caption">
+              {appSigPreparedDesig || "Position/Designation"}
+            </div>
             <div className="ngpa-app-form__sig-unit">
               Bids and Awards Committee Secretariat
             </div>
@@ -1735,8 +1811,12 @@ function Dashboard({ token, user, onLogout }) {
             <div className="ngpa-app-form__sig-authority">
               By the Authority of the Bids and Awards Committee:
             </div>
-            <div className="ngpa-app-form__sig-line">Signature over Printed Name</div>
-            <div className="ngpa-app-form__sig-caption">Position/Designation</div>
+            <div className="ngpa-app-form__sig-line">
+              {appSigRecommendedBy || "Signature over Printed Name"}
+            </div>
+            <div className="ngpa-app-form__sig-caption">
+              {appSigRecommendedDesig || "Position/Designation"}
+            </div>
             <div className="ngpa-app-form__sig-unit">
               Bids and Awards Committee Chairperson
             </div>
@@ -1744,8 +1824,12 @@ function Dashboard({ token, user, onLogout }) {
           </div>
           <div className="ngpa-app-form__sig-block">
             <div className="ngpa-app-form__sig-role">Approved by:</div>
-            <div className="ngpa-app-form__sig-line">Signature over Printed Name</div>
-            <div className="ngpa-app-form__sig-caption">Position/Designation</div>
+            <div className="ngpa-app-form__sig-line">
+              {appSigApprovedBy || "Signature over Printed Name"}
+            </div>
+            <div className="ngpa-app-form__sig-caption">
+              {appSigApprovedDesig || "Position/Designation"}
+            </div>
             <div className="ngpa-app-form__sig-unit">Head of the Procuring Entity</div>
             <div className="ngpa-app-form__sig-date">Date : _________________</div>
           </div>
@@ -1881,19 +1965,34 @@ function Dashboard({ token, user, onLogout }) {
         <div className="ngpa-app-form__signatories">
           <div className="ngpa-app-form__sig-block">
             <div className="ngpa-app-form__sig-role">Prepared by:</div>
-            <div className="ngpa-app-form__sig-line">Signature over Printed Name</div>
+            <div className="ngpa-app-form__sig-line">
+              {appSigPreparedBy || "Signature over Printed Name"}
+            </div>
+            {appSigPreparedDesig ? (
+              <div className="ngpa-app-form__sig-caption">{appSigPreparedDesig}</div>
+            ) : null}
             <div className="ngpa-app-form__sig-unit">
               Bids and Awards Committee Secretariat
             </div>
           </div>
           <div className="ngpa-app-form__sig-block">
             <div className="ngpa-app-form__sig-role">Recommended by:</div>
-            <div className="ngpa-app-form__sig-line">Signature over Printed Name</div>
+            <div className="ngpa-app-form__sig-line">
+              {appSigRecommendedBy || "Signature over Printed Name"}
+            </div>
+            {appSigRecommendedDesig ? (
+              <div className="ngpa-app-form__sig-caption">{appSigRecommendedDesig}</div>
+            ) : null}
             <div className="ngpa-app-form__sig-unit">Bids and Awards Committee</div>
           </div>
           <div className="ngpa-app-form__sig-block">
             <div className="ngpa-app-form__sig-role">Approved by:</div>
-            <div className="ngpa-app-form__sig-line">Signature over Printed Name</div>
+            <div className="ngpa-app-form__sig-line">
+              {appSigApprovedBy || "Signature over Printed Name"}
+            </div>
+            {appSigApprovedDesig ? (
+              <div className="ngpa-app-form__sig-caption">{appSigApprovedDesig}</div>
+            ) : null}
             <div className="ngpa-app-form__sig-unit">Head of the Procuring Entity</div>
           </div>
         </div>
@@ -1920,6 +2019,28 @@ function Dashboard({ token, user, onLogout }) {
       (sum, r) => sum + Number(r.total_estimated_budget || 0),
       0
     );
+
+    // FINAL only when every active office has a CSE PPMP file for this FY.
+    const fyNum = Number(consolidationYear);
+    const submittedCodes = new Set(
+      (approvedAppPpmps || [])
+        .filter((p) => {
+          if (p.fiscal_year == null || p.fiscal_year === "") return true;
+          return Number(p.fiscal_year) === fyNum;
+        })
+        .map((p) => String(p.office_code || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const activeOffices = (offices || []).filter((o) => o.is_active !== false);
+    const submittedOfficeCount = activeOffices.filter((o) =>
+      submittedCodes.has(String(o.code || "").trim().toLowerCase())
+    ).length;
+    const isFinalApp =
+      isCse &&
+      activeOffices.length > 0 &&
+      activeOffices.every((o) =>
+        submittedCodes.has(String(o.code || "").trim().toLowerCase())
+      );
 
     return (
       <div className="app-workspace">
@@ -2049,6 +2170,11 @@ function Dashboard({ token, user, onLogout }) {
                 {rows.length > 0
                   ? ` · Page ${safePage} of ${totalPages}`
                   : ""}
+                {isCse
+                  ? ` · ${submittedOfficeCount}/${activeOffices.length} offices submitted · ${
+                      isFinalApp ? "FINAL" : "INDICATIVE"
+                    }`
+                  : ""}
               </span>
               <button
                 type="button"
@@ -2062,7 +2188,12 @@ function Dashboard({ token, user, onLogout }) {
             </div>
           </div>
           {isCse
-            ? renderNgpaCseAppForm(pageRows, consolidationYear, grandTotal)
+            ? renderNgpaCseAppForm(
+                pageRows,
+                consolidationYear,
+                grandTotal,
+                isFinalApp
+              )
             : renderNgpaNonCseAppForm(pageRows, consolidationYear, grandTotal)}
 
           {rows.length > APP_FORM_PAGE_SIZE && (
@@ -2141,7 +2272,12 @@ function Dashboard({ token, user, onLogout }) {
             </header>
             <div className="ppmp-fullscreen-body app-ngpa-preview__body">
               {isCse
-                ? renderNgpaCseAppForm(rows, consolidationYear, grandTotal)
+                ? renderNgpaCseAppForm(
+                    rows,
+                    consolidationYear,
+                    grandTotal,
+                    isFinalApp
+                  )
                 : renderNgpaNonCseAppForm(rows, consolidationYear, grandTotal)}
             </div>
           </div>
@@ -2150,129 +2286,6 @@ function Dashboard({ token, user, onLogout }) {
     );
   };
 
-  const fetchSignatory = async () => {
-    if (!user?.office_id) return;
-    try {
-      const res = await apiFetch(
-        `/api/offices/signatory?office_id=${user.office_id}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!res.ok) return;
-      const data = await res.json();
-      setSubmittedBy(data.submitted_by || "");
-      setSubmittedByDesignation(data.submitted_by_designation || "");
-      setPreparedBy(data.prepared_by || "");
-      setPreparedByDesignation(data.prepared_by_designation || "");
-      setAipReference(data.aip_reference || "");
-      setResponsibilityCenterNo(data.responsibility_center_no || "");
-      setOfficeCodeFromPR(data.office_code_from_pr || "");
-    } catch (err) {
-      // Non-fatal: leave inputs blank so the user can still save.
-    }
-  };
-
-  const handleUpdateSignatory = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await apiFetch("/api/offices/signatory", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          submitted_by: submittedBy,
-          submitted_by_designation: submittedByDesignation,
-          prepared_by: preparedBy,
-          prepared_by_designation: preparedByDesignation,
-          aip_reference: aipReference,
-          responsibility_center_no: responsibilityCenterNo,
-          office_code_from_pr: officeCodeFromPR,
-          office_id: user.office_id,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const sig = data.signatory || {};
-        setSubmittedBy(sig.submitted_by || submittedBy);
-        setSubmittedByDesignation(
-          sig.submitted_by_designation || submittedByDesignation
-        );
-        setPreparedBy(sig.prepared_by || preparedBy);
-        setPreparedByDesignation(
-          sig.prepared_by_designation || preparedByDesignation
-        );
-        setAipReference(sig.aip_reference || aipReference);
-        setResponsibilityCenterNo(
-          sig.responsibility_center_no || responsibilityCenterNo
-        );
-        setOfficeCodeFromPR(sig.office_code_from_pr || officeCodeFromPR);
-        showNotification("Signatory information updated successfully!");
-      } else {
-        let detail = "Failed to update signatory information";
-        try {
-          const body = await res.json();
-          if (body?.detail) detail = body.detail;
-        } catch (_) {}
-        showNotification(detail, "danger");
-      }
-    } catch (err) {
-      showNotification("Network error occurred", "danger");
-    }
-  };
-
-  // --- BUDGET ALLOCATION FUNCTIONS FOR END USERS ---
-  const fetchUserOfficeBudget = async () => {
-    if (!user.office_id) {
-      showNotification("User is not assigned to any office", "danger");
-      return;
-    }
-    try {
-      const res = await apiFetch(`/api/offices/budget/${user.office_id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUserOfficeBudget(data.budget_allocation);
-      } else {
-        const errData = await res.json();
-        showNotification(errData.detail || "Failed to fetch budget allocation", "danger");
-      }
-    } catch (err) {
-      showNotification("Network error fetching budget allocation", "danger");
-    }
-  };
-
-  const handleUpdateBudgetAllocation = async (e) => {
-    e.preventDefault();
-    if (!user.office_id) {
-      showNotification("User is not assigned to any office", "danger");
-      return;
-    }
-    try {
-      const res = await apiFetch(`/api/offices/budget/${user.office_id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          budget_allocation: parseFloat(userBudgetAllocation),
-        }),
-      });
-      if (res.ok) {
-        showNotification("Budget allocation updated successfully!");
-        setUserBudgetAllocation(0);
-        fetchUserOfficeBudget();
-        fetchOffices(); // Refresh offices list for other roles
-      } else {
-        const errData = await res.json();
-        showNotification(errData.detail || "Failed to update budget allocation", "danger");
-      }
-    } catch (err) {
-      showNotification("Failed to update budget allocation", "danger");
-    }
-  };
   return (
     <div className="dashboard-container">
       <aside className="sidebar">
@@ -2325,26 +2338,6 @@ function Dashboard({ token, user, onLogout }) {
                 View PPMPs
               </button>
             )}
-{user.role === "end_user" && (
-              <button
-                type="button"
-                className={`nav-link ${activeTab === "signatory" ? "active" : ""}`}
-                onClick={() => { setActiveTab("signatory"); setSelectedPpmp(null); setSelectedApp(null); }}
-              >
-                <i className="fas fa-th-large" aria-hidden="true"></i>
-                Signatory
-              </button>
-            )}
-            {user.role === "end_user" && (
-              <button
-                type="button"
-                className={`nav-link ${activeTab === "budget_allocation" ? "active" : ""}`}
-                onClick={() => { setActiveTab("budget_allocation"); setSelectedPpmp(null); setSelectedApp(null); }}
-              >
-                <i className="fas fa-wallet" aria-hidden="true"></i>
-                Budget Allocation
-              </button>
-            )}
             {user.role === "bac_admin" && (
               <button
                 type="button"
@@ -2363,6 +2356,36 @@ function Dashboard({ token, user, onLogout }) {
               >
                 <i className="fas fa-clipboard-list" aria-hidden="true"></i>
                 nonCSE-APP
+              </button>
+            )}
+            {user.role === "bac_admin" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "app_signatory" ? "active" : ""}`}
+                onClick={() => { setActiveTab("app_signatory"); setSelectedPpmp(null); setSelectedApp(null); }}
+              >
+                <i className="fas fa-signature" aria-hidden="true"></i>
+                Signatory
+              </button>
+            )}
+            {user.role === "bac_admin" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "offices" ? "active" : ""}`}
+                onClick={() => { setActiveTab("offices"); setSelectedPpmp(null); setSelectedApp(null); }}
+              >
+                <i className="fas fa-building" aria-hidden="true"></i>
+                Manage Offices
+              </button>
+            )}
+            {user.role === "bac_admin" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "users" ? "active" : ""}`}
+                onClick={() => { setActiveTab("users"); setSelectedPpmp(null); setSelectedApp(null); }}
+              >
+                <i className="fas fa-users" aria-hidden="true"></i>
+                Manage Users
               </button>
             )}
           </div>
@@ -2397,7 +2420,7 @@ function Dashboard({ token, user, onLogout }) {
               {user.role === "end_user" && (
                 <div className="end-user-dashboard">
                   <div className="dashboard-card">
-                    <h2 className="card-title">Create PPMP</h2>
+                    <h2 className="card-title">Upload PPMP Excel</h2>
                     <div style={{
                       backgroundColor: "#e8f4fd",
                       border: "1px solid #2196f3",
@@ -2406,52 +2429,57 @@ function Dashboard({ token, user, onLogout }) {
                       marginBottom: "10px",
                       fontSize: "13px"
                     }}>
-                      <strong>Note:</strong> All PPMPs created at this stage are <strong>Indicative</strong> (pre-budget approval).
-                      The "Final" status will be applied automatically after budget approval and consolidation,
-                      in accordance with RA 12009 process flow.
+                      <strong>Note:</strong> Upload your completed NGPA PPMP Excel (.xls / .xlsx).
+                      Uploads create or replace a <strong>Draft</strong> (or replace a <strong>Returned</strong> plan)
+                      for the same fiscal year and CSE/nonCSE type. You can <strong>view</strong> a plan only after
+                      Budget validates it (<strong>Approved</strong>) or returns it for revision (<strong>Returned</strong>).
                     </div>
-                    <form onSubmit={handleCreatePpmp} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <form onSubmit={handleUploadPpmp} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                       <input
-                        type="text"
+                        type="file"
                         className="form-input"
-                        placeholder="PPMP Title (e.g., Office Supplies 2027)"
-                        value={newPpmpTitle}
-                        onChange={(e) => setNewPpmpTitle(e.target.value)}
+                        accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
                         required
                       />
                       <input
-                        type="hidden"
-                        value={newPpmpType}
+                        type="text"
+                        className="form-input"
+                        placeholder="Title (optional — taken from Excel if blank)"
+                        value={uploadTitle}
+                        onChange={(e) => setUploadTitle(e.target.value)}
                       />
                       <input
                         type="number"
                         className="form-input"
                         placeholder="Fiscal Year"
-                        value={newPpmpYear}
-                        onChange={(e) => setNewPpmpYear(e.target.value)}
+                        value={uploadFiscalYear}
+                        onChange={(e) => setUploadFiscalYear(e.target.value)}
                         required
                       />
                       <div className="ppmp-type-picker" role="radiogroup" aria-label="PPMP type">
                         <button
                           type="button"
                           role="radio"
-                          aria-checked={!newPpmpIsCse}
-                          className={`ppmp-type-picker-option ${!newPpmpIsCse ? "active noncse" : ""}`}
-                          onClick={() => setNewPpmpIsCse(false)}
+                          aria-checked={!uploadIsCse}
+                          className={`ppmp-type-picker-option ${!uploadIsCse ? "active noncse" : ""}`}
+                          onClick={() => setUploadIsCse(false)}
                         >
                           nonCSE
                         </button>
                         <button
                           type="button"
                           role="radio"
-                          aria-checked={newPpmpIsCse}
-                          className={`ppmp-type-picker-option ${newPpmpIsCse ? "active cse" : ""}`}
-                          onClick={() => setNewPpmpIsCse(true)}
+                          aria-checked={uploadIsCse}
+                          className={`ppmp-type-picker-option ${uploadIsCse ? "active cse" : ""}`}
+                          onClick={() => setUploadIsCse(true)}
                         >
                           CSE
                         </button>
                       </div>
-                      <button type="submit" className="btn">Create PPMP</button>
+                      <button type="submit" className="btn" disabled={uploadBusy}>
+                        {uploadBusy ? "Uploading…" : "Upload PPMP"}
+                      </button>
                     </form>
                   </div>
 
@@ -2471,7 +2499,7 @@ function Dashboard({ token, user, onLogout }) {
                       <tbody>
                         {ppmps.length === 0 ? (
                           <tr>
-                            <td colSpan="6">No PPMPs created yet.</td>
+                            <td colSpan="6">No PPMPs uploaded yet.</td>
                           </tr>
                         ) : (
                           ppmps.map((p) => (
@@ -2495,7 +2523,18 @@ function Dashboard({ token, user, onLogout }) {
                               </td>
                               <td>
                                 <div className="ppmp-row-actions">
-                                  <button className="btn" onClick={() => handleSelectPpmp(p.id)}>View/Edit</button>
+                                  {(p.status === "Approved" || p.status === "Returned") && (
+                                    <button className="btn" onClick={() => handleSelectPpmp(p.id)}>View</button>
+                                  )}
+                                  {(p.status === "Draft" || p.status === "Returned") && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-success btn-sm"
+                                      onClick={() => handleSubmitPpmp(p.id)}
+                                    >
+                                      Submit
+                                    </button>
+                                  )}
                                   {p.status === "Draft" && (
                                     <button
                                       className="btn btn-danger btn-sm"
@@ -2503,6 +2542,11 @@ function Dashboard({ token, user, onLogout }) {
                                     >
                                       Delete
                                     </button>
+                                  )}
+                                  {p.status === "Pending Budget Review" && (
+                                    <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                                      Awaiting Budget
+                                    </span>
                                   )}
                                 </div>
                               </td>
@@ -2970,11 +3014,12 @@ function Dashboard({ token, user, onLogout }) {
             <div className="dashboard-card">
               <h2 className="card-title">My Office PPMPs</h2>
               <p className="page-subtitle" style={{ marginBottom: "1rem" }}>
-                All Project Procurement Management Plans for your office. The
-                <span className="ppmp-type-badge cse" style={{ margin: "0 6px" }}>CSE</span>
-                and
-                <span className="ppmp-type-badge noncse" style={{ margin: "0 6px" }}>nonCSE</span>
-                tags indicate the type chosen at creation.
+                Project Procurement Management Plans for your office. You can
+                <strong> view</strong> plans that are
+                <span className="ppmp-type-badge cse" style={{ margin: "0 6px" }}>Approved</span>
+                or
+                <span className="ppmp-type-badge noncse" style={{ margin: "0 6px" }}>Returned</span>.
+                Upload a revised Excel from the Dashboard to replace a Draft or Returned plan.
               </p>
 
               <table className="custom-table">
@@ -2992,7 +3037,7 @@ function Dashboard({ token, user, onLogout }) {
                   {ppmps.length === 0 ? (
                     <tr>
                       <td colSpan="6" style={{ textAlign: "center", padding: "1.5rem", color: "var(--text-muted)" }}>
-                        No PPMPs created yet. Create one from the Dashboard.
+                        No PPMPs uploaded yet. Upload one from the Dashboard.
                       </td>
                     </tr>
                   ) : (
@@ -3017,7 +3062,18 @@ function Dashboard({ token, user, onLogout }) {
                         </td>
                         <td>
                           <div className="ppmp-row-actions">
-                            <button className="btn" onClick={() => handleSelectPpmp(p.id)}>View/Edit</button>
+                            {(p.status === "Approved" || p.status === "Returned") && (
+                              <button className="btn" onClick={() => handleSelectPpmp(p.id)}>View</button>
+                            )}
+                            {(p.status === "Draft" || p.status === "Returned") && (
+                              <button
+                                type="button"
+                                className="btn btn-success btn-sm"
+                                onClick={() => handleSubmitPpmp(p.id)}
+                              >
+                                Submit
+                              </button>
+                            )}
                             {p.status === "Draft" && (
                               <button
                                 className="btn btn-danger btn-sm"
@@ -3036,244 +3092,94 @@ function Dashboard({ token, user, onLogout }) {
             </div>
           )}
 
-{/* --- BUDGET ALLOCATION SECTION FOR END USERS --- */}
-          {activeTab === "budget_allocation" && user.role === "end_user" && (
-            <div className="dashboard-card">
-              <h2 className="card-title">Budget Allocation</h2>
-              <p className="page-subtitle" style={{ marginBottom: "1rem" }}>
-                Input and view your office's budget allocation for the current fiscal year
-              </p>
-              
-              {!user.office_id ? (
-                <div className="dashboard-card" style={{ 
-                  background: "rgba(239, 68, 68, 0.1)",
-                  border: "1px solid var(--danger-color)",
-                  textAlign: "center",
-                  padding: "2rem"
-                }}>
-                  <i className="fas fa-exclamation-triangle" style={{ fontSize: "2rem", color: "var(--danger-color)", marginBottom: "1rem" }}></i>
-                  <h3 style={{ color: "var(--danger-color)", marginBottom: "0.5rem" }}>No Office Assigned</h3>
-                  <p style={{ color: "var(--text-secondary)" }}>
-                    You are not currently assigned to any office. Please contact the BAC Administrator to assign you to an office.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div style={{ 
-                    display: "grid", 
-                    gridTemplateColumns: "1fr 1fr", 
-                    gap: "1.5rem", 
-                    marginBottom: "1.5rem"
-                  }}>
-                    <div>
-                      <div className="dashboard-card" style={{ 
-                        background: "var(--neuro-bg)",
-                        border: "1px solid var(--border-color)"
-                      }}>
-                        <h3 style={{ fontSize: "0.95rem", fontWeight: "600", marginBottom: "1rem", color: "var(--text-secondary)" }}>
-                          <i className="fas fa-wallet" style={{ marginRight: "8px" }}></i>
-                          Your Office Budget Allocation
-                        </h3>
-                        <div style={{ 
-                          fontSize: "2rem", 
-                          fontWeight: "700", 
-                          color: "var(--accent-color)",
-                          marginBottom: "0.5rem"
-                        }}>
-                          ₱{userOfficeBudget.toLocaleString()}
-                        </div>
-                        <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                          {getOfficeLabel(user.office_id)}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <form onSubmit={handleUpdateBudgetAllocation} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                        <h3 style={{ fontSize: "0.95rem", fontWeight: "600", marginBottom: "0.5rem", color: "var(--text-secondary)" }}>
-                          <i className="fas fa-edit" style={{ marginRight: "8px" }}></i>
-                          Update Budget Allocation
-                        </h3>
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="Enter Budget Allocation Amount"
-                          className="form-input"
-                          value={userBudgetAllocation}
-                          onChange={(e) => setUserBudgetAllocation(e.target.value)}
-                          required
-                        />
-                        <button type="submit" className="btn">
-                          <i className="fas fa-save" style={{ marginRight: "8px" }}></i>
-                          Save Budget Allocation
-                        </button>
-                      </form>
-                    </div>
-                  </div>
-                  
-                  <div className="dashboard-card" style={{ 
-                    background: "var(--neuro-bg)",
-                    border: "1px solid var(--border-color)",
-                    marginTop: "1rem"
-                  }}>
-                    <h3 style={{ fontSize: "0.95rem", fontWeight: "600", marginBottom: "1rem", color: "var(--text-secondary)" }}>
-                      <i className="fas fa-info-circle" style={{ marginRight: "8px" }}></i>
-                      RA 12009 Budget Allocation Guidelines
-                    </h3>
-                    <ul style={{ 
-                      fontSize: "0.85rem", 
-                      color: "var(--text-secondary)",
-                      paddingLeft: "1.25rem",
-                      lineHeight: "1.8"
-                    }}>
-                      <li>Budget allocation should align with the approved Annual Investment Program (AIP)</li>
-                      <li>End-users are responsible for ensuring their PPMP requests do not exceed this allocation</li>
-                      <li>The Budget Office will verify all allocations during the review process</li>
-                      <li>Any changes to the allocation must be coordinated with the Budget Office</li>
-                    </ul>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {activeTab === "signatory" && user.role === "end_user" && (
+{activeTab === "app_signatory" && user.role === "bac_admin" && (
             <div className="signatory-section">
               <div className="signatory-section-header">
-                <h2 className="signatory-section-title">Signatory Information</h2>
+                <h2 className="signatory-section-title">APP Signatory Information</h2>
                 <p className="signatory-section-subtitle">
-                  Update signatory details and reference numbers for your PPMP documents
+                  Names and designations applied to both CSE and nonCSE Annual Procurement Plan footers (preview and Excel export)
                 </p>
               </div>
 
-              <form onSubmit={handleUpdateSignatory} className="signatory-form">
+              <form onSubmit={handleUpdateAppSignatory} className="signatory-form">
                 <div className="signatory-form-grid-horizontal">
-                  {/* Submitted By Section */}
                   <div className="signatory-section-group">
-                    <h3 className="signatory-section-group-title">Submission Details</h3>
+                    <h3 className="signatory-section-group-title">Prepared by (BAC Secretariat)</h3>
                     <div className="form-group">
-                      <label className="form-label" htmlFor="submittedBy">
-                        <i className="fas fa-user" style={{ marginRight: "8px" }}></i>
-                        Submitted By
-                      </label>
+                      <label className="form-label" htmlFor="appSigPreparedBy">Name</label>
                       <input
-                        id="submittedBy"
-                        type="text"
+                        id="appSigPreparedBy"
                         className="form-input"
-                        placeholder="Full Name"
-                        value={submittedBy}
-                        onChange={(e) => setSubmittedBy(e.target.value)}
-                        required
+                        value={appSigPreparedBy}
+                        onChange={(e) => setAppSigPreparedBy(e.target.value)}
+                        placeholder="Printed name"
                       />
                     </div>
                     <div className="form-group">
-                      <label className="form-label" htmlFor="submittedByDesignation">
-                        <i className="fas fa-id-badge" style={{ marginRight: "8px" }}></i>
-                        Designation
-                      </label>
+                      <label className="form-label" htmlFor="appSigPreparedDesig">Position / Designation</label>
                       <input
-                        id="submittedByDesignation"
-                        type="text"
+                        id="appSigPreparedDesig"
                         className="form-input"
-                        placeholder="Position/Title"
-                        value={submittedByDesignation}
-                        onChange={(e) => setSubmittedByDesignation(e.target.value)}
-                        required
+                        value={appSigPreparedDesig}
+                        onChange={(e) => setAppSigPreparedDesig(e.target.value)}
+                        placeholder="e.g. Head, BAC Secretariat"
                       />
                     </div>
                   </div>
 
-                  {/* Prepared By Section */}
                   <div className="signatory-section-group">
-                    <h3 className="signatory-section-group-title">Preparation Details</h3>
+                    <h3 className="signatory-section-group-title">Recommended by (BAC Chairperson)</h3>
                     <div className="form-group">
-                      <label className="form-label" htmlFor="preparedBy">
-                        <i className="fas fa-user-edit" style={{ marginRight: "8px" }}></i>
-                        Prepared By
-                      </label>
+                      <label className="form-label" htmlFor="appSigRecommendedBy">Name</label>
                       <input
-                        id="preparedBy"
-                        type="text"
+                        id="appSigRecommendedBy"
                         className="form-input"
-                        placeholder="Full Name"
-                        value={preparedBy}
-                        onChange={(e) => setPreparedBy(e.target.value)}
-                        required
+                        value={appSigRecommendedBy}
+                        onChange={(e) => setAppSigRecommendedBy(e.target.value)}
+                        placeholder="Printed name"
                       />
                     </div>
                     <div className="form-group">
-                      <label className="form-label" htmlFor="preparedByDesignation">
-                        <i className="fas fa-id-badge" style={{ marginRight: "8px" }}></i>
-                        Designation
-                      </label>
+                      <label className="form-label" htmlFor="appSigRecommendedDesig">Position / Designation</label>
                       <input
-                        id="preparedByDesignation"
-                        type="text"
+                        id="appSigRecommendedDesig"
                         className="form-input"
-                        placeholder="Position/Title"
-                        value={preparedByDesignation}
-                        onChange={(e) => setPreparedByDesignation(e.target.value)}
-                        required
+                        value={appSigRecommendedDesig}
+                        onChange={(e) => setAppSigRecommendedDesig(e.target.value)}
+                        placeholder="e.g. BAC Chairperson"
                       />
                     </div>
                   </div>
 
-                  {/* Reference Numbers Section */}
                   <div className="signatory-section-group">
-                    <h3 className="signatory-section-group-title">Reference Information</h3>
+                    <h3 className="signatory-section-group-title">Approved by (Head of the Procuring Entity)</h3>
                     <div className="form-group">
-                      <label className="form-label" htmlFor="aipReference">
-                        <i className="fas fa-hashtag" style={{ marginRight: "8px" }}></i>
-                        AIP Reference #
-                      </label>
+                      <label className="form-label" htmlFor="appSigApprovedBy">Name</label>
                       <input
-                        id="aipReference"
-                        type="text"
+                        id="appSigApprovedBy"
                         className="form-input"
-                        placeholder="e.g., AIP-2025-001"
-                        value={aipReference}
-                        onChange={(e) => setAipReference(e.target.value)}
-                        required
+                        value={appSigApprovedBy}
+                        onChange={(e) => setAppSigApprovedBy(e.target.value)}
+                        placeholder="Printed name"
                       />
                     </div>
                     <div className="form-group">
-                      <label className="form-label" htmlFor="responsibilityCenterNo">
-                        <i className="fas fa-building" style={{ marginRight: "8px" }}></i>
-                        Responsibility Center #
-                      </label>
+                      <label className="form-label" htmlFor="appSigApprovedDesig">Position / Designation</label>
                       <input
-                        id="responsibilityCenterNo"
-                        type="text"
+                        id="appSigApprovedDesig"
                         className="form-input"
-                        placeholder="e.g., RC-001"
-                        value={responsibilityCenterNo}
-                        onChange={(e) => setResponsibilityCenterNo(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label" htmlFor="officeCodeFromPR">
-                        <i className="fas fa-code" style={{ marginRight: "8px" }}></i>
-                        Office Code (from PR)
-                      </label>
-                      <input
-                        id="officeCodeFromPR"
-                        type="text"
-                        className="form-input"
-                        placeholder="e.g., CMO, CHO, GSO"
-                        value={officeCodeFromPR}
-                        onChange={(e) => setOfficeCodeFromPR(e.target.value)}
-                        required
+                        value={appSigApprovedDesig}
+                        onChange={(e) => setAppSigApprovedDesig(e.target.value)}
+                        placeholder="e.g. City Mayor"
                       />
                     </div>
                   </div>
 
-                  {/* Submit Button */}
                   <div className="signatory-section-group">
                     <div className="signatory-submit-row">
                       <button type="submit" className="btn signatory-submit-btn">
-                        <i className="fas fa-save"></i>
-                        Update Signatory Information
+                        <i className="fas fa-save" aria-hidden="true"></i>
+                        {appSignatoryLoaded ? "Update APP Signatory" : "Save APP Signatory"}
                       </button>
                     </div>
                   </div>
@@ -3281,9 +3187,6 @@ function Dashboard({ token, user, onLogout }) {
               </form>
             </div>
           )}
-          {activeTab === "cse_app" && user.role === "bac_admin" && renderAppWorkspace("cse")}
-
-          {activeTab === "noncse_app" && user.role === "bac_admin" && renderAppWorkspace("noncse")}
 
           {activeTab === "offices" && user.role === "bac_admin" && (
             <div className="grid-2-wide">
@@ -3630,49 +3533,7 @@ function Dashboard({ token, user, onLogout }) {
           )}
         </div>
 
-{activeTab === "budget_allocation" && user.role === "end_user" && (
-          <footer className="workspace-footer">
-            <div className="workspace-footer-inner workspace-footer-budget">
-              <h2 className="workspace-footer-title">RA 12009 Budget Allocation Guidelines</h2>
-              <div className="workspace-footer-content">
-                <h3>Key Provisions</h3>
-                <ul>
-                  <li><strong>Section 4 - Planning Phase:</strong> End-users must conduct market scoping and cost estimation</li>
-                  <li><strong>Budget Transparency:</strong> All budget allocations must be visible for accountability</li>
-                  <li><strong>Digital Integration:</strong> Budget data must be submitted electronically for consolidation</li>
-                  <li><strong>Transitory Period:</strong> Three-year transition for full compliance with NGPA</li>
-                </ul>
-                <p className="workspace-footer-note">
-                  <i className="fas fa-info-circle" aria-hidden="true"></i>
-                  Under RA 12009, end-users are responsible for inputting their budget allocations which are visible to Budget Office and BAC Admin for review and consolidation
-                </p>
-              </div>
-            </div>
-          </footer>
-        )}
-
-        {activeTab === "indicative" && user.role === "budget_office" && (
-          <footer className="workspace-footer">
-            <div className="workspace-footer-inner workspace-footer-budget">
-              <h2 className="workspace-footer-title">RA 12009 Compliance Guide</h2>
-              <div className="workspace-footer-content">
-                <h3>Key Requirements</h3>
-                <ul>
-                  <li><strong>Market Scoping:</strong> End-users must perform market research before drafting PPMPs</li>
-                  <li><strong>Life-Cycle Costing:</strong> Include operating, maintenance, and disposal costs</li>
-                  <li><strong>Digital Integration:</strong> All PPMPs must be submitted electronically</li>
-                  <li><strong>Transitory Period:</strong> Three-year transition period for full compliance</li>
-                </ul>
-                <p className="workspace-footer-note">
-                  <i className="fas fa-info-circle" aria-hidden="true"></i>
-                  Refer to RA 12009 Section 4 for detailed implementation guidelines
-                </p>
-              </div>
-            </div>
-          </footer>
-        )}
-
-        {activeTab === "audit" && user.role === "bac_admin" && (
+{activeTab === "audit" && user.role === "bac_admin" && (
           <footer className="workspace-footer">
             <div className="workspace-footer-inner">
               <h2 className="workspace-footer-title">RA 12009 Approval Guidelines</h2>
@@ -3719,7 +3580,7 @@ function Dashboard({ token, user, onLogout }) {
             </div>
             <div className="ppmp-fullscreen-actions">
               {(selectedPpmp.ppmp.status === "Approved" ||
-                selectedPpmp.ppmp.status === "Pending Budget Review") && (
+                selectedPpmp.ppmp.status === "Returned") && (
                 <>
                   <button
                     type="button"
@@ -3738,16 +3599,6 @@ function Dashboard({ token, user, onLogout }) {
                     Download Excel
                   </button>
                 </>
-              )}
-              {(selectedPpmp.ppmp.status === "Draft" || selectedPpmp.ppmp.status === "Returned") && (
-                <button
-                  type="button"
-                  className="btn btn-success ppmp-fullscreen-submit"
-                  onClick={() => handleSubmitPpmp(selectedPpmp.ppmp.id)}
-                >
-                  <i className="fas fa-paper-plane" aria-hidden="true"></i>
-                  Submit to Budget Office
-                </button>
               )}
             </div>
           </header>
@@ -3772,365 +3623,13 @@ function Dashboard({ token, user, onLogout }) {
                   "{selectedPpmp.ppmp.remarks}"
                 </div>
                 <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "1rem" }}>
-                  Please address the feedback above and resubmit for approval.
+                  Upload a revised Excel PPMP from the Dashboard, then submit again for approval.
                 </p>
               </div>
             )}
 
-            <div
-              className={`ppmp-fullscreen-columns${
-                selectedPpmp.ppmp.status === "Approved" ||
-                selectedPpmp.ppmp.status === "Pending Budget Review"
-                  ? " ppmp-fullscreen-columns--readonly"
-                  : ""
-              }`}
-            >
-              {selectedPpmp.ppmp.status !== "Approved" && selectedPpmp.ppmp.status !== "Pending Budget Review" && (
-              <section className="dashboard-card ppmp-add-item-card">
-                <h2 className="card-title">Add Line Item</h2>
-                <form onSubmit={handleAddPpmpItem} className="ppmp-add-item-form">
-                  <div className="form-field form-field-full">
-                    <label className="form-label">Title / Category of Items (Col 1)</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Office Supplies, ICT Equipment"
-                      className="form-input"
-                      value={itemCat}
-                      onChange={(e) => setItemCat(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div className="form-field form-field-full">
-                    <label className="form-label" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span>Item Name (Col 3)</span>
-                      {renderPpmpTypeBadge(itemIsCse)}
-                      <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: 400 }}>
-                        {itemIsCse
-                          ? "Matched PS-DBM CSE catalog"
-                          : "Not in CSE catalog"}
-                      </span>
-                    </label>
-                    <div className="item-desc-combobox">
-                      <input
-                        type="text"
-                        placeholder="Type to search catalog (e.g. Bond Paper A4)"
-                        className="form-input"
-                        value={itemDesc}
-                        onChange={(e) => handleItemDescChange(e.target.value)}
-                        onFocus={() => {
-                          if (descSuggestions.length > 0) setDescOpen(true);
-                        }}
-                        onBlur={() => {
-                          setTimeout(() => setDescOpen(false), 120);
-                        }}
-                        onKeyDown={handleItemDescKeyDown}
-                        role="combobox"
-                        aria-expanded={descOpen}
-                        aria-autocomplete="list"
-                        autoComplete="off"
-                        required
-                      />
-                      {descOpen && descSuggestions.length > 0 && (
-                        <ul className="item-desc-suggestions" role="listbox">
-                          {descSuggestions.map((entry, idx) => (
-                            <li
-                              key={`${entry.description}-${idx}`}
-                              className={`item-desc-suggestion ${
-                                idx === descHighlight ? "active" : ""
-                              }`}
-                              role="option"
-                              aria-selected={idx === descHighlight}
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                pickCatalogItem(entry);
-                              }}
-                              onMouseEnter={() => setDescHighlight(idx)}
-                            >
-                              <div className="item-desc-suggestion-main">
-                                <span className="item-desc-suggestion-name">
-                                  {entry.description}
-                                </span>
-                                <span className="item-desc-suggestion-meta">
-                                  {entry.category}
-                                  {entry.unit_of_measure ? ` \u2022 ${entry.unit_of_measure}` : ""}
-                                </span>
-                              </div>
-                              {renderPpmpTypeBadge(entry.is_cse)}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="form-field">
-                    <label className="form-label">Quantity</label>
-                    <input
-                      type="number"
-                      placeholder="0"
-                      className="form-input"
-                      value={itemQty}
-                      onChange={(e) => setItemQty(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div className="form-field">
-                    <label className="form-label">Unit of Measure</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. pc, box, ream"
-                      className="form-input"
-                      value={itemUnit}
-                      onChange={(e) => setItemUnit(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div className="form-field">
-                    <label className="form-label">Unit Cost (PHP)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      placeholder="0.00"
-                      className="form-input"
-                      value={itemCost}
-                      onChange={(e) => setItemCost(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div className="form-field">
-                    <label className="form-label">Type of Project (Col 2)</label>
-                    <select
-                      className="form-input"
-                      value={itemProjectType}
-                      onChange={(e) => setItemProjectType(e.target.value)}
-                    >
-                      {PPMP_PROJECT_TYPES.map((t) => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="form-field">
-                    <label className="form-label">Mode of Procurement (Col 4)</label>
-                    <select
-                      className="form-input"
-                      value={itemProcMode}
-                      onChange={(e) => setItemProcMode(e.target.value)}
-                    >
-                      {PPMP_PROCUREMENT_MODES.map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {itemProcMode === "Negotiated Procurement" && (
-                    <div className="form-field form-field-full">
-                      <label className="form-label">Negotiated Procurement Type</label>
-                      <select
-                        className="form-input"
-                        value={itemNpSubtype}
-                        onChange={(e) => setItemNpSubtype(e.target.value)}
-                        required
-                      >
-                        {PPMP_NP_SUBTYPES.map((s) => (
-                          <option key={s} value={s}>{s}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  <div className="form-field">
-                    <label className="form-label">Pre-Procurement Conference (Col 5)</label>
-                    <select
-                      className="form-input"
-                      value={itemPreProc ? "Yes" : "No"}
-                      onChange={(e) => setItemPreProc(e.target.value === "Yes")}
-                    >
-                      <option value="No">No</option>
-                      <option value="Yes">Yes</option>
-                    </select>
-                  </div>
-
-                  <div className="form-field">
-                    <label className="form-label">Start of Procurement (Col 6)</label>
-                    <div className="ppmp-month-year-row">
-                      <select
-                        className="form-input"
-                        value={itemStartMonth}
-                        onChange={(e) => setItemStartMonth(e.target.value)}
-                      >
-                        <option value="">Month</option>
-                        {PPMP_MONTHS.map((m) => (
-                          <option key={m} value={m}>{m}</option>
-                        ))}
-                      </select>
-                      <select
-                        className="form-input"
-                        value={itemStartYear}
-                        onChange={(e) => setItemStartYear(e.target.value)}
-                      >
-                        <option value="">Year</option>
-                        {ppmpYearOptions.map((y) => (
-                          <option key={y} value={String(y)}>{y}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="form-field">
-                    <label className="form-label">End of Procurement (Col 7)</label>
-                    <div className="ppmp-month-year-row">
-                      <select
-                        className="form-input"
-                        value={itemEndMonth}
-                        onChange={(e) => setItemEndMonth(e.target.value)}
-                      >
-                        <option value="">Month</option>
-                        {PPMP_MONTHS.map((m) => (
-                          <option key={m} value={m}>{m}</option>
-                        ))}
-                      </select>
-                      <select
-                        className="form-input"
-                        value={itemEndYear}
-                        onChange={(e) => setItemEndYear(e.target.value)}
-                      >
-                        <option value="">Year</option>
-                        {ppmpYearOptions.map((y) => (
-                          <option key={y} value={String(y)}>{y}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="form-field">
-                    <label className="form-label">Expected Delivery Period (Col 8)</label>
-                    <div className="ppmp-month-year-row">
-                      <select
-                        className="form-input"
-                        value={itemDeliveryMonth}
-                        onChange={(e) => setItemDeliveryMonth(e.target.value)}
-                      >
-                        <option value="">Month</option>
-                        {PPMP_MONTHS.map((m) => (
-                          <option key={m} value={m}>{m}</option>
-                        ))}
-                      </select>
-                      <select
-                        className="form-input"
-                        value={itemDeliveryYear}
-                        onChange={(e) => setItemDeliveryYear(e.target.value)}
-                      >
-                        <option value="">Year</option>
-                        {ppmpYearOptions.map((y) => (
-                          <option key={y} value={String(y)}>{y}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="form-field">
-                    <label className="form-label">Source of Funds (Col 9)</label>
-                    <select
-                      className="form-input"
-                      value={itemFundSource}
-                      onChange={(e) => setItemFundSource(e.target.value)}
-                    >
-                      {PPMP_FUND_SOURCES.map((f) => (
-                        <option key={f} value={f}>{f}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="form-field">
-                    <label className="form-label">Attached Supporting Documents (Col 11)</label>
-                    <select
-                      className="form-input"
-                      value={itemSupportingDocs}
-                      onChange={(e) => setItemSupportingDocs(e.target.value)}
-                    >
-                      {PPMP_SUPPORTING_DOCS.map((d) => (
-                        <option key={d} value={d}>{d}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="form-field">
-                    <label className="form-label">Remarks (Col 12)</label>
-                    <select
-                      className="form-input"
-                      value={itemRemarks}
-                      onChange={(e) => setItemRemarks(e.target.value)}
-                    >
-                      <option value="">—</option>
-                      <option value="Revised">Revised</option>
-                    </select>
-                  </div>
-
-                  <div className="form-field form-field-full ppmp-add-item-actions">
-                    <button type="submit" className="btn">
-                      <i className="fas fa-plus" aria-hidden="true"></i>
-                      Add Item
-                    </button>
-                  </div>
-                </form>
-              </section>
-              )}
-
-              <section className="dashboard-card ppmp-items-card">
-              {selectedPpmp.ppmp.status === "Approved" ||
-              selectedPpmp.ppmp.status === "Pending Budget Review" ? (
-                renderNgpaPpmpForm(selectedPpmp)
-              ) : (
-                <>
-                  <h2 className="card-title">PPMP Line Items ({selectedPpmp.items.length})</h2>
-                  <div className="table-wrapper">
-                    <table className="custom-table">
-                      <thead>
-                        <tr>
-                          <th>Title / Category</th>
-                          <th>Items</th>
-                          <th>Type</th>
-                          <th>Mode</th>
-                          <th>Fund</th>
-                          <th>Subtotal</th>
-                          <th>Remarks</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {selectedPpmp.items.length === 0 ? (
-                          <tr>
-                            <td colSpan="8" style={{ textAlign: "center", color: "var(--text-muted)", padding: "2rem" }}>
-                              No items added yet. Use the form above to add your first line item.
-                            </td>
-                          </tr>
-                        ) : (
-                          selectedPpmp.items.map((item) => (
-                            <tr key={item.id}>
-                              <td>{item.category || "—"}</td>
-                              <td>{ngpaQuantitySize(item)}</td>
-                              <td>{item.project_type || "—"}</td>
-                              <td>{item.procurement_mode}</td>
-                              <td>{item.fund_source || "—"}</td>
-                              <td>₱{(item.estimated_budget || 0).toLocaleString()}</td>
-                              <td>{item.remarks || "—"}</td>
-                              <td>
-                                <button type="button" className="btn btn-danger btn-sm" onClick={() => handleDeletePpmpItem(item.id)}>Remove</button>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
-              </section>
+            <div className="ppmp-fullscreen-columns ppmp-fullscreen-columns--readonly">
+              {renderNgpaPpmpForm(selectedPpmp)}
             </div>
           </div>
         </div>
