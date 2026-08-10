@@ -43,6 +43,9 @@ class User(SQLModel, table=True):
     username: str = Field(unique=True, index=True)
     email: str = Field(unique=True, index=True)
     hashed_password: str
+    # Plaintext copy set when BAC admin creates/resets the password (for admin display only).
+    # Login still verifies against hashed_password. Existing users are blank until reset.
+    plain_password: Optional[str] = Field(default=None)
     is_active: bool = Field(default=True)
     role: str = Field(default="end_user")  # "end_user", "budget_office", "bac_admin"
     office_id: Optional[int] = Field(default=None, foreign_key="office.id")
@@ -55,7 +58,8 @@ class User(SQLModel, table=True):
 class PPMP(SQLModel, table=True):
     """
     Base Project Procurement Management Plan model.
-    Status transitions: Draft -> Pending Budget Review -> Approved -> Returned
+    Status: Draft -> Pending Budget Review -> Approved | Returned
+    Posting (after Budget validates): Draft -> Posted (to BAC) ; Unpost -> Returned
     """
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str
@@ -67,7 +71,11 @@ class PPMP(SQLModel, table=True):
     is_cse: bool = Field(default=False, index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-    remarks: Optional[str] = Field(default=None)  # Remarks from budget office when returning for revision
+    remarks: Optional[str] = Field(default=None)  # Remarks from budget office when returning/unposting for revision
+    # BAC handoff after Budget validates (Approved + Posted = eligible for consolidation)
+    posting_status: str = Field(default="Draft")  # "Draft", "Posted"
+    posted_at: Optional[datetime] = Field(default=None)
+    posted_by: Optional[int] = Field(default=None)  # User ID of budget office staff
 
     # Relationships
     office: Office = Relationship(back_populates="ppmps")

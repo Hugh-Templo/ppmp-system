@@ -17,13 +17,29 @@ from app.auth import (
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+class UserCreate(BaseModel):
+    username: str
+    email: str
+    hashed_password: str
+    role: str = "end_user"
+    office_id: Optional[int] = None
+    office_name: Optional[str] = None
+    office_code: Optional[str] = None
+
+
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     email: Optional[str] = None
     password: Optional[str] = None
     role: Optional[str] = None
     office_id: Optional[int] = None
+    office_name: Optional[str] = None
+    office_code: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class AdminPasswordPayload(BaseModel):
+    password: str
 
 
 def _serialize_user(u: User) -> dict:
@@ -35,41 +51,110 @@ def _serialize_user(u: User) -> dict:
         "office_id": u.office_id,
         "is_active": u.is_active,
         "created_at": u.created_at,
+        "has_password": bool(u.plain_password),
     }
 
 
+def _resolve_or_create_office(
+    session: Session,
+    office_id: Optional[int] = None,
+    office_name: Optional[str] = None,
+    office_code: Optional[str] = None,
+) -> Optional[Office]:
+    if office_id is not None:
+        office = session.get(Office, office_id)
+        if not office:
+            raise HTTPException(status_code=400, detail="Office not found")
+        return office
+
+    normalized_name = (office_name or "").strip()
+    normalized_code = (office_code or "").strip().upper()
+    if not normalized_name and not normalized_code:
+        return None
+    if not normalized_name or not normalized_code:
+        raise HTTPException(
+            status_code=400,
+            detail="Office name and code are required for end-user accounts",
+        )
+
+    existing_by_code = session.exec(
+        select(Office).where(Office.code == normalized_code)
+    ).first()
+    if existing_by_code:
+        if normalized_name and existing_by_code.name != normalized_name:
+            existing_by_code.name = normalized_name
+            session.add(existing_by_code)
+        return existing_by_code
+
+    existing_by_name = session.exec(
+        select(Office).where(Office.name == normalized_name)
+    ).first()
+    if existing_by_name:
+        if normalized_code and existing_by_name.code != normalized_code:
+            existing_by_name.code = normalized_code
+            session.add(existing_by_name)
+        return existing_by_name
+
+    office = Office(
+        name=normalized_name,
+        code=normalized_code,
+        budget_allocation=0.0,
+        is_active=True,
+    )
+    session.add(office)
+    session.flush()
+    return office
+
+
 @router.post("/register")
-def register(user_data: User, current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
+def register(
+    user_data: UserCreate,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
     # Only BAC admins can register users
     if current_user.role != "bac_admin":
         raise HTTPException(status_code=403, detail="Access denied: Only BAC administrators can register users")
 
-    existing_user = session.exec(
-        select(User).where(User.username == user_data.username)
-    ).first()
+    username = user_data.username.strip()
+    email = user_data.email.strip()
+    role = (user_data.role or "end_user").strip().lower()
+    if role not in ("end_user", "budget_office", "bac_admin"):
+        raise HTTPException(status_code=400, detail="Invalid role")
+
+    existing_user = session.exec(select(User).where(User.username == username)).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already registered")
 
-    existing_email = session.exec(
-        select(User).where(User.email == user_data.email)
-    ).first()
+    existing_email = session.exec(select(User).where(User.email == email)).first()
     if existing_email:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     hashed_pwd = get_password_hash(user_data.hashed_password)
-    
-    # Verify office exists if office_id provided
-    if user_data.office_id:
+    plain_pwd = (user_data.hashed_password or "").strip() or None
+
+    office_id = None
+    if role == "end_user":
+        office = _resolve_or_create_office(
+            session,
+            office_id=user_data.office_id,
+            office_name=user_data.office_name,
+            office_code=user_data.office_code,
+        )
+        if office is not None:
+            office_id = office.id
+    elif user_data.office_id is not None:
         office = session.get(Office, user_data.office_id)
         if not office:
             raise HTTPException(status_code=400, detail="Office not found")
 
     new_user = User(
-        username=user_data.username,
-        email=user_data.email,
+        username=username,
+        email=email,
         hashed_password=hashed_pwd,
-        role=user_data.role,
-        office_id=user_data.office_id,
+        plain_password=plain_pwd,
+        role=role,
+        office_id=office_id,
         is_active=True,
     )
     session.add(new_user)
@@ -120,17 +205,22 @@ def update_user(
 
     effective_role = target.role
     if effective_role == "end_user":
-        if payload.office_id is not None:
-            office = session.get(Office, payload.office_id)
-            if not office:
-                raise HTTPException(status_code=400, detail="Office not found")
-            target.office_id = payload.office_id
+        if payload.office_id is not None or payload.office_name is not None or payload.office_code is not None:
+            office = _resolve_or_create_office(
+                session,
+                office_id=payload.office_id,
+                office_name=payload.office_name,
+                office_code=payload.office_code,
+            )
+            if office is not None:
+                target.office_id = office.id
     else:
         # Budget / BAC accounts are not tied to a department office.
         target.office_id = None
 
     if payload.password:
         target.hashed_password = get_password_hash(payload.password)
+        target.plain_password = payload.password.strip() or None
 
     if payload.is_active is not None:
         if target.id == current_user.id and payload.is_active is False:
@@ -144,6 +234,44 @@ def update_user(
     session.commit()
     session.refresh(target)
     return {"message": "User updated successfully", "user": _serialize_user(target)}
+
+
+@router.post("/users/{user_id}/reveal-password")
+def reveal_user_password(
+    user_id: int,
+    payload: AdminPasswordPayload,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["bac_admin"])),
+):
+    """Reveal an end-user or budget office saved password after verifying the bacadmin password."""
+    admin_pwd = (payload.password or "").strip()
+    if not admin_pwd:
+        raise HTTPException(status_code=400, detail="Administrator password is required")
+    if not verify_password(admin_pwd, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Incorrect administrator password")
+
+    target = session.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.role not in ("end_user", "budget_office"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only end-user and budget office passwords can be revealed",
+        )
+    if not target.plain_password:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No viewable password is stored for this account yet. "
+                "Edit the user and set their password once so it can be shown."
+            ),
+        )
+
+    return {
+        "user_id": target.id,
+        "username": target.username,
+        "password": target.plain_password,
+    }
 
 
 @router.delete("/users/{user_id}")

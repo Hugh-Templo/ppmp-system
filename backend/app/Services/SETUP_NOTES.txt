@@ -1,0 +1,83 @@
+PPMP Laravel Backend — Setup Notes
+==================================
+
+Files created (foundation only):
+- database/migrations/2026_07_19_000001_create_ppmp_tables.php
+- database/migrations/2026_07_19_000002_rebuild_users_for_ppmp.php
+- app/Models/* (Office, User, Ppmp, IndicativePpmp, FinalPpmp, PpmpItem,
+  AppPlan, AppRow, DbmClassification, CseCatalogItem, ProcessedRow, SyncLog)
+- app/Services/JwtService.php
+- app/Http/Middleware/JwtAuth.php
+- app/Http/Middleware/RequireRole.php
+- database/seeders/DatabaseSeeder.php
+
+1) Environment (.env)
+---------------------
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=ppmpsys   # or your chosen DB name
+DB_USERNAME=root
+DB_PASSWORD=
+
+JWT_SECRET=           # optional; falls back to APP_KEY
+JWT_TTL=60            # token lifetime in minutes
+
+2) Register middleware aliases in bootstrap/app.php
+---------------------------------------------------
+Inside ->withMiddleware(function (Middleware $middleware): void { ... }):
+
+    $middleware->alias([
+        'jwt'  => \App\Http\Middleware\JwtAuth::class,
+        'role' => \App\Http\Middleware\RequireRole::class,
+    ]);
+
+Also enable API routes when ready:
+
+    ->withRouting(
+        web: __DIR__.'/../routes/web.php',
+        api: __DIR__.'/../routes/api.php',
+        commands: __DIR__.'/../routes/console.php',
+        health: '/up',
+    )
+
+3) Usage examples (after aliases are registered)
+------------------------------------------------
+Route::middleware('jwt')->group(function () {
+    Route::get('/me', ...);
+});
+
+Route::middleware(['jwt', 'role:bac_admin'])->group(function () {
+    // bac_admin only
+});
+
+Route::middleware(['jwt', 'role:bac_admin,budget_office'])->group(function () {
+    // either role
+});
+
+Request attribute after JwtAuth:
+    $user = $request->attributes->get('auth_user');
+
+JSON error shapes (match FastAPI):
+    401 → {"detail":"..."}
+    403 → {"detail":"You do not have permission to access this resource"}
+
+4) Migrate & seed
+-----------------
+    php artisan migrate
+    php artisan db:seed
+
+Default admin:
+    username: admin
+    password: admin123
+    role:     bac_admin
+
+Sample offices: O-BAC, O-BUDGET, O-CHO, O-GSO, O-CMO
+
+5) Notes
+--------
+- Table `users` (Laravel) maps Python SQLModel User (was table "user").
+- AppPlan uses table `app`; AppRow uses table `approw`.
+- User password column is hashed_password (getAuthPassword() override).
+- firebase/php-jwt is already in composer.json.
+- Do not re-run the default users migration after 000002; it drops/recreates users.

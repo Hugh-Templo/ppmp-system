@@ -1,14 +1,14 @@
 BACKEND SERVER FastAPI
 
 # Navigate to the backend directory
-cd c:\xampp\htdocs\ppmpsys
+cd c:\xampp\htdocs\appbac
 
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 FRONTEND SERVER Vite/React
 
 # Navigate to the frontend directory
-cd c:\xampp\htdocs\ppmpsys\frontend
+cd c:\xampp\htdocs\appbac\frontend
 
 # Install Node.js dependencies (if not already installed)
 npm install
@@ -21,10 +21,23 @@ FILE-BASED CSE / nonCSE APP CONSOLIDATION
 # Drive layout under APP SYSTEM FILES
 #   (folder id 1WwsC0Le5uo71jSzZlYsEnQT5MGWTnjq6 — rclone remote "gdrive"):
 #
-# Sources (office PPMPs — synced into local IT_ppmps on CSE-APP / nonCSE-APP load):
-#   Drive CSE-PPMP/{office}    →  C:\xampp\htdocs\ppmpsys\IT_ppmps\CSE\{office}
-#   Drive nonCSE-PPMP/{office} →  C:\xampp\htdocs\ppmpsys\IT_ppmps\nonCSE\{office}
-#   (office folders e.g. BAC, ADMIN, IT — Excel files listed recursively)#
+# Office folder name = short code from Office.code (strip leading O- / O_):
+#   O-BAC → BAC, O-CHO → CHO, IT → IT
+#
+# Sources (office PPMPs):
+#   Drive CSE-PPMP/{short}    ↔  C:\xampp\htdocs\appbac\IT_ppmps\CSE\{short}
+#   Drive nonCSE-PPMP/{short} ↔  C:\xampp\htdocs\appbac\IT_ppmps\nonCSE\{short}
+#   (office folders e.g. BAC, ADMIN, IT — Excel files listed recursively)
+#
+# End-user PPMP upload (POST /api/offices/ppmps/upload):
+#   saves under local IT_ppmps/{CSE|nonCSE}/{short}/ AND rclone-copies to the
+#   matching Drive CSE-PPMP|nonCSE-PPMP/{short}/ folder (local+DB succeed even
+#   if Drive push fails; response includes drive_sync).
+#
+# bacadmin create/reactivate office (POST /api/bac/offices):
+#   ensures CSE-PPMP/{short} and nonCSE-PPMP/{short} exist (creates or reconnects
+#   to an existing case-insensitive match). Soft-delete never removes Drive folders.
+#
 # Outputs (consolidated APP uploaded after Run Consolidation):
 #   local export → Drive CSE-APP / nonCSE-APP
 #
@@ -49,3 +62,4 @@ WINDOWS SERVER INSTALLER (new PC)
 #   https://jrsoftware.org/isinfo.php
 # Then: npm run installer:build
 # (prepare-runtime.ps1 already stages payload under installer\payload)
+

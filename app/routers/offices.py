@@ -14,7 +14,7 @@ from app.database import get_session
 from app.models import User, Office, PPMP, PPMPItem
 from app.auth import get_current_user, check_role
 from app.ppmp_template import export_ppmp_xlsx, write_signatory
-from app.config import IT_PPMPS_DIR
+from app.config import IT_PPMPS_DIR, drive_office_folder_name
 from app.file_ppmps import (
     KIND_FOLDER,
     ensure_it_ppmps_dirs,
@@ -281,22 +281,19 @@ def create_ppmp(
 @router.post("/ppmps/upload")
 async def upload_ppmp(
     file: UploadFile = File(...),
-    fiscal_year: Optional[int] = Form(None),
-    is_cse: str = Form("false"),
     title: Optional[str] = Form(None),
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["end_user"])),
 ):
-    """Parse an uploaded NGPA/legacy PPMP Excel, replace Draft|Returned for this
-    office/year/kind, and save a copy under IT_ppmps/{CSE|nonCSE}/{office}/."""
+    """Parse an uploaded NGPA/legacy PPMP Excel, replace Draft/Returned for this
+    office/year, and save under IT_ppmps/nonCSE/{short}/.
+    Drive CSE-PPMP / nonCSE-PPMP is updated only when Budget Posts the validated plan."""
     if not current_user.office_id:
         raise HTTPException(status_code=400, detail="User is not assigned to any office")
 
     office = session.get(Office, current_user.office_id)
     if not office or not office.is_active:
         raise HTTPException(status_code=400, detail="Office not found or inactive")
-
-    is_cse_flag = str(is_cse or "").strip().lower() in {"1", "true", "yes", "on", "cse"}
 
     filename = (file.filename or "").strip()
     suffix = Path(filename).suffix.lower() if filename else ""
@@ -311,9 +308,9 @@ async def upload_ppmp(
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
     ensure_it_ppmps_dirs()
-    kind_key = "cse" if is_cse_flag else "noncse"
-    kind_folder = KIND_FOLDER[kind_key]
-    office_folder = IT_PPMPS_DIR / kind_folder / office.code
+    kind_folder = KIND_FOLDER["noncse"]
+    short_folder = drive_office_folder_name(office.code)
+    office_folder = IT_PPMPS_DIR / kind_folder / short_folder
     office_folder.mkdir(parents=True, exist_ok=True)
 
     safe_stem = re.sub(r"[^\w\-]+", "_", Path(filename).stem).strip("_") or "PPMP"
@@ -325,7 +322,7 @@ async def upload_ppmp(
         tmp_path = Path(tmp.name)
 
     try:
-        items_data = load_file_ppmp_items(tmp_path, is_cse=bool(is_cse_flag), kind_root=office_folder)
+        items_data = load_file_ppmp_items(tmp_path, is_cse=False, kind_root=office_folder)
         # Prefer fiscal year / title from the workbook when not provided
         from app.file_ppmps import _extract_meta, _iter_workbook_rows
 
@@ -339,7 +336,7 @@ async def upload_ppmp(
         logger.exception("Failed to parse uploaded PPMP")
         raise HTTPException(status_code=400, detail=f"Could not parse PPMP Excel: {exc}") from exc
 
-    year = fiscal_year or meta.get("fiscal_year") or datetime.utcnow().year
+    year = meta.get("fiscal_year") or datetime.utcnow().year
     try:
         year = int(year)
     except (TypeError, ValueError):
@@ -355,12 +352,11 @@ async def upload_ppmp(
 
     ppmp_title = (title or meta.get("title") or Path(filename).stem or "PPMP").strip()
 
-    # Replace existing Draft/Returned for same office + year + CSE flag
+    # Replace existing Draft/Returned for same office + year regardless of prior CSE type
     candidates = session.exec(
         select(PPMP).where(
             PPMP.office_id == office.id,
             PPMP.fiscal_year == year,
-            PPMP.is_cse == bool(is_cse_flag),
         )
     ).all()
     existing = [p for p in candidates if p.status in _END_USER_UPLOADABLE]
@@ -386,7 +382,8 @@ async def upload_ppmp(
         office_id=office.id,
         status="Draft",
         type="Indicative",
-        is_cse=bool(is_cse_flag),
+        is_cse=False,
+        posting_status="Draft",
         remarks=None,
         updated_at=datetime.utcnow(),
     )
@@ -404,7 +401,7 @@ async def upload_ppmp(
                 ppmp_id=new_ppmp.id,
                 description=(row.get("description") or "").strip() or "Item",
                 category=row.get("category"),
-                is_cse=bool(row.get("is_cse", is_cse_flag)),
+                is_cse=bool(row.get("is_cse", False)),
                 project_type=row.get("project_type") or "Goods",
                 quantity_size=row.get("quantity_size"),
                 procurement_mode=row.get("procurement_mode") or "Competitive Bidding",
@@ -428,6 +425,7 @@ async def upload_ppmp(
 
     session.commit()
     session.refresh(new_ppmp)
+
     return {
         "message": "PPMP uploaded successfully",
         "ppmp": new_ppmp,

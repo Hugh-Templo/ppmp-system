@@ -51,6 +51,7 @@ const formatMonthYear = (month, year) => {
   return `${month} ${year}`;
 };
 
+
 const composeQuantitySize = (qty, unit, name) =>
   [qty, (unit || "").trim(), (name || "").trim()].filter(Boolean).join(" ").trim();
 
@@ -104,9 +105,12 @@ function Dashboard({ token, user, onLogout }) {
   // Budget Office state
   const [pendingPpmps, setPendingPpmps] = useState([]);
   const [indicativePpmps, setIndicativePpmps] = useState([]);
+  const [postingPpmps, setPostingPpmps] = useState([]);
   const [finalPpmps, setFinalPpmps] = useState([]);
   const [auditDetails, setAuditDetails] = useState(null);
   const [remarks, setRemarks] = useState("");
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviseModalOpen, setReviseModalOpen] = useState(false);
 
   // BAC Admin state
   const [apps, setApps] = useState([]);
@@ -116,7 +120,7 @@ function Dashboard({ token, user, onLogout }) {
   const [newOfficeBudget, setNewOfficeBudget] = useState(0);
   const [editingOfficeId, setEditingOfficeId] = useState(null);
   const [offices, setOffices] = useState([]);
-  const [consolidationYear, setConsolidationYear] = useState(new Date().getFullYear() + 1);
+  const consolidationYear = new Date().getFullYear() + 1;
   const [dbmClassification, setDbmClassification] = useState([]);
   // CSE-APP / nonCSE-APP workspace
   const [approvedAppPpmps, setApprovedAppPpmps] = useState([]);
@@ -133,15 +137,6 @@ function Dashboard({ token, user, onLogout }) {
   const [newDbmClassification, setNewDbmClassification] = useState("");
   const [newDbmDescription, setNewDbmDescription] = useState("");
 
-  // Signatory state
-  const [submittedBy, setSubmittedBy] = useState("");
-  const [submittedByDesignation, setSubmittedByDesignation] = useState("");
-  const [preparedBy, setPreparedBy] = useState("");
-  const [preparedByDesignation, setPreparedByDesignation] = useState("");
-  const [aipReference, setAipReference] = useState("");
-  const [responsibilityCenterNo, setResponsibilityCenterNo] = useState("");
-  const [officeCodeFromPR, setOfficeCodeFromPR] = useState("");
-
   // BAC APP signatory (shared CSE + nonCSE footer)
   const [appSigPreparedBy, setAppSigPreparedBy] = useState("");
   const [appSigPreparedDesig, setAppSigPreparedDesig] = useState("");
@@ -152,15 +147,8 @@ function Dashboard({ token, user, onLogout }) {
   const [appSignatoryLoaded, setAppSignatoryLoaded] = useState(false);
 
   // End-user Excel upload
-  const [uploadFiscalYear, setUploadFiscalYear] = useState(new Date().getFullYear() + 1);
-  const [uploadIsCse, setUploadIsCse] = useState(false);
-  const [uploadTitle, setUploadTitle] = useState("");
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadBusy, setUploadBusy] = useState(false);
-
-  // Budget Allocation state (for end users)
-  const [userBudgetAllocation, setUserBudgetAllocation] = useState(0);
-  const [userOfficeBudget, setUserOfficeBudget] = useState(0);
 
   // Registration state
   const [newUsername, setNewUsername] = useState("");
@@ -172,6 +160,16 @@ function Dashboard({ token, user, onLogout }) {
   const [editingUserId, setEditingUserId] = useState(null);
   const [newUserActive, setNewUserActive] = useState(true);
   const [registeredUsers, setRegisteredUsers] = useState([]);
+  const [revealedUserPasswords, setRevealedUserPasswords] = useState({});
+  const [passwordRevealModal, setPasswordRevealModal] = useState({
+    open: false,
+    userId: null,
+    username: "",
+  });
+  const [adminRevealPassword, setAdminRevealPassword] = useState("");
+  const [adminRevealBusy, setAdminRevealBusy] = useState(false);
+  const [adminRevealError, setAdminRevealError] = useState("");
+  const [showAdminRevealPassword, setShowAdminRevealPassword] = useState(false);
 
   const [notification, setNotification] = useState({ message: "", type: "" });
   const [confirmDialog, setConfirmDialog] = useState({
@@ -248,7 +246,7 @@ function Dashboard({ token, user, onLogout }) {
       fetchOfficePpmps();
     } else if (user.role === "budget_office") {
       fetchPendingPpmps();
-      fetchIndicativePpmps();
+      fetchPostingPpmps();
       fetchFinalPpmps();
       fetchOffices();
     } else if (user.role === "bac_admin") {
@@ -257,19 +255,20 @@ function Dashboard({ token, user, onLogout }) {
       fetchUsers();
       fetchDbmClassification();
       fetchPendingPpmps();
+      fetchPostingPpmps();
       fetchIndicativePpmps();
     }
   };
 
   useEffect(() => {
-    if (user.role === "bac_admin" && activeTab === "users") {
+    if (user.role === "bac_admin" && activeTab === "offices") {
       fetchUsers();
     }
   }, [activeTab, user.role]);
 
   useEffect(() => {
     if (user.role === "budget_office" && activeTab === "indicative") {
-      fetchIndicativePpmps();
+      fetchPostingPpmps();
       fetchOffices();
     }
   }, [activeTab, user.role]);
@@ -309,24 +308,6 @@ function Dashboard({ token, user, onLogout }) {
       fetchAppSignatory();
     }
   }, [activeTab, user.role]);
-
-  useEffect(() => {
-    if (user.role === "end_user" && activeTab === "budget_allocation") {
-      fetchUserOfficeBudget();
-    }
-  }, [activeTab, user.role]);
-
-  useEffect(() => {
-    if (user.role === "end_user" && activeTab === "signatory") {
-      fetchSignatory();
-    }
-  }, [activeTab, user.role]);
-
-  useEffect(() => {
-    if (user.role === "end_user") {
-      fetchSignatory();
-    }
-  }, [user.role]);
 
   useEffect(() => {
     if (user.role === "end_user" && selectedPpmp) {
@@ -386,6 +367,20 @@ function Dashboard({ token, user, onLogout }) {
       if (res.ok) {
         const data = await res.json();
         setIndicativePpmps(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchPostingPpmps = async () => {
+    try {
+      const res = await apiFetch("/api/budget/ppmps/posting", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPostingPpmps(data);
       }
     } catch (err) {
       console.error(err);
@@ -623,9 +618,6 @@ function Dashboard({ token, user, onLogout }) {
     try {
       const form = new FormData();
       form.append("file", uploadFile);
-      form.append("fiscal_year", String(uploadFiscalYear));
-      form.append("is_cse", uploadIsCse ? "true" : "false");
-      if (uploadTitle.trim()) form.append("title", uploadTitle.trim());
 
       const res = await apiFetch("/api/offices/ppmps/upload", {
         method: "POST",
@@ -634,11 +626,22 @@ function Dashboard({ token, user, onLogout }) {
       });
       if (res.ok) {
         const data = await res.json();
-        showNotification(
-          `PPMP uploaded (${data.item_count || 0} items). Submit it when ready.`
-        );
+        const drive = data.drive_sync;
+        if (drive && drive.ok === false) {
+          showNotification(
+            `PPMP saved locally (${data.item_count || 0} items), but Drive upload failed: ${
+              drive.error || "unknown error"
+            }. Submit it when ready.`,
+            "danger"
+          );
+        } else {
+          showNotification(
+            `PPMP uploaded (${data.item_count || 0} items)${
+              drive && drive.ok ? " and synced to Google Drive" : ""
+            }. Submit it when ready.`
+          );
+        }
         setUploadFile(null);
-        setUploadTitle("");
         fetchOfficePpmps();
       } else {
         let detail = "Failed to upload PPMP";
@@ -909,21 +912,87 @@ function Dashboard({ token, user, onLogout }) {
     }
   };
 
-  const handleReviewAction = async (ppmpId, action) => {
+  const closeBudgetReview = () => {
+    setSelectedPpmp(null);
+    setAuditDetails(null);
+    setRemarks("");
+    setReviseModalOpen(false);
+  };
+
+  const handleReviewAction = async (ppmpId, action, reviewRemarks = remarks) => {
+    if (action === "return" && !String(reviewRemarks || "").trim()) {
+      showNotification("Add remarks explaining why the PPMP needs revision.", "danger");
+      return;
+    }
+
+    setReviewBusy(true);
     try {
-      const res = await apiFetch(`/api/budget/ppmps/${ppmpId}/review?action=${action}&remarks=${remarks}`, {
+      const res = await apiFetch(`/api/budget/ppmps/${ppmpId}/review?action=${action}&remarks=${encodeURIComponent(reviewRemarks || "")}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
-        showNotification(`PPMP successfully ${action}d!`);
+        const actionLabel = action === "approve" ? "verified" : "returned for revision";
+        showNotification(`PPMP successfully ${actionLabel}!`);
         setSelectedPpmp(null);
         setAuditDetails(null);
         setRemarks("");
+        setReviseModalOpen(false);
         fetchPendingPpmps();
+        fetchPostingPpmps();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showNotification(err.detail || "Error completing review", "danger");
       }
     } catch (err) {
       showNotification("Error completing review", "danger");
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const handlePostPpmp = async (ppmpId) => {
+    try {
+      const res = await apiFetch(`/api/budget/ppmps/${ppmpId}/post`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const folder = data?.drive?.drive_folder || "Drive";
+        showNotification(data.message || `PPMP posted to BAC (${folder})`);
+        fetchPostingPpmps();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showNotification(err.detail || "Failed to post PPMP", "danger");
+      }
+    } catch (err) {
+      showNotification("Failed to post PPMP", "danger");
+    }
+  };
+
+  const handleUnpostPpmp = async (ppmpId) => {
+    const unpostRemarks = window.prompt(
+      "Remarks for the end user (why revision is needed):",
+      "Unposted by Budget Office — please revise and resubmit."
+    );
+    if (unpostRemarks === null) return;
+    try {
+      const q = encodeURIComponent(unpostRemarks.trim());
+      const res = await apiFetch(`/api/budget/ppmps/${ppmpId}/unpost?remarks=${q}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        showNotification("PPMP unposted — returned to end user for revision");
+        fetchPostingPpmps();
+        fetchPendingPpmps();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showNotification(err.detail || "Failed to unpost PPMP", "danger");
+      }
+    } catch (err) {
+      showNotification("Failed to unpost PPMP", "danger");
     }
   };
 
@@ -988,7 +1057,6 @@ function Dashboard({ token, user, onLogout }) {
   };
 
   const resetOfficeForm = () => {
-    setEditingOfficeId(null);
     setNewOfficeName("");
     setNewOfficeCode("");
     setNewOfficeBudget(0);
@@ -1001,84 +1069,37 @@ function Dashboard({ token, user, onLogout }) {
       code: newOfficeCode.trim(),
       budget_allocation: parseFloat(newOfficeBudget) || 0,
     };
-    const isEdit = !!editingOfficeId;
     try {
-      const res = await apiFetch(
-        isEdit ? `/api/bac/offices/${editingOfficeId}` : "/api/bac/offices",
-        {
-          method: isEdit ? "PUT" : "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(payload),
-        }
-      );
+      const res = await apiFetch("/api/bac/offices", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showNotification(
-          isEdit
-            ? "Office updated successfully"
-            : "Office saved. Past PPMPs for this code remain available."
-        );
+        const drive = data.drive_folders;
+        const msg =
+          typeof data.message === "string"
+            ? data.message
+            : "Office saved. Past PPMPs for this code remain available.";
+        if (drive && drive.ok === false) {
+          showNotification(msg, "danger");
+        } else {
+          showNotification(msg);
+        }
         resetOfficeForm();
         fetchOffices();
       } else {
         const detail =
-          typeof data.detail === "string"
-            ? data.detail
-            : isEdit
-              ? "Failed to update office"
-              : "Failed to create office";
+          typeof data.detail === "string" ? data.detail : "Failed to create office";
         showNotification(detail, "danger");
       }
     } catch (err) {
-      showNotification(isEdit ? "Failed to update office" : "Failed to create office", "danger");
+      showNotification("Failed to create office", "danger");
     }
-  };
-
-  const handleEditOffice = (office) => {
-    setEditingOfficeId(office.id);
-    setNewOfficeName(office.name || "");
-    setNewOfficeCode(office.code || "");
-    setNewOfficeBudget(office.budget_allocation || 0);
-  };
-
-  const performDeleteOffice = async (officeId) => {
-    try {
-      const res = await apiFetch(`/api/bac/offices/${officeId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        showNotification(
-          typeof data.message === "string"
-            ? data.message
-            : "Office removed. PPMPs and local files were kept."
-        );
-        if (editingOfficeId === officeId) resetOfficeForm();
-        fetchOffices();
-        fetchUsers();
-      } else {
-        const detail =
-          typeof data.detail === "string" ? data.detail : "Failed to delete office";
-        showNotification(detail, "danger");
-      }
-    } catch (err) {
-      showNotification("Failed to delete office", "danger");
-    }
-  };
-
-  const handleDeleteOffice = (office) => {
-    showConfirm({
-      title: "Remove Office",
-      message: `Remove "${office.name}" (${office.code}) from the active office list?\n\nCreated PPMPs and local template files for this office will NOT be deleted. Assigned user accounts will be unassigned. Recreate this office with the same code later to restore access to past PPMPs.`,
-      confirmLabel: "Remove Office",
-      cancelLabel: "Cancel",
-      variant: "danger",
-      onConfirm: () => performDeleteOffice(office.id),
-    });
   };
 
   const resetUserForm = () => {
@@ -1090,6 +1111,9 @@ function Dashboard({ token, user, onLogout }) {
     setNewUserRole("end_user");
     setNewUserOfficeId("");
     setNewUserActive(true);
+    setNewOfficeName("");
+    setNewOfficeCode("");
+    setNewOfficeBudget(0);
   };
 
   const handleEditUser = (u) => {
@@ -1101,6 +1125,78 @@ function Dashboard({ token, user, onLogout }) {
     setNewUserRole(u.role || "end_user");
     setNewUserOfficeId(u.office_id ? String(u.office_id) : "");
     setNewUserActive(u.is_active !== false);
+    const office = offices.find((item) => item.id === u.office_id);
+    setNewOfficeName(office?.name || "");
+    setNewOfficeCode(office?.code || "");
+    setNewOfficeBudget(office?.budget_allocation || 0);
+  };
+
+  const openPasswordRevealModal = (u) => {
+    setPasswordRevealModal({
+      open: true,
+      userId: u.id,
+      username: u.username || "",
+    });
+    setAdminRevealPassword("");
+    setAdminRevealError("");
+    setShowAdminRevealPassword(false);
+  };
+
+  const closePasswordRevealModal = () => {
+    setPasswordRevealModal({ open: false, userId: null, username: "" });
+    setAdminRevealPassword("");
+    setAdminRevealError("");
+    setAdminRevealBusy(false);
+    setShowAdminRevealPassword(false);
+  };
+
+  const hideRevealedUserPassword = (userId) => {
+    setRevealedUserPasswords((prev) => {
+      const next = { ...prev };
+      delete next[userId];
+      return next;
+    });
+  };
+
+  const submitAdminPasswordReveal = async (e) => {
+    e?.preventDefault?.();
+    const userId = passwordRevealModal.userId;
+    if (!userId) return;
+    const adminPwd = adminRevealPassword.trim();
+    if (!adminPwd) {
+      setAdminRevealError("Enter your administrator password");
+      return;
+    }
+    setAdminRevealBusy(true);
+    setAdminRevealError("");
+    try {
+      const res = await apiFetch(`/api/auth/users/${userId}/reveal-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ password: adminPwd }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.password) {
+        setRevealedUserPasswords((prev) => ({
+          ...prev,
+          [userId]: data.password,
+        }));
+        closePasswordRevealModal();
+      } else {
+        setAdminRevealError(
+          typeof data.detail === "string"
+            ? data.detail
+            : "Could not reveal password"
+        );
+      }
+    } catch (_) {
+      setAdminRevealError("Could not reveal password");
+    } finally {
+      setAdminRevealBusy(false);
+    }
   };
 
   const handleSaveUser = async (e) => {
@@ -1118,9 +1214,13 @@ function Dashboard({ token, user, onLogout }) {
       }
     }
 
-    if (newUserRole === "end_user" && !newUserOfficeId) {
-      showNotification("Please select an office for end-user accounts", "danger");
-      return;
+    if (newUserRole === "end_user") {
+      const officeName = newOfficeName.trim();
+      const officeCode = newOfficeCode.trim();
+      if (!officeName || !officeCode) {
+        showNotification("Please enter both the end-user office name and code", "danger");
+        return;
+      }
     }
 
     try {
@@ -1130,9 +1230,13 @@ function Dashboard({ token, user, onLogout }) {
           username: newUsername.trim(),
           email: newEmail.trim(),
           role: newUserRole,
-          office_id: newUserRole === "end_user" ? parseInt(newUserOfficeId, 10) : null,
+          office_id: newUserRole === "end_user" && newUserOfficeId ? parseInt(newUserOfficeId, 10) : null,
           is_active: newUserActive,
         };
+        if (newUserRole === "end_user") {
+          body.office_name = newOfficeName.trim();
+          body.office_code = newOfficeCode.trim().toUpperCase();
+        }
         if (newPassword) body.password = newPassword;
         res = await apiFetch(`/api/auth/users/${editingUserId}`, {
           method: "PUT",
@@ -1154,7 +1258,9 @@ function Dashboard({ token, user, onLogout }) {
             email: newEmail.trim(),
             hashed_password: newPassword,
             role: newUserRole,
-            office_id: newUserRole === "end_user" ? parseInt(newUserOfficeId, 10) : null,
+            office_id: newUserRole === "end_user" && newUserOfficeId ? parseInt(newUserOfficeId, 10) : null,
+            office_name: newUserRole === "end_user" ? newOfficeName.trim() : undefined,
+            office_code: newUserRole === "end_user" ? newOfficeCode.trim().toUpperCase() : undefined,
           }),
         });
       }
@@ -1164,6 +1270,7 @@ function Dashboard({ token, user, onLogout }) {
         showNotification(isEdit ? "User updated successfully!" : "User registered successfully!");
         resetUserForm();
         fetchUsers();
+        fetchOffices();
       } else {
         const detail =
           typeof data.detail === "string"
@@ -1443,17 +1550,16 @@ function Dashboard({ token, user, onLogout }) {
   const pageTitles = {
     dashboard: "Dashboard",
     view_ppmps: "View PPMPs",
-    signatory: "Signatory Information",
-    indicative: "Indicative PPMP Management",
+    indicative: "Post to BAC",
     final: "Final PPMP",
     cse_app: "CSE Annual Procurement Plan",
     noncse_app: "nonCSE Annual Procurement Plan",
+    consolidated_apps: "Consolidated APPs",
     app_signatory: "APP Signatory",
-    offices: "Manage Offices",
+    offices: "Users & Offices",
     users: "Manage Users",
     dbm: "DBM Classification",
     audit: "Pending PPMP Review",
-    budget_allocation: "Budget Allocation",
   };
 
   const renderPpmpTypeBadge = (isCse) => (
@@ -2319,129 +2425,21 @@ function Dashboard({ token, user, onLogout }) {
     );
   };
 
-  const fetchSignatory = async () => {
-    if (!user?.office_id) return;
-    try {
-      const res = await apiFetch(
-        `/api/offices/signatory?office_id=${user.office_id}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!res.ok) return;
-      const data = await res.json();
-      setSubmittedBy(data.submitted_by || "");
-      setSubmittedByDesignation(data.submitted_by_designation || "");
-      setPreparedBy(data.prepared_by || "");
-      setPreparedByDesignation(data.prepared_by_designation || "");
-      setAipReference(data.aip_reference || "");
-      setResponsibilityCenterNo(data.responsibility_center_no || "");
-      setOfficeCodeFromPR(data.office_code_from_pr || "");
-    } catch (err) {
-      // Non-fatal: leave inputs blank so the user can still save.
-    }
-  };
+  const activeOffices = (offices || []).filter((office) => office.is_active !== false);
+  const verifiedOfficeIds = new Set(
+    (postingPpmps || [])
+      .map((ppmp) => ppmp.office_id)
+      .filter((value) => value != null && value !== "")
+      .map((value) => String(value))
+  );
+  const verifiedOfficeCount = activeOffices.filter((office) =>
+    verifiedOfficeIds.has(String(office.id))
+  ).length;
+  const verifiedProgress = activeOffices.length
+    ? Math.round((verifiedOfficeCount / activeOffices.length) * 100)
+    : 0;
+  const allOfficesVerified = activeOffices.length > 0 && verifiedOfficeCount >= activeOffices.length;
 
-  const handleUpdateSignatory = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await apiFetch("/api/offices/signatory", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          submitted_by: submittedBy,
-          submitted_by_designation: submittedByDesignation,
-          prepared_by: preparedBy,
-          prepared_by_designation: preparedByDesignation,
-          aip_reference: aipReference,
-          responsibility_center_no: responsibilityCenterNo,
-          office_code_from_pr: officeCodeFromPR,
-          office_id: user.office_id,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const sig = data.signatory || {};
-        setSubmittedBy(sig.submitted_by || submittedBy);
-        setSubmittedByDesignation(
-          sig.submitted_by_designation || submittedByDesignation
-        );
-        setPreparedBy(sig.prepared_by || preparedBy);
-        setPreparedByDesignation(
-          sig.prepared_by_designation || preparedByDesignation
-        );
-        setAipReference(sig.aip_reference || aipReference);
-        setResponsibilityCenterNo(
-          sig.responsibility_center_no || responsibilityCenterNo
-        );
-        setOfficeCodeFromPR(sig.office_code_from_pr || officeCodeFromPR);
-        showNotification("Signatory information updated successfully!");
-      } else {
-        let detail = "Failed to update signatory information";
-        try {
-          const body = await res.json();
-          if (body?.detail) detail = body.detail;
-        } catch (_) {}
-        showNotification(detail, "danger");
-      }
-    } catch (err) {
-      showNotification("Network error occurred", "danger");
-    }
-  };
-
-  // --- BUDGET ALLOCATION FUNCTIONS FOR END USERS ---
-  const fetchUserOfficeBudget = async () => {
-    if (!user.office_id) {
-      showNotification("User is not assigned to any office", "danger");
-      return;
-    }
-    try {
-      const res = await apiFetch(`/api/offices/budget/${user.office_id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUserOfficeBudget(data.budget_allocation);
-      } else {
-        const errData = await res.json();
-        showNotification(errData.detail || "Failed to fetch budget allocation", "danger");
-      }
-    } catch (err) {
-      showNotification("Network error fetching budget allocation", "danger");
-    }
-  };
-
-  const handleUpdateBudgetAllocation = async (e) => {
-    e.preventDefault();
-    if (!user.office_id) {
-      showNotification("User is not assigned to any office", "danger");
-      return;
-    }
-    try {
-      const res = await apiFetch(`/api/offices/budget/${user.office_id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          budget_allocation: parseFloat(userBudgetAllocation),
-        }),
-      });
-      if (res.ok) {
-        showNotification("Budget allocation updated successfully!");
-        setUserBudgetAllocation(0);
-        fetchUserOfficeBudget();
-        fetchOffices(); // Refresh offices list for other roles
-      } else {
-        const errData = await res.json();
-        showNotification(errData.detail || "Failed to update budget allocation", "danger");
-      }
-    } catch (err) {
-      showNotification("Failed to update budget allocation", "danger");
-    }
-  };
   return (
     <div className="dashboard-container">
       <aside className="sidebar">
@@ -2464,26 +2462,6 @@ function Dashboard({ token, user, onLogout }) {
               <i className="fas fa-th-large" aria-hidden="true"></i>
               Dashboard
             </button>
-            {user.role === "budget_office" && (
-              <button
-                type="button"
-                className={`nav-link ${activeTab === "indicative" ? "active" : ""}`}
-                onClick={() => { setActiveTab("indicative"); setSelectedPpmp(null); setAuditDetails(null); }}
-              >
-                <i className="fas fa-file-invoice" aria-hidden="true"></i>
-                Indicative PPMP
-              </button>
-            )}
-            {user.role === "budget_office" && (
-              <button
-                type="button"
-                className={`nav-link ${activeTab === "final" ? "active" : ""}`}
-                onClick={() => { setActiveTab("final"); setSelectedPpmp(null); setAuditDetails(null); }}
-              >
-                <i className="fas fa-file-contract" aria-hidden="true"></i>
-                Final PPMP
-              </button>
-            )}
             {user.role === "end_user" && (
               <button
                 type="button"
@@ -2494,24 +2472,14 @@ function Dashboard({ token, user, onLogout }) {
                 View PPMPs
               </button>
             )}
-{user.role === "end_user" && (
+            {user.role === "bac_admin" && (
               <button
                 type="button"
-                className={`nav-link ${activeTab === "signatory" ? "active" : ""}`}
-                onClick={() => { setActiveTab("signatory"); setSelectedPpmp(null); setSelectedApp(null); }}
+                className={`nav-link ${activeTab === "consolidated_apps" ? "active" : ""}`}
+                onClick={() => { setActiveTab("consolidated_apps"); setSelectedPpmp(null); setSelectedApp(null); }}
               >
-                <i className="fas fa-th-large" aria-hidden="true"></i>
-                Signatory
-              </button>
-            )}
-            {user.role === "end_user" && (
-              <button
-                type="button"
-                className={`nav-link ${activeTab === "budget_allocation" ? "active" : ""}`}
-                onClick={() => { setActiveTab("budget_allocation"); setSelectedPpmp(null); setSelectedApp(null); }}
-              >
-                <i className="fas fa-wallet" aria-hidden="true"></i>
-                Budget Allocation
+                <i className="fas fa-layer-group" aria-hidden="true"></i>
+                Consolidated APPs
               </button>
             )}
             {user.role === "bac_admin" && (
@@ -2551,17 +2519,7 @@ function Dashboard({ token, user, onLogout }) {
                 onClick={() => { setActiveTab("offices"); setSelectedPpmp(null); setSelectedApp(null); }}
               >
                 <i className="fas fa-building" aria-hidden="true"></i>
-                Manage Offices
-              </button>
-            )}
-            {user.role === "bac_admin" && (
-              <button
-                type="button"
-                className={`nav-link ${activeTab === "users" ? "active" : ""}`}
-                onClick={() => { setActiveTab("users"); setSelectedPpmp(null); setSelectedApp(null); }}
-              >
-                <i className="fas fa-users" aria-hidden="true"></i>
-                Manage Users
+                Users & Offices
               </button>
             )}
           </div>
@@ -2598,17 +2556,21 @@ function Dashboard({ token, user, onLogout }) {
                   <div className="dashboard-card">
                     <h2 className="card-title">Upload PPMP Excel</h2>
                     <div style={{
-                      backgroundColor: "#e8f4fd",
-                      border: "1px solid #2196f3",
-                      borderRadius: "6px",
+                      backgroundColor: "var(--neuro-bg)",
+                      border: "1px solid transparent",
+                      borderLeft: "4px solid var(--primary-color)",
+                      borderRadius: "12px",
                       padding: "12px",
                       marginBottom: "10px",
-                      fontSize: "13px"
+                      fontSize: "13px",
+                      boxShadow: "var(--shadow-inset)",
+                      color: "var(--text-secondary)"
                     }}>
                       <strong>Note:</strong> Upload your completed NGPA PPMP Excel (.xls / .xlsx).
                       Uploads create or replace a <strong>Draft</strong> (or replace a <strong>Returned</strong> plan)
-                      for the same fiscal year and CSE/nonCSE type. You can <strong>view</strong> a plan only after
-                      Budget validates it (<strong>Approved</strong>) or returns it for revision (<strong>Returned</strong>).
+                      for the same fiscal year. You can <strong>view</strong> a plan only after
+                      Budget validates it (<strong>Approved</strong>) or returns/unposts it for revision (<strong>Returned</strong>).
+                      Remarks from Budget explain what to revise.
                     </div>
                     <form onSubmit={handleUploadPpmp} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                       <input
@@ -2618,41 +2580,6 @@ function Dashboard({ token, user, onLogout }) {
                         onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
                         required
                       />
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="Title (optional — taken from Excel if blank)"
-                        value={uploadTitle}
-                        onChange={(e) => setUploadTitle(e.target.value)}
-                      />
-                      <input
-                        type="number"
-                        className="form-input"
-                        placeholder="Fiscal Year"
-                        value={uploadFiscalYear}
-                        onChange={(e) => setUploadFiscalYear(e.target.value)}
-                        required
-                      />
-                      <div className="ppmp-type-picker" role="radiogroup" aria-label="PPMP type">
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={!uploadIsCse}
-                          className={`ppmp-type-picker-option ${!uploadIsCse ? "active noncse" : ""}`}
-                          onClick={() => setUploadIsCse(false)}
-                        >
-                          nonCSE
-                        </button>
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={uploadIsCse}
-                          className={`ppmp-type-picker-option ${uploadIsCse ? "active cse" : ""}`}
-                          onClick={() => setUploadIsCse(true)}
-                        >
-                          CSE
-                        </button>
-                      </div>
                       <button type="submit" className="btn" disabled={uploadBusy}>
                         {uploadBusy ? "Uploading…" : "Upload PPMP"}
                       </button>
@@ -2665,7 +2592,6 @@ function Dashboard({ token, user, onLogout }) {
                       <thead>
                         <tr>
                           <th>Title</th>
-                          <th>Type</th>
                           <th>Year</th>
                           <th>Status</th>
                           <th>Remarks</th>
@@ -2675,13 +2601,12 @@ function Dashboard({ token, user, onLogout }) {
                       <tbody>
                         {ppmps.length === 0 ? (
                           <tr>
-                            <td colSpan="6">No PPMPs uploaded yet.</td>
+                            <td colSpan="5">No PPMPs uploaded yet.</td>
                           </tr>
                         ) : (
                           ppmps.map((p) => (
                             <tr key={p.id}>
                               <td>{p.title}</td>
-                              <td>{renderPpmpTypeBadge(p.is_cse)}</td>
                               <td>{p.fiscal_year}</td>
                               <td>
                                 <span className={`badge ${p.status === "Approved" ? "badge-success" : p.status === "Pending Budget Review" ? "badge-warning" : p.status === "Returned" ? "badge-danger" : "badge-secondary"}`}>
@@ -2737,9 +2662,19 @@ function Dashboard({ token, user, onLogout }) {
 
               {/* --- BUDGET OFFICE PPMP AUDIT (Dashboard) --- */}
               {user.role === "budget_office" && (
-                <div className="grid-2-wide">
-                  <div className="dashboard-card">
-                    <h2 className="card-title">Pending PPMPs for Audit</h2>
+                <div className="dashboard-card budget-pending-card">
+                  <div className="card-title-bar">
+                    <div>
+                      <h2 className="card-title">Pending PPMPs for Audit</h2>
+                      <p className="page-subtitle">
+                        Select Preview to open the full fitted review page, then verify the PPMP or return it for revision.
+                      </p>
+                    </div>
+                    <span className="badge badge-warning">
+                      {pendingPpmps.length} awaiting review
+                    </span>
+                  </div>
+                  <div className="table-wrapper">
                     <table className="custom-table">
                       <thead>
                         <tr>
@@ -2761,7 +2696,14 @@ function Dashboard({ token, user, onLogout }) {
                               <td>{p.title}</td>
                               <td>{p.fiscal_year}</td>
                               <td>
-                                <button className="btn" onClick={() => handleSelectPpmp(p.id)}>Audit</button>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  onClick={() => handleSelectPpmp(p.id)}
+                                >
+                                  <i className="fas fa-expand-arrows-alt" aria-hidden="true"></i>
+                                  Preview
+                                </button>
                               </td>
                             </tr>
                           ))
@@ -2769,218 +2711,170 @@ function Dashboard({ token, user, onLogout }) {
                       </tbody>
                     </table>
                   </div>
-
-                  <div>
-                    {selectedPpmp && auditDetails ? (
-                      <div className="dashboard-card">
-                        <h2 className="card-title">Audit Workspace: {selectedPpmp.ppmp.title}</h2>
-
-                        <div style={{ 
-                          display: "grid", 
-                          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", 
-                          gap: "1.5rem", 
-                          margin: "1.5rem 0",
-                          padding: "1.5rem",
-                          background: "var(--neuro-bg)",
-                          borderRadius: "8px",
-                          border: "1px solid var(--border-color)"
-                        }}>
-                          <div>
-                            <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Department</div>
-                            <div style={{ fontWeight: "700", fontSize: "1rem" }}>{auditDetails.office_name}</div>
-                            <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
-                              Allocation: ₱{auditDetails.office_budget_allocation.toLocaleString()}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Budget Summary</div>
-                            <div style={{ fontWeight: "700", fontSize: "1rem", color: auditDetails.is_within_budget ? "var(--success-color)" : "var(--danger-color)" }}>
-                              ₱{auditDetails.total_ppmp_cost.toLocaleString()}
-                            </div>
-                            <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
-                              Remaining: ₱{auditDetails.remaining_budget.toLocaleString()}
-                            </div>
-                          </div>
-                          <div style={{ gridColumn: "1 / -1", borderTop: "1px solid var(--border-color)", paddingTop: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <span style={{ fontSize: "0.875rem", fontWeight: "600", color: "var(--text-secondary)" }}>Audit Status:</span>
-                            <span className={`badge ${auditDetails.is_within_budget ? "badge-success" : "badge-danger"}`} style={{ padding: "6px 12px", fontSize: "0.8rem" }}>
-                              {auditDetails.is_within_budget ? "READY FOR APPROVAL" : "OVER BUDGET LIMIT"}
-                            </span>
-                          </div>
-                        </div>
-
-                        <h3>Requested Items List</h3>
-                        <table className="custom-table" style={{ fontSize: "12px", marginBottom: "20px" }}>
-                          <thead>
-                            <tr>
-                              <th>Description</th>
-                              <th>Qty</th>
-                              <th>Unit Cost</th>
-                              <th>Subtotal</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {selectedPpmp.items.map((item) => (
-                              <tr key={item.id}>
-                                <td>{item.description}</td>
-                                <td>{item.quantity}</td>
-                                <td>₱{item.unit_cost.toLocaleString()}</td>
-                                <td>₱{item.estimated_budget.toLocaleString()}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-
-                        {user.role === "budget_office" && (
-                          <>
-                            <h3 style={{ fontSize: "0.95rem", fontWeight: "700", marginBottom: "0.75rem" }}>Budget Office Action</h3>
-                            <textarea
-                              className="form-input"
-                              placeholder="Provide feedback or remarks here..."
-                              value={remarks}
-                              onChange={(e) => setRemarks(e.target.value)}
-                              style={{ minHeight: "100px", marginBottom: "1.5rem", fontSize: "0.9rem" }}
-                            />
-
-                            <div style={{ display: "flex", gap: "12px" }}>
-                              <button className="btn btn-success" style={{ flex: 1 }} onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "approve")}>
-                                <i className="fas fa-check" style={{ marginRight: "8px" }}></i>
-                                Approve PPMP
-                              </button>
-                              <button type="button" className="btn btn-danger" style={{ flex: 1 }} onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "return")}>
-                                <i className="fas fa-undo" style={{ marginRight: "8px" }}></i>
-                                Return for Revision
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="dashboard-card" style={{ textAlign: "center", color: "var(--text-muted)" }}>
-                        Select a PPMP to execute budget review.
-                      </div>
-                    )}
-                  </div>
                 </div>
               )}
 
               {/* --- BAC ADMIN VIEW --- */}
               {user.role === "bac_admin" && (
-                <div className="grid-2">
-                  <div>
-                    <div className="dashboard-card">
-                      <h2 className="card-title">APP Consolidation</h2>
-                      <p className="page-subtitle" style={{ marginBottom: "0.75rem" }}>
-                        Quick consolidate for FY. Full CSE / nonCSE forms live under the{" "}
-                        <strong>CSE-APP</strong> and <strong>nonCSE-APP</strong> menus.
+                <div className="dashboard-card">
+                  <div className="card-title-bar" style={{ marginBottom: "1rem" }}>
+                    <div>
+                      <h2 className="card-title">Verified PPMPs</h2>
+                      <p className="page-subtitle">
+                        Track which registered offices have submitted verified PPMPs for consolidation.
                       </p>
-                      <form onSubmit={handleConsolidate} style={{ display: "flex", gap: "10px" }}>
-                        <input
-                          type="number"
-                          className="form-input"
-                          value={consolidationYear}
-                          onChange={(e) => setConsolidationYear(e.target.value)}
-                          required
-                        />
-                        <button type="submit" className="btn">Run Consolidation</button>
-                      </form>
                     </div>
+                    <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                      <span className="badge badge-success">
+                        {verifiedOfficeCount}/{activeOffices.length} offices verified
+                      </span>
+                      <button type="button" className="btn" onClick={() => handleConsolidate()} disabled={!allOfficesVerified}>
+                        Run Consolidation
+                      </button>
+                    </div>
+                  </div>
 
-                    <div className="dashboard-card" style={{ marginTop: "20px" }}>
-                      <h2 className="card-title">Consolidated APPs</h2>
-                      <table className="custom-table">
+                  <div style={{ marginBottom: "1rem" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.35rem", fontSize: "0.92rem" }}>
+                      <strong>Submission progress</strong>
+                      <span>{verifiedProgress}%</span>
+                    </div>
+                    <div style={{ width: "100%", height: "10px", background: "#e8eef3", borderRadius: "999px", overflow: "hidden" }}>
+                      <div style={{ width: `${verifiedProgress}%`, height: "100%", background: verifiedProgress === 100 ? "#2e7d32" : "#2563eb", transition: "width 0.3s ease" }} />
+                    </div>
+                  </div>
+
+                  {allOfficesVerified ? (
+                    <div className="page-subtitle" style={{ marginBottom: "1rem" }}>
+                      All registered offices have verified PPMPs for FY {consolidationYear}.
+                    </div>
+                  ) : (
+                    <div className="page-subtitle" style={{ marginBottom: "1rem" }}>
+                      Waiting for {activeOffices.length - verifiedOfficeCount} more office{activeOffices.length - verifiedOfficeCount === 1 ? "" : "s"} to submit verified PPMPs before consolidation can proceed.
+                    </div>
+                  )}
+
+                  <div className="table-wrapper">
+                    <table className="custom-table">
+                      <thead>
+                        <tr>
+                          <th>Office</th>
+                          <th>Title</th>
+                          <th>Year</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {postingPpmps.length === 0 ? (
+                          <tr>
+                            <td colSpan="4" style={{ textAlign: "center", color: "var(--text-muted)" }}>
+                              No verified PPMPs have been captured yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          postingPpmps.map((ppmp) => (
+                            <tr key={ppmp.id}>
+                              <td>{ppmp.office_name || getOfficeLabel(ppmp.office_id)}</td>
+                              <td>{ppmp.title}</td>
+                              <td>{ppmp.fiscal_year}</td>
+                              <td>
+                                <span className="badge badge-success">Verified</span>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
+          {activeTab === "consolidated_apps" && user.role === "bac_admin" && (
+            <div className="grid-2">
+              <div className="dashboard-card">
+                <h2 className="card-title">Consolidated APPs</h2>
+                <table className="custom-table">
+                  <thead>
+                    <tr>
+                      <th>Title</th>
+                      <th>Fiscal Year</th>
+                      <th>Type</th>
+                      <th>Created At</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {apps.map((a) => (
+                      <tr key={a.id}>
+                        <td>{a.title}</td>
+                        <td>{a.fiscal_year}</td>
+                        <td>{a.app_type || "Combined"}</td>
+                        <td>{new Date(a.created_at + "Z").toLocaleDateString()}</td>
+                        <td>
+                          <button className="btn" onClick={() => handleSelectApp(a.id)}>View Rows</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div>
+                {selectedApp ? (
+                  <div className="dashboard-card">
+                    <h2 className="card-title">{selectedApp.app.title} Details</h2>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", margin: "8px 0 16px 0" }}>
+                      <button className="btn" onClick={() => handleExportApp(selectedApp.app.fiscal_year, "cse")}>
+                        Download CSE APP (.xlsx)
+                      </button>
+                      <button className="btn" onClick={() => handleExportApp(selectedApp.app.fiscal_year, "noncse")}>
+                        Download Non-CSE APP (.xlsx)
+                      </button>
+                      <button className="btn" onClick={() => handleExportApp(selectedApp.app.fiscal_year, "combined")}>
+                        Download Combined APP (.xlsx)
+                      </button>
+                    </div>
+                    <div className="table-wrapper">
+                      <table className="custom-table" style={{ fontSize: "11px" }}>
                         <thead>
                           <tr>
-                            <th>Title</th>
-                            <th>Fiscal Year</th>
-                            <th>Created At</th>
-                            <th>Action</th>
+                            <th>Kind</th>
+                            <th>Description</th>
+                            <th>Type</th>
+                            <th>Qty/Size</th>
+                            <th>Mode</th>
+                            <th>Fund Source</th>
+                            <th>Timeline (Start→End)</th>
+                            <th>Est. Budget</th>
+                            <th>End-User Offices</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {apps.map((a) => (
-                            <tr key={a.id}>
-                              <td>{a.title}</td>
-                              <td>{a.fiscal_year}</td>
-                              <td>{new Date(a.created_at + "Z").toLocaleDateString()}</td>
-                              <td>
-                                <button className="btn" onClick={() => handleSelectApp(a.id)}>View Rows</button>
-                              </td>
+                          {selectedApp.rows.map((row) => (
+                            <tr key={row.id}>
+                              <td>{row.is_cse ? "CSE" : "Non-CSE"}</td>
+                              <td>{row.description}</td>
+                              <td>{row.project_type || "—"}</td>
+                              <td>{row.quantity_size || "—"}</td>
+                              <td>{row.procurement_mode}</td>
+                              <td>{row.fund_source || "—"}</td>
+                              <td>{(row.proc_start || "—") + " → " + (row.proc_end || "—")}</td>
+                              <td>₱{Number(row.total_estimated_budget || 0).toLocaleString()}</td>
+                              <td>{row.end_user_offices || "—"}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
                   </div>
-
-                  <div>
-                    {selectedApp ? (
-                      <div className="dashboard-card">
-                        <h2 className="card-title">{selectedApp.app.title} Details</h2>
-                        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", margin: "8px 0 16px 0" }}>
-                          <button
-                            className="btn"
-                            onClick={() => handleExportApp(selectedApp.app.fiscal_year, "cse")}
-                          >
-                            Download CSE APP (.xlsx)
-                          </button>
-                          <button
-                            className="btn"
-                            onClick={() => handleExportApp(selectedApp.app.fiscal_year, "noncse")}
-                          >
-                            Download Non-CSE APP (.xlsx)
-                          </button>
-                          <button
-                            className="btn"
-                            onClick={() => handleExportApp(selectedApp.app.fiscal_year, "combined")}
-                          >
-                            Download Combined APP (.xlsx)
-                          </button>
-                        </div>
-                        <div className="table-wrapper">
-                          <table className="custom-table" style={{ fontSize: "11px" }}>
-                            <thead>
-                              <tr>
-                                <th>Kind</th>
-                                <th>Description</th>
-                                <th>Type</th>
-                                <th>Qty/Size</th>
-                                <th>Mode</th>
-                                <th>Fund Source</th>
-                                <th>Timeline (Start→End)</th>
-                                <th>Est. Budget</th>
-                                <th>End-User Offices</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {selectedApp.rows.map((row) => (
-                                <tr key={row.id}>
-                                  <td>{row.is_cse ? "CSE" : "Non-CSE"}</td>
-                                  <td>{row.description}</td>
-                                  <td>{row.project_type || "—"}</td>
-                                  <td>{row.quantity_size || "—"}</td>
-                                  <td>{row.procurement_mode}</td>
-                                  <td>{row.fund_source || "—"}</td>
-                                  <td>{(row.proc_start || "—") + " → " + (row.proc_end || "—")}</td>
-                                  <td>₱{Number(row.total_estimated_budget || 0).toLocaleString()}</td>
-                                  <td>{row.end_user_offices || "—"}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="dashboard-card" style={{ textAlign: "center", color: "var(--text-muted)" }}>
-                        Select an APP from the left list to view consolidated procurement rows.
-                      </div>
-                    )}
+                ) : (
+                  <div className="dashboard-card" style={{ textAlign: "center", color: "var(--text-muted)" }}>
+                    Select an APP from the left list to view consolidated procurement rows.
                   </div>
-                </div>
-              )}
-
-
-
+                )}
+              </div>
             </div>
           )}
           {activeTab === "audit" && user.role === "bac_admin" && (
@@ -3008,7 +2902,7 @@ function Dashboard({ token, user, onLogout }) {
                           <td>{p.title}</td>
                           <td>{p.fiscal_year}</td>
                           <td>
-                            <button className="btn" onClick={() => handleSelectPpmp(p.id)}>Audit</button>
+                            <button className="btn" onClick={() => handleSelectPpmp(p.id)}>Preview</button>
                           </td>
                         </tr>
                       ))
@@ -3022,61 +2916,16 @@ function Dashboard({ token, user, onLogout }) {
                   <div className="dashboard-card">
                     <h2 className="card-title">Audit Workspace: {selectedPpmp.ppmp.title}</h2>
 
-                    <div style={{ 
-                      display: "grid", 
-                      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", 
-                      gap: "1.5rem", 
-                      margin: "1.5rem 0",
-                      padding: "1.5rem",
-                      background: "var(--neuro-bg)",
-                      borderRadius: "8px",
-                      border: "1px solid var(--border-color)"
-                    }}>
-                      <div>
-                        <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Department</div>
-                        <div style={{ fontWeight: "700", fontSize: "1rem" }}>{auditDetails.office_name}</div>
-                        <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
-                          Allocation: ₱{auditDetails.office_budget_allocation.toLocaleString()}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Budget Summary</div>
-                        <div style={{ fontWeight: "700", fontSize: "1rem", color: auditDetails.is_within_budget ? "var(--success-color)" : "var(--danger-color)" }}>
-                          ₱{auditDetails.total_ppmp_cost.toLocaleString()}
-                        </div>
-                        <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
-                          Remaining: ₱{auditDetails.remaining_budget.toLocaleString()}
-                        </div>
-                      </div>
-                      <div style={{ gridColumn: "1 / -1", borderTop: "1px solid var(--border-color)", paddingTop: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontSize: "0.875rem", fontWeight: "600", color: "var(--text-secondary)" }}>Audit Status:</span>
-                        <span className={`badge ${auditDetails.is_within_budget ? "badge-success" : "badge-danger"}`} style={{ padding: "6px 12px", fontSize: "0.8rem" }}>
-                          {auditDetails.is_within_budget ? "READY FOR APPROVAL" : "OVER BUDGET LIMIT"}
-                        </span>
-                      </div>
+                    <div style={{ marginBottom: "1.5rem" }}>
+                      <h3 style={{ margin: 0, fontSize: "1rem" }}>PPMP Preview</h3>
+                      <p style={{ margin: "0.35rem 0 0", color: "var(--text-secondary)", fontSize: "0.9rem" }}>
+                        Review the full PPMP content before continuing with the audit workflow.
+                      </p>
                     </div>
 
-                    <h3>Requested Items List</h3>
-                    <table className="custom-table" style={{ fontSize: "12px", marginBottom: "20px" }}>
-                      <thead>
-                        <tr>
-                          <th>Description</th>
-                          <th>Qty</th>
-                          <th>Unit Cost</th>
-                          <th>Subtotal</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {selectedPpmp.items.map((item) => (
-                          <tr key={item.id}>
-                            <td>{item.description}</td>
-                            <td>{item.quantity}</td>
-                            <td>₱{item.unit_cost.toLocaleString()}</td>
-                            <td>₱{item.estimated_budget.toLocaleString()}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <div style={{ border: "1px solid var(--border-color)", borderRadius: "16px", padding: "1rem", background: "white", overflow: "hidden" }}>
+                      {renderNgpaPpmpForm(selectedPpmp)}
+                    </div>
                   </div>
                 ) : (
                   <div className="dashboard-card" style={{ textAlign: "center", color: "var(--text-muted)" }}>
@@ -3088,9 +2937,11 @@ function Dashboard({ token, user, onLogout }) {
           )}
           {activeTab === "indicative" && user.role === "budget_office" && (
             <div className="dashboard-card">
-              <h2 className="card-title">Indicative PPMP Management</h2>
+              <h2 className="card-title">Post to BAC</h2>
               <p className="page-subtitle" style={{ marginBottom: "1rem" }}>
-                Manage indicative PPMPs for RA 12009 compliance
+                After you validate a PPMP (CSE or nonCSE), post it here so BAC can consolidate into the APP.
+                Posted files are stored on Drive <strong>CSE-PPMP</strong> or <strong>nonCSE-PPMP</strong> (per office)
+                for file-based consolidation. Unposting removes the Drive copy and returns the plan to the end user for revision.
               </p>
               <table className="custom-table">
                 <thead>
@@ -3098,35 +2949,36 @@ function Dashboard({ token, user, onLogout }) {
                     <th>Office</th>
                     <th>Title</th>
                     <th>Year</th>
-                    <th>Status</th>
+                    <th>Validation</th>
+                    <th>Posting</th>
                     <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {indicativePpmps.length === 0 ? (
+                  {postingPpmps.length === 0 ? (
                     <tr>
-                      <td colSpan="5">No indicative PPMPs available for posting.</td>
+                      <td colSpan="6">No validated PPMPs ready to post. Approve pending plans from the Dashboard first.</td>
                     </tr>
                   ) : (
-                    indicativePpmps.map((p) => (
+                    postingPpmps.map((p) => (
                       <tr key={p.id}>
-                        <td>{getOfficeLabel(p.office_id)}</td>
+                        <td>{p.office_name || getOfficeLabel(p.office_id)}</td>
                         <td>{p.title}</td>
                         <td>{p.fiscal_year}</td>
                         <td>
-                          <span className={`badge ${p.posting_status === "Draft" ? "badge-secondary" : p.posting_status === "Posted" ? "badge-warning" : p.posting_status === "Approved" ? "badge-success" : "badge-danger"}`}>
-                            {p.posting_status}
+                          <span className="badge badge-success">{p.status}</span>
+                        </td>
+                        <td>
+                          <span className={`badge ${p.posting_status === "Posted" ? "badge-warning" : "badge-secondary"}`}>
+                            {p.posting_status || "Draft"}
                           </span>
                         </td>
                         <td>
-                          {p.posting_status === "Draft" && (
-                            <button className="btn" onClick={() => handlePostIndicativePpmp(p.id)}>Post</button>
+                          {(p.posting_status || "Draft") === "Draft" && (
+                            <button className="btn" onClick={() => handlePostPpmp(p.id)}>Post</button>
                           )}
                           {p.posting_status === "Posted" && (
-                            <button className="btn btn-danger" onClick={() => handleUnpostIndicativePpmp(p.id)}>Unpost</button>
-                          )}
-                          {p.posting_status !== "Draft" && p.posting_status !== "Posted" && (
-                            <span className="badge badge-secondary">{p.posting_status}</span>
+                            <button className="btn btn-danger" onClick={() => handleUnpostPpmp(p.id)}>Unpost</button>
                           )}
                         </td>
                       </tr>
@@ -3194,7 +3046,8 @@ function Dashboard({ token, user, onLogout }) {
                 <strong> view</strong> plans that are
                 <span className="ppmp-type-badge cse" style={{ margin: "0 6px" }}>Approved</span>
                 or
-                <span className="ppmp-type-badge noncse" style={{ margin: "0 6px" }}>Returned</span>.
+                <span className="ppmp-type-badge noncse" style={{ margin: "0 6px" }}>Returned</span>
+                (including plans Budget unposted for revision).
                 Upload a revised Excel from the Dashboard to replace a Draft or Returned plan.
               </p>
 
@@ -3202,7 +3055,6 @@ function Dashboard({ token, user, onLogout }) {
                 <thead>
                   <tr>
                     <th>Title</th>
-                    <th>Type</th>
                     <th>Year</th>
                     <th>Status</th>
                     <th>Remarks</th>
@@ -3212,7 +3064,7 @@ function Dashboard({ token, user, onLogout }) {
                 <tbody>
                   {ppmps.length === 0 ? (
                     <tr>
-                      <td colSpan="6" style={{ textAlign: "center", padding: "1.5rem", color: "var(--text-muted)" }}>
+                      <td colSpan="5" style={{ textAlign: "center", padding: "1.5rem", color: "var(--text-muted)" }}>
                         No PPMPs uploaded yet. Upload one from the Dashboard.
                       </td>
                     </tr>
@@ -3220,7 +3072,6 @@ function Dashboard({ token, user, onLogout }) {
                     ppmps.map((p) => (
                       <tr key={p.id}>
                         <td>{p.title}</td>
-                        <td>{renderPpmpTypeBadge(p.is_cse)}</td>
                         <td>{p.fiscal_year}</td>
                         <td>
                           <span className={`badge ${p.status === "Approved" ? "badge-success" : p.status === "Pending Budget Review" ? "badge-warning" : p.status === "Returned" ? "badge-danger" : "badge-secondary"}`}>
@@ -3268,256 +3119,7 @@ function Dashboard({ token, user, onLogout }) {
             </div>
           )}
 
-{/* --- BUDGET ALLOCATION SECTION FOR END USERS --- */}
-          {activeTab === "budget_allocation" && user.role === "end_user" && (
-            <div className="dashboard-card">
-              <h2 className="card-title">Budget Allocation</h2>
-              <p className="page-subtitle" style={{ marginBottom: "1rem" }}>
-                Input and view your office's budget allocation for the current fiscal year
-              </p>
-              
-              {!user.office_id ? (
-                <div className="dashboard-card" style={{ 
-                  background: "rgba(239, 68, 68, 0.1)",
-                  border: "1px solid var(--danger-color)",
-                  textAlign: "center",
-                  padding: "2rem"
-                }}>
-                  <i className="fas fa-exclamation-triangle" style={{ fontSize: "2rem", color: "var(--danger-color)", marginBottom: "1rem" }}></i>
-                  <h3 style={{ color: "var(--danger-color)", marginBottom: "0.5rem" }}>No Office Assigned</h3>
-                  <p style={{ color: "var(--text-secondary)" }}>
-                    You are not currently assigned to any office. Please contact the BAC Administrator to assign you to an office.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div style={{ 
-                    display: "grid", 
-                    gridTemplateColumns: "1fr 1fr", 
-                    gap: "1.5rem", 
-                    marginBottom: "1.5rem"
-                  }}>
-                    <div>
-                      <div className="dashboard-card" style={{ 
-                        background: "var(--neuro-bg)",
-                        border: "1px solid var(--border-color)"
-                      }}>
-                        <h3 style={{ fontSize: "0.95rem", fontWeight: "600", marginBottom: "1rem", color: "var(--text-secondary)" }}>
-                          <i className="fas fa-wallet" style={{ marginRight: "8px" }}></i>
-                          Your Office Budget Allocation
-                        </h3>
-                        <div style={{ 
-                          fontSize: "2rem", 
-                          fontWeight: "700", 
-                          color: "var(--accent-color)",
-                          marginBottom: "0.5rem"
-                        }}>
-                          ₱{userOfficeBudget.toLocaleString()}
-                        </div>
-                        <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                          {getOfficeLabel(user.office_id)}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <form onSubmit={handleUpdateBudgetAllocation} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                        <h3 style={{ fontSize: "0.95rem", fontWeight: "600", marginBottom: "0.5rem", color: "var(--text-secondary)" }}>
-                          <i className="fas fa-edit" style={{ marginRight: "8px" }}></i>
-                          Update Budget Allocation
-                        </h3>
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="Enter Budget Allocation Amount"
-                          className="form-input"
-                          value={userBudgetAllocation}
-                          onChange={(e) => setUserBudgetAllocation(e.target.value)}
-                          required
-                        />
-                        <button type="submit" className="btn">
-                          <i className="fas fa-save" style={{ marginRight: "8px" }}></i>
-                          Save Budget Allocation
-                        </button>
-                      </form>
-                    </div>
-                  </div>
-                  
-                  <div className="dashboard-card" style={{ 
-                    background: "var(--neuro-bg)",
-                    border: "1px solid var(--border-color)",
-                    marginTop: "1rem"
-                  }}>
-                    <h3 style={{ fontSize: "0.95rem", fontWeight: "600", marginBottom: "1rem", color: "var(--text-secondary)" }}>
-                      <i className="fas fa-info-circle" style={{ marginRight: "8px" }}></i>
-                      RA 12009 Budget Allocation Guidelines
-                    </h3>
-                    <ul style={{ 
-                      fontSize: "0.85rem", 
-                      color: "var(--text-secondary)",
-                      paddingLeft: "1.25rem",
-                      lineHeight: "1.8"
-                    }}>
-                      <li>Budget allocation should align with the approved Annual Investment Program (AIP)</li>
-                      <li>End-users are responsible for ensuring their PPMP requests do not exceed this allocation</li>
-                      <li>The Budget Office will verify all allocations during the review process</li>
-                      <li>Any changes to the allocation must be coordinated with the Budget Office</li>
-                    </ul>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {activeTab === "signatory" && user.role === "end_user" && (
-            <div className="signatory-section">
-              <div className="signatory-section-header">
-                <h2 className="signatory-section-title">Signatory Information</h2>
-                <p className="signatory-section-subtitle">
-                  Update signatory details and reference numbers for your PPMP documents
-                </p>
-              </div>
-
-              <form onSubmit={handleUpdateSignatory} className="signatory-form">
-                <div className="signatory-form-grid-horizontal">
-                  {/* Submitted By Section */}
-                  <div className="signatory-section-group">
-                    <h3 className="signatory-section-group-title">Submission Details</h3>
-                    <div className="form-group">
-                      <label className="form-label" htmlFor="submittedBy">
-                        <i className="fas fa-user" style={{ marginRight: "8px" }}></i>
-                        Submitted By
-                      </label>
-                      <input
-                        id="submittedBy"
-                        type="text"
-                        className="form-input"
-                        placeholder="Full Name"
-                        value={submittedBy}
-                        onChange={(e) => setSubmittedBy(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label" htmlFor="submittedByDesignation">
-                        <i className="fas fa-id-badge" style={{ marginRight: "8px" }}></i>
-                        Designation
-                      </label>
-                      <input
-                        id="submittedByDesignation"
-                        type="text"
-                        className="form-input"
-                        placeholder="Position/Title"
-                        value={submittedByDesignation}
-                        onChange={(e) => setSubmittedByDesignation(e.target.value)}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  {/* Prepared By Section */}
-                  <div className="signatory-section-group">
-                    <h3 className="signatory-section-group-title">Preparation Details</h3>
-                    <div className="form-group">
-                      <label className="form-label" htmlFor="preparedBy">
-                        <i className="fas fa-user-edit" style={{ marginRight: "8px" }}></i>
-                        Prepared By
-                      </label>
-                      <input
-                        id="preparedBy"
-                        type="text"
-                        className="form-input"
-                        placeholder="Full Name"
-                        value={preparedBy}
-                        onChange={(e) => setPreparedBy(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label" htmlFor="preparedByDesignation">
-                        <i className="fas fa-id-badge" style={{ marginRight: "8px" }}></i>
-                        Designation
-                      </label>
-                      <input
-                        id="preparedByDesignation"
-                        type="text"
-                        className="form-input"
-                        placeholder="Position/Title"
-                        value={preparedByDesignation}
-                        onChange={(e) => setPreparedByDesignation(e.target.value)}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  {/* Reference Numbers Section */}
-                  <div className="signatory-section-group">
-                    <h3 className="signatory-section-group-title">Reference Information</h3>
-                    <div className="form-group">
-                      <label className="form-label" htmlFor="aipReference">
-                        <i className="fas fa-hashtag" style={{ marginRight: "8px" }}></i>
-                        AIP Reference #
-                      </label>
-                      <input
-                        id="aipReference"
-                        type="text"
-                        className="form-input"
-                        placeholder="e.g., AIP-2025-001"
-                        value={aipReference}
-                        onChange={(e) => setAipReference(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label" htmlFor="responsibilityCenterNo">
-                        <i className="fas fa-building" style={{ marginRight: "8px" }}></i>
-                        Responsibility Center #
-                      </label>
-                      <input
-                        id="responsibilityCenterNo"
-                        type="text"
-                        className="form-input"
-                        placeholder="e.g., RC-001"
-                        value={responsibilityCenterNo}
-                        onChange={(e) => setResponsibilityCenterNo(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label" htmlFor="officeCodeFromPR">
-                        <i className="fas fa-code" style={{ marginRight: "8px" }}></i>
-                        Office Code (from PR)
-                      </label>
-                      <input
-                        id="officeCodeFromPR"
-                        type="text"
-                        className="form-input"
-                        placeholder="e.g., CMO, CHO, GSO"
-                        value={officeCodeFromPR}
-                        onChange={(e) => setOfficeCodeFromPR(e.target.value)}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  {/* Submit Button */}
-                  <div className="signatory-section-group">
-                    <div className="signatory-submit-row">
-                      <button type="submit" className="btn signatory-submit-btn">
-                        <i className="fas fa-save"></i>
-                        Update Signatory Information
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </form>
-            </div>
-          )}
-          {activeTab === "cse_app" && user.role === "bac_admin" && renderAppWorkspace("cse")}
-
-          {activeTab === "noncse_app" && user.role === "bac_admin" && renderAppWorkspace("noncse")}
-
-          {activeTab === "app_signatory" && user.role === "bac_admin" && (
+{activeTab === "app_signatory" && user.role === "bac_admin" && (
             <div className="signatory-section">
               <div className="signatory-section-header">
                 <h2 className="signatory-section-title">APP Signatory Information</h2>
@@ -3616,97 +3218,7 @@ function Dashboard({ token, user, onLogout }) {
           {activeTab === "offices" && user.role === "bac_admin" && (
             <div className="grid-2-wide">
               <div className="dashboard-card">
-                <h2 className="card-title">
-                  {editingOfficeId ? "Edit Department/Office" : "Add Department/Office"}
-                </h2>
-                <form onSubmit={handleSaveOffice} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                  <input
-                    type="text"
-                    placeholder="Office Name"
-                    className="form-input"
-                    value={newOfficeName}
-                    onChange={(e) => setNewOfficeName(e.target.value)}
-                    required
-                  />
-                  <input
-                    type="text"
-                    placeholder="Office Code (e.g. CMO, CHO, GSO)"
-                    className="form-input"
-                    value={newOfficeCode}
-                    onChange={(e) => setNewOfficeCode(e.target.value)}
-                    required
-                  />
-                
-                  <div className="ppmp-row-actions">
-                    <button type="submit" className="btn">
-                      {editingOfficeId ? "Update Office" : "Add Office"}
-                    </button>
-                    {editingOfficeId && (
-                      <button type="button" className="btn btn-secondary" onClick={resetOfficeForm}>
-                        Cancel
-                      </button>
-                    )}
-                  </div>
-                </form>
-              </div>
-
-              <div className="dashboard-card">
-                <h2 className="card-title">Ormoc City Hall Offices</h2>
-                <table className="custom-table">
-                  <thead>
-                    <tr>
-                      <th>Code</th>
-                      <th>Office Name</th>
-                      <th>Budget Ceiling</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {offices.length === 0 ? (
-                      <tr>
-                        <td colSpan="4" style={{ textAlign: "center", color: "var(--text-muted)" }}>
-                          No offices registered yet.
-                        </td>
-                      </tr>
-                    ) : (
-                      offices.map((o) => (
-                        <tr key={o.id}>
-                          <td>{o.code}</td>
-                          <td>{o.name}</td>
-                          <td>₱{Number(o.budget_allocation || 0).toLocaleString()}</td>
-                          <td>
-                            <div className="ppmp-row-actions">
-                              <button
-                                type="button"
-                                className="btn btn-sm"
-                                onClick={() => handleEditOffice(o)}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-danger btn-sm"
-                                onClick={() => handleDeleteOffice(o)}
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "users" && user.role === "bac_admin" && (
-            <div className="grid-2-wide">
-              <div className="dashboard-card">
-                <h2 className="card-title">
-                  {editingUserId ? "Edit Registered User" : "Register New User"}
-                </h2>
+                <h2 className="card-title">Register End User</h2>
                 <form onSubmit={handleSaveUser} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                   <input
                     type="text"
@@ -3714,6 +3226,7 @@ function Dashboard({ token, user, onLogout }) {
                     className="form-input"
                     value={newUsername}
                     onChange={(e) => setNewUsername(e.target.value.toUpperCase())}
+                    style={{ textTransform: "uppercase" }}
                     required
                   />
                   <input
@@ -3750,19 +3263,25 @@ function Dashboard({ token, user, onLogout }) {
                     <option value="bac_admin">BAC Secretariat / Admin</option>
                   </select>
                   {newUserRole === "end_user" && (
-                    <select
-                      className="form-input"
-                      value={newUserOfficeId}
-                      onChange={(e) => setNewUserOfficeId(e.target.value)}
-                      required
-                    >
-                      <option value="">Select Office</option>
-                      {offices.map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.name} ({o.code})
-                        </option>
-                      ))}
-                    </select>
+                    <>
+                      <input
+                        type="text"
+                        placeholder="Office / End-User Name"
+                        className="form-input"
+                        value={newOfficeName}
+                        onChange={(e) => setNewOfficeName(e.target.value)}
+                        required
+                      />
+                      <input
+                        type="text"
+                        placeholder="Office Code (e.g. CMO, CHO, GSO)"
+                        className="form-input"
+                        value={newOfficeCode}
+                        onChange={(e) => setNewOfficeCode(e.target.value.toUpperCase())}
+                        style={{ textTransform: "uppercase" }}
+                        required
+                      />
+                    </>
                   )}
                   {editingUserId && (
                     <label className="form-label" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -3794,6 +3313,7 @@ function Dashboard({ token, user, onLogout }) {
                     <thead>
                       <tr>
                         <th>Username</th>
+                        <th>Password</th>
                         <th>Email</th>
                         <th>Role</th>
                         <th>Office</th>
@@ -3805,12 +3325,70 @@ function Dashboard({ token, user, onLogout }) {
                     <tbody>
                       {registeredUsers.length === 0 ? (
                         <tr>
-                          <td colSpan="7">No users registered yet.</td>
+                          <td colSpan="8">No users registered yet.</td>
                         </tr>
                       ) : (
                         registeredUsers.map((u) => (
                           <tr key={u.id}>
                             <td>{u.username}</td>
+                            <td>
+                              {u.role === "end_user" || u.role === "budget_office" ? (
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "6px",
+                                    minWidth: "120px",
+                                  }}
+                                >
+                                  <code
+                                    style={{
+                                      userSelect: revealedUserPasswords[u.id] ? "all" : "none",
+                                      letterSpacing: revealedUserPasswords[u.id] ? "normal" : "0.12em",
+                                    }}
+                                  >
+                                    {revealedUserPasswords[u.id] || "••••••••"}
+                                  </code>
+                                  <button
+                                    type="button"
+                                    className="password-toggle-btn"
+                                    style={{ position: "static", padding: "4px" }}
+                                    onClick={() => {
+                                      if (revealedUserPasswords[u.id]) {
+                                        hideRevealedUserPassword(u.id);
+                                      } else {
+                                        openPasswordRevealModal(u);
+                                      }
+                                    }}
+                                    aria-label={
+                                      revealedUserPasswords[u.id]
+                                        ? "Hide password"
+                                        : "Show password"
+                                    }
+                                    title={
+                                      revealedUserPasswords[u.id]
+                                        ? "Hide password"
+                                        : "Enter administrator password to view"
+                                    }
+                                  >
+                                    {revealedUserPasswords[u.id] ? (
+                                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                                        <line x1="1" y1="1" x2="23" y2="23" />
+                                      </svg>
+                                    ) : (
+                                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                        <circle cx="12" cy="12" r="3" />
+                                      </svg>
+                                    )}
+                                  </button>
+                                </div>
+                              ) : (
+                                <span style={{ opacity: 0.55 }}>—</span>
+                              )}
+                            </td>
                             <td>{u.email}</td>
                             <td>{formatRole(u.role)}</td>
                             <td>{getOfficeLabel(u.office_id)}</td>
@@ -3958,49 +3536,7 @@ function Dashboard({ token, user, onLogout }) {
           )}
         </div>
 
-{activeTab === "budget_allocation" && user.role === "end_user" && (
-          <footer className="workspace-footer">
-            <div className="workspace-footer-inner workspace-footer-budget">
-              <h2 className="workspace-footer-title">RA 12009 Budget Allocation Guidelines</h2>
-              <div className="workspace-footer-content">
-                <h3>Key Provisions</h3>
-                <ul>
-                  <li><strong>Section 4 - Planning Phase:</strong> End-users must conduct market scoping and cost estimation</li>
-                  <li><strong>Budget Transparency:</strong> All budget allocations must be visible for accountability</li>
-                  <li><strong>Digital Integration:</strong> Budget data must be submitted electronically for consolidation</li>
-                  <li><strong>Transitory Period:</strong> Three-year transition for full compliance with NGPA</li>
-                </ul>
-                <p className="workspace-footer-note">
-                  <i className="fas fa-info-circle" aria-hidden="true"></i>
-                  Under RA 12009, end-users are responsible for inputting their budget allocations which are visible to Budget Office and BAC Admin for review and consolidation
-                </p>
-              </div>
-            </div>
-          </footer>
-        )}
-
-        {activeTab === "indicative" && user.role === "budget_office" && (
-          <footer className="workspace-footer">
-            <div className="workspace-footer-inner workspace-footer-budget">
-              <h2 className="workspace-footer-title">RA 12009 Compliance Guide</h2>
-              <div className="workspace-footer-content">
-                <h3>Key Requirements</h3>
-                <ul>
-                  <li><strong>Market Scoping:</strong> End-users must perform market research before drafting PPMPs</li>
-                  <li><strong>Life-Cycle Costing:</strong> Include operating, maintenance, and disposal costs</li>
-                  <li><strong>Digital Integration:</strong> All PPMPs must be submitted electronically</li>
-                  <li><strong>Transitory Period:</strong> Three-year transition period for full compliance</li>
-                </ul>
-                <p className="workspace-footer-note">
-                  <i className="fas fa-info-circle" aria-hidden="true"></i>
-                  Refer to RA 12009 Section 4 for detailed implementation guidelines
-                </p>
-              </div>
-            </div>
-          </footer>
-        )}
-
-        {activeTab === "audit" && user.role === "bac_admin" && (
+{activeTab === "audit" && user.role === "bac_admin" && (
           <footer className="workspace-footer">
             <div className="workspace-footer-inner">
               <h2 className="workspace-footer-title">RA 12009 Approval Guidelines</h2>
@@ -4022,6 +3558,79 @@ function Dashboard({ token, user, onLogout }) {
         )}
       </main>
 
+      {/* --- BUDGET OFFICE FULL-SCREEN PPMP REVIEW --- */}
+      {user.role === "budget_office" && activeTab === "dashboard" && selectedPpmp && auditDetails && (
+        <div
+          className="ppmp-fullscreen budget-review-fullscreen"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="budget-review-title"
+        >
+          <header className="ppmp-fullscreen-header">
+            <button
+              type="button"
+              className="btn btn-secondary ppmp-fullscreen-back"
+              onClick={closeBudgetReview}
+            >
+              <i className="fas fa-arrow-left" aria-hidden="true"></i>
+              Back to Pending PPMPs
+            </button>
+
+            <div className="ppmp-fullscreen-title">
+              <span className="budget-review-eyebrow">Budget Office Review</span>
+              <h1 id="budget-review-title">{selectedPpmp.ppmp.title}</h1>
+              <div className="ppmp-fullscreen-meta">
+                <span className={`badge ${selectedPpmp.ppmp.status === "Approved" ? "badge-success" : "badge-warning"}`}>
+                  {selectedPpmp.ppmp.status}
+                </span>
+                {renderPpmpTypeBadge(selectedPpmp.ppmp.is_cse)}
+                <span className="ppmp-fullscreen-year">
+                  Fiscal Year {selectedPpmp.ppmp.fiscal_year}
+                </span>
+                <span>{auditDetails.office_name}</span>
+              </div>
+            </div>
+
+            <div className="ppmp-fullscreen-actions" aria-label="PPMP review actions">
+              <button
+                type="button"
+                className="btn btn-success"
+                onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "approve")}
+                disabled={reviewBusy}
+              >
+                <i className="fas fa-check" aria-hidden="true"></i>
+                {reviewBusy ? "Saving…" : "Verified"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => {
+                  setRemarks("");
+                  setReviseModalOpen(true);
+                }}
+                disabled={reviewBusy}
+              >
+                <i className="fas fa-undo" aria-hidden="true"></i>
+                Revise
+              </button>
+            </div>
+          </header>
+
+          <div className="ppmp-fullscreen-body">
+            <div className="budget-review-intro">
+              <div>
+                <h2>PPMP Preview</h2>
+                <p>Review the full plan before marking it as verified or returned for revision.</p>
+              </div>
+            </div>
+
+            <div className="budget-review-form-frame">
+              {renderNgpaPpmpForm(selectedPpmp)}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* --- END-USER FULL-SCREEN PPMP WORKSPACE --- */}
       {user.role === "end_user" && selectedPpmp && (
         <div className="ppmp-fullscreen" role="dialog" aria-modal="true">
@@ -4040,6 +3649,7 @@ function Dashboard({ token, user, onLogout }) {
                 <span className={`badge ${selectedPpmp.ppmp.status === "Approved" ? "badge-success" : selectedPpmp.ppmp.status === "Pending Budget Review" ? "badge-warning" : selectedPpmp.ppmp.status === "Returned" ? "badge-danger" : "badge-secondary"}`}>
                   {selectedPpmp.ppmp.status}
                 </span>
+                {renderPpmpTypeBadge(selectedPpmp.ppmp.is_cse)}
                 <span className="ppmp-fullscreen-year">
                   Fiscal Year {selectedPpmp.ppmp.fiscal_year}
                 </span>
@@ -4073,24 +3683,24 @@ function Dashboard({ token, user, onLogout }) {
           <div className="ppmp-fullscreen-body">
             {selectedPpmp.ppmp.status === "Returned" && selectedPpmp.ppmp.remarks && (
               <div className="dashboard-card" style={{
-                backgroundColor: "#fffafa",
+                backgroundColor: "var(--neuro-bg)",
                 borderLeft: "4px solid var(--danger-color)",
                 marginBottom: "24px",
                 padding: "1.25rem",
-                boxShadow: "0 2px 4px rgba(0,0,0,0.05)"
+                boxShadow: "var(--shadow-md)"
               }}>
-                <h3 style={{ color: "#b91c1c", fontSize: "0.95rem", fontWeight: "700", marginBottom: "0.75rem", display: "flex", alignItems: "center", gap: "8px" }}>
+                <h3 style={{ color: "var(--danger-color)", fontSize: "0.95rem", fontWeight: "700", marginBottom: "0.75rem", display: "flex", alignItems: "center", gap: "8px" }}>
                   <i className="fas fa-exclamation-triangle"></i>
                   Revision Required
                 </h3>
                 <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
                   <strong>Budget Office Remarks:</strong>
                 </p>
-                <div style={{ fontSize: "0.875rem", lineHeight: "1.6", color: "var(--text-primary)", background: "#ffffff", padding: "12px", borderRadius: "6px", border: "1px solid var(--border-color)", fontStyle: "italic" }}>
+                <div style={{ fontSize: "0.875rem", lineHeight: "1.6", color: "var(--text-primary)", background: "var(--neuro-bg)", padding: "12px", borderRadius: "12px", border: "1px solid transparent", boxShadow: "var(--shadow-inset)", fontStyle: "italic" }}>
                   "{selectedPpmp.ppmp.remarks}"
                 </div>
                 <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "1rem" }}>
-                  Upload a revised Excel PPMP from the Dashboard, then submit again for approval.
+                  Budget returned or unposted this plan. Upload a revised Excel PPMP from the Dashboard, then submit again for validation.
                 </p>
               </div>
             )}
@@ -4173,6 +3783,167 @@ function Dashboard({ token, user, onLogout }) {
                 {confirmDialog.confirmLabel}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {reviseModalOpen && (
+        <div
+          className="confirm-modal-overlay"
+          role="presentation"
+          onClick={() => { setReviseModalOpen(false); setRemarks(""); }}
+        >
+          <div
+            className="confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="revise-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="confirm-modal-header">
+              <h2 id="revise-modal-title" className="confirm-modal-title">
+                Revise PPMP
+              </h2>
+              <button
+                type="button"
+                className="confirm-modal-close"
+                onClick={() => { setReviseModalOpen(false); setRemarks(""); }}
+                aria-label="Close"
+              >
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <p className="confirm-modal-message">
+              Please provide remarks explaining why this PPMP needs revision for the end user.
+            </p>
+            <textarea
+              className="form-input"
+              placeholder="Enter revision remarks..."
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              style={{ minHeight: "110px", marginBottom: "1rem", fontSize: "0.9rem" }}
+            />
+            <div className="confirm-modal-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => { setReviseModalOpen(false); setRemarks(""); }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => handleReviewAction(selectedPpmp.ppmp.id, "return")}
+                disabled={reviewBusy}
+              >
+                Confirm Revise
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {passwordRevealModal.open && (
+        <div
+          className="confirm-modal-overlay"
+          role="presentation"
+          onClick={closePasswordRevealModal}
+        >
+          <div
+            className="confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="password-reveal-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="confirm-modal-header">
+              <h2 id="password-reveal-modal-title" className="confirm-modal-title">
+                Administrator verification
+              </h2>
+              <button
+                type="button"
+                className="confirm-modal-close"
+                onClick={closePasswordRevealModal}
+                aria-label="Close"
+              >
+                <i className="fas fa-times" aria-hidden="true"></i>
+              </button>
+            </div>
+            <p className="confirm-modal-message">
+              Enter your bacadmin password to view the login password for{" "}
+              <strong>{passwordRevealModal.username}</strong>.
+            </p>
+            <form onSubmit={submitAdminPasswordReveal}>
+              <div className="form-group" style={{ marginBottom: "12px" }}>
+                <label className="form-label" htmlFor="admin-reveal-password">
+                  Administrator password
+                </label>
+                <div className="password-input-wrapper">
+                  <input
+                    id="admin-reveal-password"
+                    type={showAdminRevealPassword ? "text" : "password"}
+                    className="form-input"
+                    value={adminRevealPassword}
+                    onChange={(e) => {
+                      setAdminRevealPassword(e.target.value);
+                      if (adminRevealError) setAdminRevealError("");
+                    }}
+                    placeholder="Your bacadmin password"
+                    autoComplete="current-password"
+                    autoFocus
+                    disabled={adminRevealBusy}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="password-toggle-btn"
+                    onClick={() => setShowAdminRevealPassword((prev) => !prev)}
+                    aria-label={
+                      showAdminRevealPassword
+                        ? "Hide administrator password"
+                        : "Show administrator password"
+                    }
+                    tabIndex={-1}
+                  >
+                    {showAdminRevealPassword ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                        <line x1="1" y1="1" x2="23" y2="23" />
+                      </svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                {adminRevealError && (
+                  <p style={{ color: "var(--danger, #b91c1c)", marginTop: "8px", fontSize: "0.9rem" }}>
+                    {adminRevealError}
+                  </p>
+                )}
+              </div>
+              <div className="confirm-modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={closePasswordRevealModal}
+                  disabled={adminRevealBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-success"
+                  disabled={adminRevealBusy}
+                >
+                  {adminRevealBusy ? "Verifying…" : "Reveal password"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

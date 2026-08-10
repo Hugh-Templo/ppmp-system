@@ -103,9 +103,12 @@ function Login({ onLogin }) {
                 type="text"
                 className="form-input"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Your Office"
+                onChange={(e) => setUsername(e.target.value.toUpperCase())}
+                placeholder="YOUR OFFICE"
                 autoComplete="username"
+                autoCapitalize="characters"
+                spellCheck={false}
+                style={{ textTransform: "uppercase" }}
                 required
               />
             </div>

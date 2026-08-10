@@ -1,0 +1,22 @@
+# Database Configuration
+DATABASE_URL=postgresql://postgres:admin12345@localhost:5432/ppmpbacdb
+
+# Redis & Celery
+REDIS_URL=redis://localhost:6379/0
+
+# Security
+# Run: openssl rand -hex 32 to generate a secure secret key
+SECRET_KEY=8df5e8c4601be24e772f778a48ef0406d4e5f2e825a0756788db9f18a28723c0
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+
+# Drive Sync Settings
+RCLONE_REMOTE=gdrive
+DRIVE_INPUT_FOLDER=inputs
+LOCAL_INPUT_FOLDER=./data/inputs
+SYNC_INTERVAL_MINUTES=60
+
+# Google Drive API Settings
+GOOGLE_MASTER_SPREADSHEET_ID=<Submission_Status_2027 ID>
+GOOGLE_SYNC_FISCAL_YEAR=2027
+GOOGLE_SERVICE_ACCOUNT_FILE=./credentials/google-service-account.json

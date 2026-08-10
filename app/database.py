@@ -24,6 +24,55 @@ def init_db():
                 "ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE"
             )
         )
+        conn.execute(
+            text(
+                "ALTER TABLE \"user\" "
+                "ADD COLUMN IF NOT EXISTS plain_password VARCHAR"
+            )
+        )
+        # Budget validate → post to BAC (office PPMP path)
+        had_posting = conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'ppmp' AND column_name = 'posting_status'"
+            )
+        ).first()
+        conn.execute(
+            text(
+                "ALTER TABLE ppmp "
+                "ADD COLUMN IF NOT EXISTS posting_status VARCHAR NOT NULL DEFAULT 'Draft'"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE ppmp "
+                "ADD COLUMN IF NOT EXISTS posted_at TIMESTAMP WITHOUT TIME ZONE"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE ppmp "
+                "ADD COLUMN IF NOT EXISTS posted_by INTEGER"
+            )
+        )
+        # Older installs created legacy PPMP item fields as NOT NULL. The
+        # current NGPA parser legitimately leaves these fields empty, so keep
+        # the database schema aligned with the nullable SQLModel fields.
+        conn.execute(
+            text("ALTER TABLE ppmpitem ALTER COLUMN quantity DROP NOT NULL")
+        )
+        conn.execute(
+            text("ALTER TABLE ppmpitem ALTER COLUMN unit_cost DROP NOT NULL")
+        )
+        # One-time: existing Approved rows were already in the BAC pool.
+        # Do not re-run after the column exists (Approved + Draft means "validated, not posted").
+        if not had_posting:
+            conn.execute(
+                text(
+                    "UPDATE ppmp SET posting_status = 'Posted' "
+                    "WHERE status = 'Approved'"
+                )
+            )
 
     with Session(engine) as session:
         if session.exec(select(Office)).first() is None:

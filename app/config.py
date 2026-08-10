@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -63,6 +64,21 @@ def drive_ppmp_rclone_source(kind: str) -> str:
         else DRIVE_NONCSE_PPMP_SUBFOLDER
     )
     return f"{RCLONE_REMOTE},root_folder_id={DRIVE_APP_ROOT_FOLDER_ID}:{sub}"
+
+
+def drive_office_folder_name(code: str) -> str:
+    """
+    Short Drive/local office folder from office.code.
+
+    Strips a leading O- / O_ (case-insensitive). Examples:
+    O-BAC → BAC, O-CHO → CHO, IT → IT.
+    """
+    text = (code or "").strip()
+    if not text:
+        return "office"
+    cleaned = re.sub(r"(?i)^O[-_]", "", text).strip()
+    cleaned = re.sub(r"[^\w\-]+", "_", cleaned).strip("_") or "office"
+    return cleaned
 
 
 # Google Sheets API (Option B sync)

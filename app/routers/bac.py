@@ -1,4 +1,7 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -7,6 +10,9 @@ from datetime import datetime
 from app.database import get_session
 from app.models import User, APP, APPRow, Office, PPMP, PPMPItem, IndicativePPMP, FinalPPMP, AppSignatory
 from app.auth import check_role, get_current_user
+from app.drive_sync import ensure_office_drive_folders
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/bac", tags=["bac"])
 
@@ -15,6 +21,14 @@ class OfficeUpdate(BaseModel):
     name: Optional[str] = None
     code: Optional[str] = None
     budget_allocation: Optional[float] = None
+
+
+class AppSummary(BaseModel):
+    id: int
+    title: str
+    fiscal_year: int
+    created_at: Optional[str] = None
+    app_type: str
 
 
 class AppSignatoryPayload(BaseModel):
@@ -108,14 +122,44 @@ def list_offices_bac(
     return session.exec(stmt).all()
 
 
-@router.post("/offices", response_model=Office)
+def _office_create_response(office: Office, drive_folders: dict) -> dict:
+    """Office payload plus non-fatal Drive folder ensure result."""
+    data = jsonable_encoder(office)
+    data["drive_folders"] = drive_folders
+    if drive_folders.get("ok"):
+        if drive_folders.get("reused") and not drive_folders.get("created"):
+            data["message"] = (
+                f"Office saved. Reconnected to existing Drive folder "
+                f"{drive_folders.get('folder')} under CSE-PPMP and nonCSE-PPMP."
+            )
+        elif drive_folders.get("created"):
+            data["message"] = (
+                f"Office saved. Created Drive folders CSE-PPMP/"
+                f"{drive_folders.get('folder')} and nonCSE-PPMP/"
+                f"{drive_folders.get('folder')}."
+            )
+        else:
+            data["message"] = "Office saved. Drive office folders are ready."
+    else:
+        data["message"] = (
+            "Office saved, but Drive folder sync failed: "
+            f"{drive_folders.get('error') or 'unknown error'}"
+        )
+    return data
+
+
+@router.post("/offices")
 def create_office(
     office_data: Office,
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
     """Add a new office, or reactivate a soft-deleted office with the same code
-    so historical PPMPs and the local template folder remain linked."""
+    so historical PPMPs and the local template folder remain linked.
+
+    Also ensures CSE-PPMP/{short} and nonCSE-PPMP/{short} exist on Google Drive
+    (reuses an existing folder with the same short name; never deletes Drive folders).
+    """
     code = (office_data.code or "").strip()
     name = (office_data.name or "").strip()
     if not code or not name:
@@ -142,7 +186,14 @@ def create_office(
         session.add(existing)
         session.commit()
         session.refresh(existing)
-        return existing
+        drive_folders = ensure_office_drive_folders(existing.code)
+        if not drive_folders.get("ok"):
+            logger.warning(
+                "Office %s reactivated but Drive folders failed: %s",
+                existing.code,
+                drive_folders.get("error"),
+            )
+        return _office_create_response(existing, drive_folders)
 
     name_clash = session.exec(select(Office).where(Office.name == name)).first()
     if name_clash:
@@ -162,17 +213,28 @@ def create_office(
     session.add(new_office)
     session.commit()
     session.refresh(new_office)
-    return new_office
+    drive_folders = ensure_office_drive_folders(new_office.code)
+    if not drive_folders.get("ok"):
+        logger.warning(
+            "Office %s created but Drive folders failed: %s",
+            new_office.code,
+            drive_folders.get("error"),
+        )
+    return _office_create_response(new_office, drive_folders)
 
 
-@router.put("/offices/{office_id}", response_model=Office)
+@router.put("/offices/{office_id}")
 def update_office(
     office_id: int,
     payload: OfficeUpdate,
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
-    """Update an existing office (name, code, budget ceiling)."""
+    """Update an existing office (name, code, budget ceiling).
+
+    When the code changes, ensures Drive/local folders for the new short name
+    (old Drive folders are left in place).
+    """
     office = session.get(Office, office_id)
     if not office:
         raise HTTPException(status_code=404, detail="Office not found")
@@ -182,11 +244,13 @@ def update_office(
             detail="Office is inactive. Recreate it with the same code to restore.",
         )
 
+    code_changed = False
     if payload.code is not None and payload.code != office.code:
         clash = session.exec(select(Office).where(Office.code == payload.code)).first()
         if clash:
             raise HTTPException(status_code=400, detail="Office code already exists")
         office.code = payload.code
+        code_changed = True
 
     if payload.name is not None and payload.name != office.name:
         clash = session.exec(select(Office).where(Office.name == payload.name)).first()
@@ -200,7 +264,21 @@ def update_office(
     session.add(office)
     session.commit()
     session.refresh(office)
-    return office
+
+    drive_folders = None
+    if code_changed:
+        drive_folders = ensure_office_drive_folders(office.code)
+        if not drive_folders.get("ok"):
+            logger.warning(
+                "Office %s code updated but Drive folders failed: %s",
+                office.code,
+                drive_folders.get("error"),
+            )
+        return _office_create_response(office, drive_folders)
+
+    data = jsonable_encoder(office)
+    data["message"] = "Office updated successfully"
+    return data
 
 
 @router.delete("/offices/{office_id}")
@@ -209,9 +287,10 @@ def delete_office(
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
-    """Soft-delete an office. PPMPs, items, and the local template folder under
-    templates/end-users/{office_code}/ are retained. Assigned users are
-    unassigned so accounts can be recreated later against the same office."""
+    """Soft-delete an office. PPMPs, items, the local template folder under
+    templates/end-users/{office_code}/, and Google Drive CSE-PPMP/nonCSE-PPMP
+    office folders are retained (Drive folders are never deleted). Assigned users
+    are unassigned so accounts can be recreated later against the same office."""
     office = session.get(Office, office_id)
     if not office:
         raise HTTPException(status_code=404, detail="Office not found")
@@ -238,13 +317,15 @@ def delete_office(
 
     return {
         "message": (
-            "Office removed from active list. Created PPMPs and local template "
-            "files were kept. Recreate this office with the same code to restore access."
+            "Office removed from active list. Created PPMPs, local template files, "
+            "and Google Drive office folders were kept. Recreate this office with "
+            "the same code to restore access and reconnect to the existing Drive folder."
         ),
         "office_id": office_id,
         "office_code": office.code,
         "users_unassigned": len(assigned_users),
         "ppmps_retained": True,
+        "drive_folders_retained": True,
     }
 
 
@@ -255,15 +336,16 @@ def consolidate_ppmps(
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
     """
-    Consolidate all budget-approved office PPMPs for the specified fiscal year
+    Consolidate Budget-validated and Posted office PPMPs for the specified fiscal year
     into a single APP (CSE and non-CSE rows kept separate via item.is_cse).
     If an APP already exists for that year, it is recalculated.
     """
-    # 1. Fetch all Approved office PPMPs for this year
+    # 1. Fetch Budget-validated + Posted office PPMPs for this year
     approved_ppmps = session.exec(
         select(PPMP).where(
             PPMP.fiscal_year == fiscal_year,
             PPMP.status == "Approved",
+            PPMP.posting_status == "Posted",
         )
     ).all()
 
@@ -283,7 +365,7 @@ def consolidate_ppmps(
             return app
         raise HTTPException(
             status_code=400,
-            detail=f"No approved PPMPs found for fiscal year {fiscal_year} to consolidate",
+            detail=f"No posted (Budget-validated) PPMPs found for fiscal year {fiscal_year} to consolidate",
         )
 
     # 2-4. Rebuild APP rows from approved PPMP items
@@ -637,7 +719,7 @@ def list_approved_ppmps_for_app(
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["bac_admin"])),
 ):
-    """List budget-approved office PPMPs for a FY that belong to CSE or non-CSE.
+    """List Budget-validated and Posted office PPMPs for a FY that belong to CSE or non-CSE.
 
     A PPMP is included when it has matching line items (item.is_cse), or when the
     PPMP itself was created as that kind (ppmp.is_cse) even if item flags drifted.
@@ -651,6 +733,7 @@ def list_approved_ppmps_for_app(
         select(PPMP).where(
             PPMP.fiscal_year == fiscal_year,
             PPMP.status == "Approved",
+            PPMP.posting_status == "Posted",
         )
     ).all()
     if not approved:
@@ -675,6 +758,7 @@ def list_approved_ppmps_for_app(
                 "title": ppmp.title,
                 "fiscal_year": ppmp.fiscal_year,
                 "status": ppmp.status,
+                "posting_status": ppmp.posting_status,
                 "office_id": ppmp.office_id,
                 "office_name": office.name if office else "",
                 "office_code": office.code if office else "",
@@ -757,13 +841,28 @@ def reject_indicative_ppmp(
     }
 
 
-@router.get("/apps", response_model=List[APP])
+@router.get("/apps")
 def list_apps(
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["bac_admin", "budget_office", "end_user"])),
 ):
     """List all consolidated APPs."""
-    return session.exec(select(APP)).all()
+    apps = session.exec(select(APP)).all()
+    app_list = []
+    for app in apps:
+        rows = session.exec(select(APPRow.is_cse).where(APPRow.app_id == app.id)).all()
+        kinds = {"CSE" if bool(is_cse) else "Non-CSE" for is_cse in rows}
+        app_type = "Combined" if len(kinds) == 2 else (next(iter(kinds), "Unknown"))
+        app_list.append(
+            {
+                "id": app.id,
+                "title": app.title,
+                "fiscal_year": app.fiscal_year,
+                "created_at": app.created_at.isoformat() if app.created_at else None,
+                "app_type": app_type,
+            }
+        )
+    return app_list
 
 
 @router.get("/apps/by-year/{fiscal_year}")
