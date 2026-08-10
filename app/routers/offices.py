@@ -2,7 +2,11 @@ import json
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+import re
+import tempfile
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from typing import List, Optional
@@ -10,6 +14,12 @@ from app.database import get_session
 from app.models import User, Office, PPMP, PPMPItem
 from app.auth import get_current_user, check_role
 from app.ppmp_template import export_ppmp_xlsx, write_signatory
+from app.config import IT_PPMPS_DIR
+from app.file_ppmps import (
+    KIND_FOLDER,
+    ensure_it_ppmps_dirs,
+    load_file_ppmp_items,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -234,12 +244,20 @@ def update_office_budget(
 
 
 
+_END_USER_VIEWABLE = {"Approved", "Returned"}
+_END_USER_UPLOADABLE = {"Draft", "Returned"}
+
+
 @router.get("/ppmps", response_model=List[PPMP])
 def list_ppmps(
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["end_user", "bac_admin"])),
 ):
-    """List all PPMPs belonging to the user's office."""
+    """List PPMPs for the user's office.
+
+    End users see Draft/Pending (for upload/submit workflow) plus Approved/Returned
+    (for viewing). Detail/view of editable drafts is still blocked via GET by id.
+    """
     if not current_user.office_id:
         raise HTTPException(status_code=400, detail="User is not assigned to any office")
     return session.exec(
@@ -253,21 +271,169 @@ def create_ppmp(
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["end_user"])),
 ):
-    """Create a new PPMP for the current office."""
+    """Legacy create endpoint — end users must upload an Excel PPMP instead."""
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Create a PPMP by uploading an Excel file via POST /api/offices/ppmps/upload",
+    )
+
+
+@router.post("/ppmps/upload")
+async def upload_ppmp(
+    file: UploadFile = File(...),
+    fiscal_year: Optional[int] = Form(None),
+    is_cse: str = Form("false"),
+    title: Optional[str] = Form(None),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(check_role(["end_user"])),
+):
+    """Parse an uploaded NGPA/legacy PPMP Excel, replace Draft|Returned for this
+    office/year/kind, and save a copy under IT_ppmps/{CSE|nonCSE}/{office}/."""
     if not current_user.office_id:
         raise HTTPException(status_code=400, detail="User is not assigned to any office")
-    
+
+    office = session.get(Office, current_user.office_id)
+    if not office or not office.is_active:
+        raise HTTPException(status_code=400, detail="Office not found or inactive")
+
+    is_cse_flag = str(is_cse or "").strip().lower() in {"1", "true", "yes", "on", "cse"}
+
+    filename = (file.filename or "").strip()
+    suffix = Path(filename).suffix.lower() if filename else ""
+    if suffix not in {".xls", ".xlsx", ".xlsm"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload must be an Excel file (.xls, .xlsx, or .xlsm)",
+        )
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    ensure_it_ppmps_dirs()
+    kind_key = "cse" if is_cse_flag else "noncse"
+    kind_folder = KIND_FOLDER[kind_key]
+    office_folder = IT_PPMPS_DIR / kind_folder / office.code
+    office_folder.mkdir(parents=True, exist_ok=True)
+
+    safe_stem = re.sub(r"[^\w\-]+", "_", Path(filename).stem).strip("_") or "PPMP"
+    dest_name = f"{safe_stem}{suffix}"
+    dest_path = office_folder / dest_name
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(raw)
+        tmp_path = Path(tmp.name)
+
+    try:
+        items_data = load_file_ppmp_items(tmp_path, is_cse=bool(is_cse_flag), kind_root=office_folder)
+        # Prefer fiscal year / title from the workbook when not provided
+        from app.file_ppmps import _extract_meta, _iter_workbook_rows
+
+        meta = {}
+        for _name, rows in _iter_workbook_rows(tmp_path):
+            meta = _extract_meta(rows)
+            if meta.get("fiscal_year") or meta.get("title"):
+                break
+    except Exception as exc:  # noqa: BLE001
+        tmp_path.unlink(missing_ok=True)
+        logger.exception("Failed to parse uploaded PPMP")
+        raise HTTPException(status_code=400, detail=f"Could not parse PPMP Excel: {exc}") from exc
+
+    year = fiscal_year or meta.get("fiscal_year") or datetime.utcnow().year
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Invalid fiscal_year") from None
+
+    if not items_data:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400,
+            detail="No PPMP line items found in the uploaded Excel file",
+        )
+
+    ppmp_title = (title or meta.get("title") or Path(filename).stem or "PPMP").strip()
+
+    # Replace existing Draft/Returned for same office + year + CSE flag
+    candidates = session.exec(
+        select(PPMP).where(
+            PPMP.office_id == office.id,
+            PPMP.fiscal_year == year,
+            PPMP.is_cse == bool(is_cse_flag),
+        )
+    ).all()
+    existing = [p for p in candidates if p.status in _END_USER_UPLOADABLE]
+
+    for old in existing:
+        for item in list(old.items or []):
+            session.delete(item)
+        session.delete(old)
+    session.flush()
+
+    # Persist file copy after successful parse
+    try:
+        dest_path.write_bytes(raw)
+    except OSError as exc:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save PPMP file: {exc}") from exc
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
     new_ppmp = PPMP(
-        title=ppmp_data.title,
-        fiscal_year=ppmp_data.fiscal_year,
-        office_id=current_user.office_id,
+        title=ppmp_title,
+        fiscal_year=year,
+        office_id=office.id,
         status="Draft",
-        type=ppmp_data.type,
+        type="Indicative",
+        is_cse=bool(is_cse_flag),
+        remarks=None,
+        updated_at=datetime.utcnow(),
     )
     session.add(new_ppmp)
+    session.flush()
+
+    for row in items_data:
+        qty = row.get("quantity")
+        unit_cost = row.get("unit_cost")
+        estimated = float(row.get("estimated_budget") or 0)
+        if estimated <= 0 and qty is not None and unit_cost is not None:
+            estimated = float(qty or 0) * float(unit_cost or 0)
+        session.add(
+            PPMPItem(
+                ppmp_id=new_ppmp.id,
+                description=(row.get("description") or "").strip() or "Item",
+                category=row.get("category"),
+                is_cse=bool(row.get("is_cse", is_cse_flag)),
+                project_type=row.get("project_type") or "Goods",
+                quantity_size=row.get("quantity_size"),
+                procurement_mode=row.get("procurement_mode") or "Competitive Bidding",
+                pre_proc_conf=bool(row.get("pre_proc_conf", False)),
+                proc_start=row.get("proc_start"),
+                proc_end=row.get("proc_end"),
+                delivery_period=row.get("delivery_period"),
+                fund_source=row.get("fund_source"),
+                estimated_budget=estimated,
+                supporting_docs=row.get("supporting_docs"),
+                remarks=row.get("remarks"),
+                quantity=row.get("quantity"),
+                unit_of_measure=row.get("unit_of_measure"),
+                unit_cost=row.get("unit_cost"),
+                q1_qty=int(row.get("q1_qty") or 0),
+                q2_qty=int(row.get("q2_qty") or 0),
+                q3_qty=int(row.get("q3_qty") or 0),
+                q4_qty=int(row.get("q4_qty") or 0),
+            )
+        )
+
     session.commit()
     session.refresh(new_ppmp)
-    return new_ppmp
+    return {
+        "message": "PPMP uploaded successfully",
+        "ppmp": new_ppmp,
+        "item_count": len(items_data),
+        "saved_path": str(dest_path),
+    }
 
 
 @router.get("/ppmps/{ppmp_id}")
@@ -286,6 +452,14 @@ def get_ppmp(
     # Restrict end-users to only view their office's PPMPs
     if current_user.role == "end_user" and ppmp.office_id != current_user.office_id:
         raise HTTPException(status_code=403, detail="Access denied to this office's PPMP")
+
+    # End users may only open Approved (validated) or Returned (revision) plans
+    if current_user.role == "end_user" and ppmp.status not in _END_USER_VIEWABLE:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only view PPMPs that are Approved or Returned. "
+            "Upload a new Excel file or wait for Budget Office review.",
+        )
 
     office = session.get(Office, ppmp.office_id) if ppmp.office_id else None
     office_payload = None
@@ -411,65 +585,11 @@ def add_ppmp_item(
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["end_user"])),
 ):
-    """Add a new item to a PPMP (only if PPMP is not approved or pending review)."""
-    ppmp = session.get(PPMP, ppmp_id)
-    if not ppmp:
-        raise HTTPException(status_code=404, detail="PPMP not found")
-        
-    if ppmp.office_id != current_user.office_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    if ppmp.status in ["Pending Budget Review", "Approved"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, 
-            detail="PPMP is locked for revisions because it is approved or pending review"
-        )
-
-    description = (item_data.description or "").strip()
-    if not description:
-        raise HTTPException(status_code=400, detail="Item description is required")
-
-    existing_items = session.exec(
-        select(PPMPItem).where(PPMPItem.ppmp_id == ppmp_id)
-    ).all()
-    target = description.lower()
-    if any((it.description or "").strip().lower() == target for it in existing_items):
-        raise HTTPException(
-            status_code=409,
-            detail="This item is already on the PPMP. Duplicate items are not allowed.",
-        )
-
-    qty = item_data.quantity or 0
-    unit_cost = item_data.unit_cost or 0.0
-    estimated = qty * unit_cost
-    new_item = PPMPItem(
-        ppmp_id=ppmp_id,
-        description=description,
-        category=item_data.category,
-        is_cse=item_data.is_cse,
-        quantity=item_data.quantity,
-        unit_of_measure=item_data.unit_of_measure,
-        unit_cost=item_data.unit_cost,
-        estimated_budget=estimated,
-        procurement_mode=item_data.procurement_mode,
-        project_type=item_data.project_type,
-        quantity_size=item_data.quantity_size,
-        pre_proc_conf=item_data.pre_proc_conf,
-        proc_start=item_data.proc_start,
-        proc_end=item_data.proc_end,
-        delivery_period=item_data.delivery_period,
-        fund_source=item_data.fund_source,
-        supporting_docs=item_data.supporting_docs,
-        remarks=item_data.remarks,
-        q1_qty=item_data.q1_qty,
-        q2_qty=item_data.q2_qty,
-        q3_qty=item_data.q3_qty,
-        q4_qty=item_data.q4_qty,
+    """Line-item editing is disabled — end users upload Excel PPMPs instead."""
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="PPMP line items cannot be edited manually. Upload a revised Excel PPMP instead.",
     )
-    session.add(new_item)
-    session.commit()
-    session.refresh(new_item)
-    return new_item
 
 
 @router.delete("/ppmps/{ppmp_id}/items/{item_id}")
@@ -479,24 +599,8 @@ def delete_ppmp_item(
     session: Session = Depends(get_session),
     current_user: User = Depends(check_role(["end_user"])),
 ):
-    """Delete an item from a PPMP."""
-    ppmp = session.get(PPMP, ppmp_id)
-    if not ppmp:
-        raise HTTPException(status_code=404, detail="PPMP not found")
-        
-    if ppmp.office_id != current_user.office_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    if ppmp.status in ["Pending Budget Review", "Approved"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, 
-            detail="PPMP is locked for revisions"
-        )
-
-    item = session.get(PPMPItem, item_id)
-    if not item or item.ppmp_id != ppmp_id:
-        raise HTTPException(status_code=404, detail="Item not found in this PPMP")
-        
-    session.delete(item)
-    session.commit()
-    return {"message": "Item deleted successfully"}
+    """Line-item editing is disabled — end users upload Excel PPMPs instead."""
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="PPMP line items cannot be edited manually. Upload a revised Excel PPMP instead.",
+    )

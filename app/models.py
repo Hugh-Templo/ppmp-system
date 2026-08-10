@@ -300,3 +300,20 @@ class CseCatalogItem(SQLModel, table=True):
     source: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class AppSignatory(SQLModel, table=True):
+    """
+    Agency-wide signatory block for CSE and nonCSE APP exports/previews.
+    Singleton row (id=1) edited by bac_admin.
+    """
+    __tablename__ = "app_signatory"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    prepared_by: Optional[str] = Field(default=None)
+    prepared_by_designation: Optional[str] = Field(default=None)
+    recommended_by: Optional[str] = Field(default=None)
+    recommended_by_designation: Optional[str] = Field(default=None)
+    approved_by_name: Optional[str] = Field(default=None)
+    approved_by_designation: Optional[str] = Field(default=None)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

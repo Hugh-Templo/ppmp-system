@@ -22,7 +22,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from sqlmodel import Session, select
 
-from app.models import APP, APPRow
+from app.models import APP, APPRow, Office, AppSignatory
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
 
@@ -70,9 +70,16 @@ def _apply_data_style(ws, row: int, first_col: int, last_col: int) -> None:
         cell.alignment = Alignment(wrap_text=True, vertical="top")
 
 
-def _find_row_containing(ws, text: str, max_row: int = 80, max_col: int = 16) -> Optional[int]:
+def _find_row_containing(
+    ws,
+    text: str,
+    max_row: int = 80,
+    max_col: int = 16,
+    *,
+    start_row: int = 1,
+) -> Optional[int]:
     needle = text.lower()
-    for r in range(1, max_row + 1):
+    for r in range(max(1, start_row), max_row + 1):
         for c in range(1, max_col + 1):
             val = ws.cell(row=r, column=c).value
             if isinstance(val, str) and needle in val.lower():
@@ -80,52 +87,184 @@ def _find_row_containing(ws, text: str, max_row: int = 80, max_col: int = 16) ->
     return None
 
 
+def _resolve_cse_app_sheet(wb):
+    """
+    Prefer the official ``APP`` sheet (Guide columns 1–12).
+
+    Never use draft Indicative / Updated prop forms as the fill target.
+    """
+    for name in wb.sheetnames:
+        if name.strip().upper() == "APP":
+            return wb[name]
+
+    # Fallback: sheet that has both APP letterhead and CSE PS-DBM block
+    for ws in wb.worksheets:
+        if _find_row_containing(
+            ws, "Common Use Supplies and Equipment (CSE)", max_row=80
+        ) and _find_row_containing(ws, "ANNUAL PROCUREMENT PLAN", max_row=10):
+            return ws
+
+    return wb.active
+
+
 def _set_fiscal_year_header(cell, fiscal_year: int, fallback: str) -> None:
     val = cell.value
-    if isinstance(val, str) and ("____" in val or "20" in val):
+    if isinstance(val, str) and (
+        "____" in val or "20" in val or "<YEAR>" in val.upper() or "<year>" in val
+    ):
         updated = re.sub(r"20\d{2}", str(fiscal_year), val)
-        updated = updated.replace("______", str(fiscal_year)).replace("____", str(fiscal_year))
+        updated = (
+            updated.replace("______", str(fiscal_year))
+            .replace("____", str(fiscal_year))
+            .replace("<YEAR>", str(fiscal_year))
+            .replace("<year>", str(fiscal_year))
+        )
         cell.value = updated
     else:
         cell.value = fallback
 
 
 def _write_cse_data_row(ws, r: int, row: APPRow) -> None:
-    """Map APPRow into NGPA_CSE-APP columns (Guide + header row 7)."""
+    """
+    Map APPRow into NGPA_CSE-APP ``APP`` sheet columns.
+
+    Guide columns 1–12 live in C–O; A/B are PAP / Object Code.
+    """
     title = row.description or ""
     qty = row.quantity_size or ""
-    ws.cell(row=r, column=1, value="")  # PAP Code (optional)
+    # Col 3 (Guide): brief description including procurement type
+    project_desc = row.category or title
+    # Template also has Gen. Description of Procurement Project in F
+    procurement_desc = qty or title
+
+    ws.cell(row=r, column=1, value="")  # PAP Code
     ws.cell(row=r, column=2, value="")  # Object Code
-    ws.cell(row=r, column=3, value=title)  # Project Title
-    ws.cell(row=r, column=4, value=row.end_user_offices or "")  # End-User
-    ws.cell(row=r, column=5, value=row.category or title)  # General Description of Project
-    ws.cell(row=r, column=6, value=qty or title)  # General Description of Procurement Project
-    ws.cell(row=r, column=7, value=row.procurement_mode or "")  # Mode
-    ws.cell(row=r, column=8, value=_yes_no(row.pre_proc_conf))  # EPA
-    ws.cell(row=r, column=9, value="")  # Criteria for Bid Evaluation
-    ws.cell(row=r, column=10, value=row.proc_start or "")  # Start
-    ws.cell(row=r, column=11, value=row.proc_end or "")  # End
-    ws.cell(row=r, column=12, value=row.fund_source or "")  # Source of Fund
-    budget_cell = ws.cell(row=r, column=13, value=float(row.total_estimated_budget or 0))
-    budget_cell.number_format = "#,##0.00"
-    ws.cell(row=r, column=14, value="")  # Procurement Strategy / Tools
+    ws.cell(row=r, column=3, value=title)  # 1 Project Title
+    ws.cell(row=r, column=4, value=row.end_user_offices or "")  # 2 End-User
+    ws.cell(row=r, column=5, value=project_desc)  # 3 Gen. Description of Project
+    ws.cell(row=r, column=6, value=procurement_desc)  # template F
+    ws.cell(row=r, column=7, value=row.procurement_mode or "")  # 4 Mode
+    ws.cell(row=r, column=8, value=_yes_no(row.pre_proc_conf))  # 5 EPA
+    ws.cell(row=r, column=9, value="")  # 6 Criteria
+    ws.cell(row=r, column=10, value=row.proc_start or "")  # 7 Start
+    ws.cell(row=r, column=11, value=row.proc_end or "")  # 8 End
+    ws.cell(row=r, column=12, value=row.fund_source or "")  # 9 Source
+    budget = ws.cell(row=r, column=13, value=float(row.total_estimated_budget or 0))
+    budget.number_format = "#,##0.00"  # 10 Estimated Budget
+    ws.cell(row=r, column=14, value="")  # 11 Strategy / Tools
     ws.cell(
         row=r,
         column=15,
-        value=row.delivery_period or row.quantity_size or "",
-    )  # Remarks
+        value=row.delivery_period or qty or "",
+    )  # 12 Remarks
     _apply_data_style(ws, r, 1, 15)
 
 
+def _cse_app_is_final(session: Session, fiscal_year: int) -> bool:
+    """
+    FINAL only when every active office has a CSE PPMP file under IT_ppmps/CSE.
+
+    Files with a fiscal_year must match; files with no year still count.
+    Zero active offices => INDICATIVE.
+    """
+    from app.file_ppmps import list_file_ppmps
+
+    active = session.exec(select(Office).where(Office.is_active == True)).all()  # noqa: E712
+    if not active:
+        return False
+
+    submitted: set[str] = set()
+    for entry in list_file_ppmps("cse"):
+        code = str(entry.get("office_code") or "").strip().lower()
+        if not code:
+            continue
+        fy = entry.get("fiscal_year")
+        if fy is not None and fy != "":
+            try:
+                if int(fy) != int(fiscal_year):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        submitted.add(code)
+
+    return all(
+        str(o.code or "").strip().lower() in submitted for o in active
+    )
+
+
+def _load_app_signatory(session: Session) -> dict:
+    row = session.get(AppSignatory, 1)
+    if row is None:
+        return {
+            "prepared_by": "",
+            "prepared_by_designation": "",
+            "recommended_by": "",
+            "recommended_by_designation": "",
+            "approved_by_name": "",
+            "approved_by_designation": "",
+        }
+    return {
+        "prepared_by": row.prepared_by or "",
+        "prepared_by_designation": row.prepared_by_designation or "",
+        "recommended_by": row.recommended_by or "",
+        "recommended_by_designation": row.recommended_by_designation or "",
+        "approved_by_name": row.approved_by_name or "",
+        "approved_by_designation": row.approved_by_designation or "",
+    }
+
+
+def _write_cse_app_signatories(ws, sig: dict) -> None:
+    """Fill Prepared / Recommended / Approved name+designation on CSE APP sheet."""
+    prepared_row = _find_row_containing(ws, "Prepared by:")
+    if not prepared_row:
+        return
+    name_row = prepared_row + 2
+    desig_row = prepared_row + 3
+    for col, name_key, desig_key in (
+        (3, "prepared_by", "prepared_by_designation"),
+        (8, "recommended_by", "recommended_by_designation"),
+        (13, "approved_by_name", "approved_by_designation"),
+    ):
+        name = (sig.get(name_key) or "").strip()
+        desig = (sig.get(desig_key) or "").strip()
+        if name:
+            ws.cell(row=name_row, column=col, value=name)
+        if desig:
+            ws.cell(row=desig_row, column=col, value=desig)
+
+
+def _write_noncse_app_signatories(ws, sig: dict) -> None:
+    """Fill Prepared / Recommended / Approved name+designation on nonCSE APP sheet."""
+    prepared_row = _find_row_containing(ws, "Prepared by:")
+    if not prepared_row:
+        return
+    name_row = prepared_row + 2
+    desig_row = prepared_row + 3
+    for col, name_key, desig_key in (
+        (2, "prepared_by", "prepared_by_designation"),
+        (5, "recommended_by", "recommended_by_designation"),
+        (11, "approved_by_name", "approved_by_designation"),
+    ):
+        name = (sig.get(name_key) or "").strip()
+        desig = (sig.get(desig_key) or "").strip()
+        if name:
+            ws.cell(row=name_row, column=col, value=name)
+        if desig:
+            ws.cell(row=desig_row, column=col, value=desig)
+
+
 def export_cse_app(session: Session, fiscal_year: int) -> bytes:
-    """Fill NGPA_CSE-APP.xlsx under the CSE / PS-DBM section, keeping signatories."""
+    """Fill NGPA_CSE-APP.xlsx ``APP`` sheet CSE / PS-DBM section."""
     _app, all_rows = _get_app_and_rows(session, fiscal_year)
     cse_rows = [r for r in all_rows if r.is_cse]
 
     wb = load_workbook(CSE_APP_TEMPLATE)
-    ws = wb.worksheets[0]
+    ws = _resolve_cse_app_sheet(wb)
+    try:
+        wb.active = ws
+    except Exception:
+        pass
 
-    # Letterhead + FY title
     letter = ws.cell(row=2, column=3)
     if not letter.value or "letterhead" in str(letter.value).lower():
         letter.value = "Ormoc City Government"
@@ -135,18 +274,25 @@ def export_cse_app(session: Session, fiscal_year: int) -> bytes:
         f"ANNUAL PROCUREMENT PLAN FOR FY {fiscal_year}",
     )
 
-    # Mark FINAL
     type_cell = ws.cell(row=4, column=3)
     if isinstance(type_cell.value, str):
-        type_cell.value = (
-            "   INDICATIVE               ✓ FINAL               UPDATED"
-        )
+        if _cse_app_is_final(session, fiscal_year):
+            type_cell.value = (
+                "   INDICATIVE               ✓ FINAL               UPDATED"
+            )
+        else:
+            type_cell.value = (
+                "   ✓ INDICATIVE               FINAL               UPDATED"
+            )
 
-    # CSE section header (do not write into Early Procurement / General Requirements)
-    cse_header = _find_row_containing(ws, "Common Use Supplies and Equipment (CSE)") or 22
+    cse_header = (
+        _find_row_containing(ws, "Common Use Supplies and Equipment (CSE)") or 28
+    )
     data_start = cse_header + 1
-    # Template has two placeholder rows under the CSE header before the note line.
-    note_row = _find_row_containing(ws, "Insert additional rows") or (data_start + 2)
+    note_row = (
+        _find_row_containing(ws, "Insert additional rows", start_row=data_start)
+        or (data_start + 2)
+    )
     placeholder_slots = max(1, note_row - data_start)
     n = len(cse_rows)
     extra = max(0, n - placeholder_slots)
@@ -155,7 +301,6 @@ def export_cse_app(session: Session, fiscal_year: int) -> bytes:
         for offset in range(extra):
             _clone_row_style(ws, data_start, note_row + offset, 15)
 
-    # Clear leftover formulas / sample text in the data band
     band_end = data_start + max(n, placeholder_slots) - 1
     for r in range(data_start, band_end + 1):
         for c in range(1, 16):
@@ -166,16 +311,16 @@ def export_cse_app(session: Session, fiscal_year: int) -> bytes:
 
     total = sum(float(r.total_estimated_budget or 0) for r in cse_rows)
 
-    # Fill template total labels (shifted if rows were inserted)
-    cse_total_row = _find_row_containing(ws, "CSEs to be purchased from PS-DBM")
+    cse_total_row = _find_row_containing(
+        ws, "Total Amount of CSEs to be purchased from PS-DBM", start_row=data_start
+    )
     if cse_total_row:
         amount = ws.cell(row=cse_total_row, column=13, value=total)
         amount.number_format = "#,##0.00"
         amount.font = Font(bold=True)
 
-    # Prefer the exact grand-total label (avoid the EPA Projects line)
     grand_row = None
-    for r in range(1, min(ws.max_row, 80) + 1):
+    for r in range(data_start, min(ws.max_row, 120) + 1):
         for c in range(1, 16):
             val = ws.cell(row=r, column=c).value
             if not isinstance(val, str):
@@ -190,6 +335,8 @@ def export_cse_app(session: Session, fiscal_year: int) -> bytes:
         amount = ws.cell(row=grand_row, column=13, value=total)
         amount.number_format = "#,##0.00"
         amount.font = Font(bold=True)
+
+    _write_cse_app_signatories(ws, _load_app_signatory(session))
 
     stream = io.BytesIO()
     wb.save(stream)
@@ -295,6 +442,8 @@ def export_noncse_app(session: Session, fiscal_year: int) -> bytes:
         )
         cell.number_format = "#,##0.00"
         cell.font = Font(bold=True)
+
+    _write_noncse_app_signatories(ws, _load_app_signatory(session))
 
     stream = io.BytesIO()
     wb.save(stream)
