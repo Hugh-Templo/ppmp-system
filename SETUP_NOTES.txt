@@ -16,7 +16,7 @@ Files created (foundation only):
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
 DB_PORT=3306
-DB_DATABASE=ppmpsys   # or your chosen DB name
+DB_DATABASE=appbac   # create this database in MySQL / phpMyAdmin first
 DB_USERNAME=root
 DB_PASSWORD=
 
@@ -58,7 +58,7 @@ Route::middleware(['jwt', 'role:bac_admin,budget_office'])->group(function () {
 Request attribute after JwtAuth:
     $user = $request->attributes->get('auth_user');
 
-JSON error shapes (match FastAPI):
+JSON error shapes:
     401 → {"detail":"..."}
     403 → {"detail":"You do not have permission to access this resource"}
 
@@ -76,7 +76,7 @@ Sample offices: O-BAC, O-BUDGET, O-CHO, O-GSO, O-CMO
 
 5) Notes
 --------
-- Table `users` (Laravel) maps Python SQLModel User (was table "user").
+- Database: MySQL only (local XAMPP or Hostinger).
 - AppPlan uses table `app`; AppRow uses table `approw`.
 - User password column is hashed_password (getAuthPassword() override).
 - firebase/php-jwt is already in composer.json.

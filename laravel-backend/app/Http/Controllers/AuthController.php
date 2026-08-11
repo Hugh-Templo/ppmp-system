@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Hash;
 use App\Models\User;
 use App\Models\Office;
 use App\Services\JwtService;
+use App\Services\OfficeResolver;
 
 class AuthController extends Controller
 {
@@ -36,6 +37,10 @@ class AuthController extends Controller
     public function getMe(Request $request)
     {
         $user = $request->attributes->get('auth_user') ?: auth()->user();
+        if ($user->role === 'end_user') {
+            OfficeResolver::ensureUserOffice($user);
+            $user->refresh();
+        }
 
         return response()->json([
             'id' => $user->id,
@@ -59,7 +64,23 @@ class AuthController extends Controller
         $email = trim($request->input('email', ''));
         $password = $request->input('password') ?: $request->input('hashed_password');
         $role = $request->input('role', 'end_user');
-        $officeId = $request->input('office_id');
+        $officeId = null;
+
+        if ($role === 'end_user') {
+            $office = OfficeResolver::resolveOrCreate(
+                $request->input('office_id') ? (int) $request->input('office_id') : null,
+                $request->input('office_name'),
+                $request->input('office_code')
+            );
+            if (!$office) {
+                return response()->json([
+                    'detail' => 'Office name and code are required for end-user accounts',
+                ], 400);
+            }
+            $officeId = $office->id;
+        } elseif ($request->input('office_id') && !Office::find($request->input('office_id'))) {
+            return response()->json(['detail' => 'Office not found'], 400);
+        }
 
         if (User::where('username', $username)->exists()) {
             return response()->json(['detail' => 'Username already registered'], 400);
@@ -67,10 +88,6 @@ class AuthController extends Controller
 
         if (User::where('email', $email)->exists()) {
             return response()->json(['detail' => 'Email already registered'], 400);
-        }
-
-        if ($officeId && !Office::find($officeId)) {
-            return response()->json(['detail' => 'Office not found'], 400);
         }
 
         $user = User::create([
@@ -137,12 +154,19 @@ class AuthController extends Controller
         }
 
         if ($target->role === 'end_user') {
-            if ($request->has('office_id')) {
-                $officeId = $request->input('office_id');
-                if ($officeId && !Office::find($officeId)) {
-                    return response()->json(['detail' => 'Office not found'], 400);
+            if (
+                $request->has('office_id')
+                || $request->has('office_name')
+                || $request->has('office_code')
+            ) {
+                $office = OfficeResolver::resolveOrCreate(
+                    $request->has('office_id') ? (int) $request->input('office_id') : null,
+                    $request->input('office_name'),
+                    $request->input('office_code')
+                );
+                if ($office) {
+                    $target->office_id = $office->id;
                 }
-                $target->office_id = $officeId;
             }
         } else {
             $target->office_id = null;

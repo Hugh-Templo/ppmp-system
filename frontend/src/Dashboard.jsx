@@ -120,6 +120,9 @@ function Dashboard({ token, user, onLogout }) {
   const [newOfficeBudget, setNewOfficeBudget] = useState(0);
   const [editingOfficeId, setEditingOfficeId] = useState(null);
   const [offices, setOffices] = useState([]);
+  const [allPpmps, setAllPpmps] = useState([]);
+  const [allPpmpsLoading, setAllPpmpsLoading] = useState(false);
+  const [downloadingPpmpId, setDownloadingPpmpId] = useState(null);
   const consolidationYear = new Date().getFullYear() + 1;
   const [dbmClassification, setDbmClassification] = useState([]);
   // CSE-APP / nonCSE-APP workspace
@@ -244,21 +247,39 @@ function Dashboard({ token, user, onLogout }) {
   const loadDashboardData = () => {
     if (user.role === "end_user") {
       fetchOfficePpmps();
-    } else if (user.role === "budget_office") {
+      fetchOffices();
+      return;
+    }
+    if (user.role === "budget_office") {
+      fetchPendingPpmps();
+      fetchOffices();
+      return;
+    }
+    if (user.role === "bac_admin") {
+      fetchOffices();
       fetchPendingPpmps();
       fetchPostingPpmps();
-      fetchFinalPpmps();
-      fetchOffices();
-    } else if (user.role === "bac_admin") {
-      fetchApps();
-      fetchOffices();
-      fetchUsers();
-      fetchDbmClassification();
-      fetchPendingPpmps();
-      fetchPostingPpmps();
-      fetchIndicativePpmps();
     }
   };
+
+  useEffect(() => {
+    if (user.role === "bac_admin" && activeTab === "dashboard") {
+      fetchPostingPpmps();
+      fetchOffices();
+    }
+  }, [activeTab, user.role]);
+
+  useEffect(() => {
+    if (user.role === "bac_admin" && activeTab === "consolidated_apps") {
+      fetchApps();
+    }
+  }, [activeTab, user.role]);
+
+  useEffect(() => {
+    if (user.role === "bac_admin" && activeTab === "all_ppmps") {
+      fetchAllPpmps();
+    }
+  }, [activeTab, user.role, consolidationYear]);
 
   useEffect(() => {
     if (user.role === "bac_admin" && activeTab === "offices") {
@@ -320,12 +341,6 @@ function Dashboard({ token, user, onLogout }) {
     setItemIsCse(Boolean(catalogMatchFor(itemDesc)));
   }, [itemCatalog, itemDesc]);
 
-  useEffect(() => {
-    if (user.role === "end_user" && activeTab === "view_ppmps") {
-      fetchOfficePpmps();
-    }
-  }, [activeTab, user.role]);
-
   // --- API FETCHERS ---
 
   const fetchOfficePpmps = async () => {
@@ -384,6 +399,29 @@ function Dashboard({ token, user, onLogout }) {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const fetchAllPpmps = async () => {
+    setAllPpmpsLoading(true);
+    try {
+      const res = await apiFetch(
+        `/api/bac/ppmps?fiscal_year=${consolidationYear}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setAllPpmps(Array.isArray(data) ? data : []);
+      } else {
+        setAllPpmps([]);
+        showNotification("Failed to load PPMPs", "danger");
+      }
+    } catch (err) {
+      console.error(err);
+      setAllPpmps([]);
+      showNotification("Failed to load PPMPs", "danger");
+    } finally {
+      setAllPpmpsLoading(false);
     }
   };
 
@@ -510,9 +548,20 @@ function Dashboard({ token, user, onLogout }) {
         if (user.role === "budget_office" || user.role === "bac_admin") {
           loadAudit(ppmpId);
         }
+        return;
       }
+
+      let detail = `Failed to open PPMP preview (HTTP ${res.status})`;
+      try {
+        const errBody = await res.json();
+        if (errBody?.detail) detail = errBody.detail;
+      } catch (_) {
+        // ignore JSON parse errors
+      }
+      showNotification(detail, "danger");
     } catch (err) {
       console.error(err);
+      showNotification("Failed to open PPMP preview. Check that the backend is running.", "danger");
     }
   };
 
@@ -614,6 +663,19 @@ function Dashboard({ token, user, onLogout }) {
       showNotification("Choose an Excel PPMP file to upload", "danger");
       return;
     }
+    const userOffice = offices.find((o) => o.id === user.office_id);
+    if (userOffice?.code) {
+      const expectedStem = `${String(userOffice.code).trim()} (IND PPMP)`;
+      const actualStem = String(uploadFile.name || "")
+        .replace(/\.(xlsx|xls|xlsm)$/i, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (actualStem.toLowerCase() !== expectedStem.toLowerCase()) {
+        const ext = (uploadFile.name.match(/\.(xlsx|xls|xlsm)$/i) || [".xlsx"])[0];
+        showNotification(`Filename must be "${expectedStem}${ext}"`, "danger");
+        return;
+      }
+    }
     setUploadBusy(true);
     try {
       const form = new FormData();
@@ -647,14 +709,20 @@ function Dashboard({ token, user, onLogout }) {
         let detail = "Failed to upload PPMP";
         try {
           const err = await res.json();
-          detail = err.detail || detail;
+          if (typeof err.detail === "string") detail = err.detail;
+          else if (typeof err.message === "string") detail = err.message;
         } catch (_) {
-          /* ignore */
+          detail = `Failed to upload PPMP (HTTP ${res.status})`;
         }
         showNotification(detail, "danger");
       }
     } catch (err) {
-      showNotification("Failed to upload PPMP", "danger");
+      showNotification(
+        err?.message
+          ? `Failed to upload PPMP: ${err.message}`
+          : "Failed to upload PPMP. Check that the Laravel backend is running.",
+        "danger"
+      );
     } finally {
       setUploadBusy(false);
     }
@@ -884,13 +952,13 @@ function Dashboard({ token, user, onLogout }) {
     });
   };
 
-  const handleDownloadPpmpXlsx = async () => {
-    if (!selectedPpmp) return;
+  const downloadPpmpById = async (ppmpId, title, fiscalYear) => {
+    if (!ppmpId) return;
+    setDownloadingPpmpId(ppmpId);
     try {
-      const res = await apiFetch(
-        `/api/offices/ppmps/${selectedPpmp.ppmp.id}/export`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const res = await apiFetch(`/api/offices/ppmps/${ppmpId}/export`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: "Export failed" }));
         showNotification(err.detail || "PPMP export failed", "danger");
@@ -899,9 +967,9 @@ function Dashboard({ token, user, onLogout }) {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      const safeTitle = (selectedPpmp.ppmp.title || "PPMP").replace(/[^A-Za-z0-9_-]+/g, "_");
+      const safeTitle = (title || "PPMP").replace(/[^A-Za-z0-9_-]+/g, "_");
       a.href = url;
-      a.download = `NGPA_PPMP_${safeTitle}_FY${selectedPpmp.ppmp.fiscal_year}.xlsx`;
+      a.download = `NGPA_PPMP_${safeTitle}_FY${fiscalYear || ""}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -909,7 +977,18 @@ function Dashboard({ token, user, onLogout }) {
       showNotification("PPMP download started");
     } catch (err) {
       showNotification("Failed to download PPMP", "danger");
+    } finally {
+      setDownloadingPpmpId(null);
     }
+  };
+
+  const handleDownloadPpmpXlsx = async () => {
+    if (!selectedPpmp) return;
+    await downloadPpmpById(
+      selectedPpmp.ppmp.id,
+      selectedPpmp.ppmp.title,
+      selectedPpmp.ppmp.fiscal_year
+    );
   };
 
   const closeBudgetReview = () => {
@@ -1281,7 +1360,7 @@ function Dashboard({ token, user, onLogout }) {
         showNotification(detail, "danger");
       }
     } catch (err) {
-      showNotification("Network error. Make sure the FastAPI backend is running.", "danger");
+      showNotification("Network error. Make sure the Laravel backend is running.", "danger");
     }
   };
 
@@ -1549,7 +1628,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const pageTitles = {
     dashboard: "Dashboard",
-    view_ppmps: "View PPMPs",
+    all_ppmps: "All PPMPs",
     indicative: "Post to BAC",
     final: "Final PPMP",
     cse_app: "CSE Annual Procurement Plan",
@@ -1654,6 +1733,7 @@ function Dashboard({ token, user, onLogout }) {
               <col style={{ minWidth: 140 }} />
               <col style={{ minWidth: 170 }} />
               <col style={{ minWidth: 200 }} />
+              <col style={{ minWidth: 120 }} />
             </colgroup>
             <thead>
               <tr>
@@ -1672,6 +1752,9 @@ function Dashboard({ token, user, onLogout }) {
                 <th rowSpan={2} className="ngpa-ppmp-table__group ngpa-ppmp-table__group--vertical">
                   REMARKS
                 </th>
+                <th rowSpan={2} className="ngpa-ppmp-table__group ngpa-ppmp-table__group--vertical">
+                  PPMP Type (CSE / NONCSE)
+                </th>
               </tr>
               <tr>
                 <th>Title / Category of Items</th>
@@ -1686,7 +1769,7 @@ function Dashboard({ token, user, onLogout }) {
                 <th>Estimated Budget / Authorized Budgetary Allocation (PhP)</th>
               </tr>
               <tr className="ngpa-ppmp-table__col-numbers">
-                {Array.from({ length: 12 }, (_, i) => (
+                {Array.from({ length: 13 }, (_, i) => (
                   <th key={i}>Column {i + 1}</th>
                 ))}
               </tr>
@@ -1710,6 +1793,9 @@ function Dashboard({ token, user, onLogout }) {
                   </td>
                   <td>{item?.supporting_docs || ""}</td>
                   <td>{item?.remarks || ""}</td>
+                  <td className="ngpa-ppmp-table__center">
+                    {item ? (item.is_cse ? "CSE" : "NONCSE") : ""}
+                  </td>
                 </tr>
               ))}
               <tr className="ngpa-ppmp-table__total">
@@ -1718,7 +1804,7 @@ function Dashboard({ token, user, onLogout }) {
                 <td className="ngpa-ppmp-table__amount ngpa-ppmp-table__total-value">
                   {ngpaMoney(totalBudget)}
                 </td>
-                <td colSpan={2}></td>
+                <td colSpan={3}></td>
               </tr>
             </tbody>
           </table>
@@ -2440,6 +2526,167 @@ function Dashboard({ token, user, onLogout }) {
     : 0;
   const allOfficesVerified = activeOffices.length > 0 && verifiedOfficeCount >= activeOffices.length;
 
+  const closeEndUserPreview = () => {
+    setSelectedPpmp(null);
+    setActiveTab("dashboard");
+  };
+
+  const closeBacPpmpPreview = () => {
+    setSelectedPpmp(null);
+    setAuditDetails(null);
+    setActiveTab("all_ppmps");
+  };
+
+  const showReadonlyPpmpPreview =
+    !!selectedPpmp &&
+    (user.role === "end_user" ||
+      (user.role === "bac_admin" && activeTab === "all_ppmps"));
+
+  // Dedicated preview page (replaces dashboard — view only)
+  if (showReadonlyPpmpPreview) {
+    const previewBackLabel =
+      user.role === "bac_admin" ? "Back to All PPMPs" : "Back to Dashboard";
+    const previewOfficeName =
+      selectedPpmp.office?.name ||
+      selectedPpmp.office?.code ||
+      getOfficeLabel(selectedPpmp.ppmp.office_id) ||
+      "";
+    return (
+      <div className="ppmp-preview-page" aria-label="PPMP preview (view only)">
+        <header className="ppmp-preview-page__header">
+          <button
+            type="button"
+            className="btn btn-secondary ppmp-preview-page__back"
+            onClick={user.role === "bac_admin" ? closeBacPpmpPreview : closeEndUserPreview}
+          >
+            <i className="fas fa-arrow-left" aria-hidden="true"></i>
+            {previewBackLabel}
+          </button>
+          <div className="ppmp-preview-page__title">
+            <h1>{selectedPpmp.ppmp.title}</h1>
+            <div className="ppmp-preview-page__meta">
+              <span className="badge badge-secondary">View only</span>
+              <span
+                className={`badge ${
+                  selectedPpmp.ppmp.status === "Approved"
+                    ? "badge-success"
+                    : selectedPpmp.ppmp.status === "Pending Budget Review"
+                      ? "badge-warning"
+                      : selectedPpmp.ppmp.status === "Returned"
+                        ? "badge-danger"
+                        : "badge-secondary"
+                }`}
+              >
+                {selectedPpmp.ppmp.status}
+              </span>
+              <span className="ppmp-preview-page__year">
+                Fiscal Year {selectedPpmp.ppmp.fiscal_year}
+              </span>
+              {user.role === "bac_admin" && previewOfficeName && (
+                <span>{previewOfficeName}</span>
+              )}
+            </div>
+          </div>
+          <div className="ppmp-preview-page__actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => window.print()}
+            >
+              <i className="fas fa-print" aria-hidden="true"></i>
+              Print
+            </button>
+            <button type="button" className="btn" onClick={handleDownloadPpmpXlsx}>
+              <i className="fas fa-file-excel" aria-hidden="true"></i>
+              Download Excel
+            </button>
+          </div>
+        </header>
+
+        <main className="ppmp-preview-page__body">
+          {selectedPpmp.ppmp.status === "Returned" && selectedPpmp.ppmp.remarks && (
+            <div
+              className="dashboard-card"
+              style={{
+                backgroundColor: "var(--neuro-bg)",
+                borderLeft: "4px solid var(--danger-color)",
+                marginBottom: "24px",
+                padding: "1.25rem",
+                boxShadow: "var(--shadow-md)",
+              }}
+            >
+              <h3
+                style={{
+                  color: "var(--danger-color)",
+                  fontSize: "0.95rem",
+                  fontWeight: "700",
+                  marginBottom: "0.75rem",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <i className="fas fa-exclamation-triangle"></i>
+                Revision Required
+              </h3>
+              <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
+                <strong>Budget Office Remarks:</strong>
+              </p>
+              <div
+                style={{
+                  fontSize: "0.875rem",
+                  lineHeight: "1.6",
+                  color: "var(--text-primary)",
+                  background: "var(--neuro-bg)",
+                  padding: "12px",
+                  borderRadius: "12px",
+                  border: "1px solid transparent",
+                  boxShadow: "var(--shadow-inset)",
+                  fontStyle: "italic",
+                }}
+              >
+                "{selectedPpmp.ppmp.remarks}"
+              </div>
+              <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "1rem" }}>
+                Budget returned or unposted this plan. Upload a revised Excel PPMP from the Dashboard, then submit again for validation.
+              </p>
+            </div>
+          )}
+
+          <div className="ppmp-fullscreen-columns ppmp-fullscreen-columns--readonly">
+            {renderNgpaPpmpForm(selectedPpmp)}
+          </div>
+        </main>
+
+        {notification.message && (
+          <div
+            className={`notification-toast alert alert-${notification.type}`}
+            role="status"
+            aria-live="polite"
+          >
+            <div className="notification-toast-body">
+              <i
+                className={`fas ${
+                  notification.type === "danger" ? "fa-exclamation-circle" : "fa-check-circle"
+                }`}
+                aria-hidden="true"
+              ></i>
+              <span>{notification.message}</span>
+            </div>
+            <button
+              type="button"
+              className="notification-toast-close"
+              onClick={dismissNotification}
+              aria-label="Dismiss notification"
+            >
+              <i className="fas fa-times" aria-hidden="true"></i>
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="dashboard-container">
       <aside className="sidebar">
@@ -2447,8 +2694,8 @@ function Dashboard({ token, user, onLogout }) {
           <div className="sidebar-logo">
             <img src={`${import.meta.env.BASE_URL}Ormoc_City.png`} alt="Ormoc City" />
           </div>
-          <h2 className="sidebar-title">PPMP System</h2>
-          <p className="sidebar-subtitle">RA 12009 Consolidation</p>
+          <h2 className="sidebar-title">APP CONSOLIDATION SYSTEM</h2>
+          <p className="sidebar-subtitle">RA 12009 COMPLIANCE MODULE</p>
         </div>
 
         <nav className="sidebar-nav">
@@ -2462,14 +2709,14 @@ function Dashboard({ token, user, onLogout }) {
               <i className="fas fa-th-large" aria-hidden="true"></i>
               Dashboard
             </button>
-            {user.role === "end_user" && (
+            {user.role === "bac_admin" && (
               <button
                 type="button"
-                className={`nav-link ${activeTab === "view_ppmps" ? "active" : ""}`}
-                onClick={() => { setActiveTab("view_ppmps"); setSelectedPpmp(null); setSelectedApp(null); }}
+                className={`nav-link ${activeTab === "all_ppmps" ? "active" : ""}`}
+                onClick={() => { setActiveTab("all_ppmps"); setSelectedPpmp(null); setSelectedApp(null); }}
               >
-                <i className="fas fa-th-large" aria-hidden="true"></i>
-                View PPMPs
+                <i className="fas fa-file-excel" aria-hidden="true"></i>
+                All PPMPs
               </button>
             )}
             {user.role === "bac_admin" && (
@@ -2551,14 +2798,34 @@ function Dashboard({ token, user, onLogout }) {
           {activeTab === "dashboard" && (
             <div>
               {/* --- END-USER VIEW --- */}
-              {user.role === "end_user" && (
+              {user.role === "end_user" && (() => {
+                const hasReturnedPpmp = ppmps.some((p) => p.status === "Returned");
+                const canUpload =
+                  ppmps.length === 0 ||
+                  ppmps.some((p) => p.status === "Draft" || p.status === "Returned");
+                const uploadLockedByPending = !canUpload && ppmps.some((p) => p.status === "Pending Budget Review");
+                const uploadLockMessage = uploadLockedByPending
+                  ? "Upload is unavailable while your PPMP is Pending Budget Review. You can upload again if Budget returns it for revision."
+                  : "Upload is unavailable because your PPMP has been Approved / validated. No further action is needed.";
+
+                return (
                 <div className="end-user-dashboard">
-                  <div className="dashboard-card">
-                    <h2 className="card-title">Upload PPMP Excel</h2>
+                  <div className={`dashboard-card end-user-upload-card${canUpload ? "" : " is-locked"}`}>
+                    {!canUpload && (
+                      <div className="end-user-upload-lock" role="status" aria-live="polite">
+                        <div className="end-user-upload-lock__message">
+                          <i className={`fas ${uploadLockedByPending ? "fa-hourglass-half" : "fa-lock"}`} aria-hidden="true"></i>
+                          <p>{uploadLockMessage}</p>
+                        </div>
+                      </div>
+                    )}
+                    <h2 className="card-title">
+                      {hasReturnedPpmp ? "Upload Revised PPMP Excel" : "Upload PPMP Excel"}
+                    </h2>
                     <div style={{
                       backgroundColor: "var(--neuro-bg)",
                       border: "1px solid transparent",
-                      borderLeft: "4px solid var(--primary-color)",
+                      borderLeft: `4px solid ${hasReturnedPpmp ? "var(--danger-color)" : "var(--primary-color)"}`,
                       borderRadius: "12px",
                       padding: "12px",
                       marginBottom: "10px",
@@ -2566,22 +2833,44 @@ function Dashboard({ token, user, onLogout }) {
                       boxShadow: "var(--shadow-inset)",
                       color: "var(--text-secondary)"
                     }}>
-                      <strong>Note:</strong> Upload your completed NGPA PPMP Excel (.xls / .xlsx).
-                      Uploads create or replace a <strong>Draft</strong> (or replace a <strong>Returned</strong> plan)
-                      for the same fiscal year. You can <strong>view</strong> a plan only after
-                      Budget validates it (<strong>Approved</strong>) or returns/unposts it for revision (<strong>Returned</strong>).
-                      Remarks from Budget explain what to revise.
+                      {(() => {
+                        const userOffice = offices.find((o) => o.id === user.office_id);
+                        const expectedUploadName = userOffice?.code
+                          ? `${String(userOffice.code).trim()} (IND PPMP).xlsx`
+                          : "OFFICE_CODE (IND PPMP).xlsx";
+                        return hasReturnedPpmp ? (
+                          <>
+                            <strong>Revision required:</strong> Budget returned your PPMP.
+                            Upload a revised NGPA Excel named <strong>{expectedUploadName}</strong>{" "}
+                            (Column 13 must be CSE or NONCSE per item) to replace the Returned plan,
+                            then submit again for review.
+                          </>
+                        ) : (
+                          <>
+                            <strong>Note:</strong> Filename must be{" "}
+                            <strong>{expectedUploadName}</strong>. Include{" "}
+                            <strong>Column 13</strong> with CSE or NONCSE for each item.
+                            Uploads create or replace a <strong>Draft</strong> for the same fiscal year.
+                            Use <strong>Preview</strong> anytime for a view-only form (no editing).
+                          </>
+                        );
+                      })()}
                     </div>
-                    <form onSubmit={handleUploadPpmp} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <form
+                      onSubmit={canUpload ? handleUploadPpmp : (e) => e.preventDefault()}
+                      style={{ display: "flex", flexDirection: "column", gap: "10px" }}
+                      aria-disabled={!canUpload}
+                    >
                       <input
                         type="file"
                         className="form-input"
                         accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
                         required
+                        disabled={!canUpload || uploadBusy}
                       />
-                      <button type="submit" className="btn" disabled={uploadBusy}>
-                        {uploadBusy ? "Uploading…" : "Upload PPMP"}
+                      <button type="submit" className="btn" disabled={!canUpload || uploadBusy}>
+                        {uploadBusy ? "Uploading…" : hasReturnedPpmp ? "Upload Revised PPMP" : "Upload PPMP"}
                       </button>
                     </form>
                   </div>
@@ -2624,9 +2913,14 @@ function Dashboard({ token, user, onLogout }) {
                               </td>
                               <td>
                                 <div className="ppmp-row-actions">
-                                  {(p.status === "Approved" || p.status === "Returned") && (
-                                    <button className="btn" onClick={() => handleSelectPpmp(p.id)}>View</button>
-                                  )}
+                                  <button
+                                    type="button"
+                                    className="btn"
+                                    onClick={() => handleSelectPpmp(p.id)}
+                                    title="View-only NGPA PPMP preview"
+                                  >
+                                    Preview
+                                  </button>
                                   {(p.status === "Draft" || p.status === "Returned") && (
                                     <button
                                       type="button"
@@ -2658,7 +2952,8 @@ function Dashboard({ token, user, onLogout }) {
                     </table>
                   </div>
                 </div>
-              )}
+                );
+              })()}
 
               {/* --- BUDGET OFFICE PPMP AUDIT (Dashboard) --- */}
               {user.role === "budget_office" && (
@@ -2789,6 +3084,106 @@ function Dashboard({ token, user, onLogout }) {
                 </div>
               )}
 
+            </div>
+          )}
+          {activeTab === "all_ppmps" && user.role === "bac_admin" && (
+            <div className="dashboard-card">
+              <div className="card-title-bar" style={{ marginBottom: "1rem" }}>
+                <div>
+                  <h2 className="card-title">All PPMPs</h2>
+                  <p className="page-subtitle">
+                    View and download office PPMPs for FY {consolidationYear}.
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                  <span className="badge badge-secondary">
+                    {allPpmps.length} PPMP{allPpmps.length === 1 ? "" : "s"}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={fetchAllPpmps}
+                    disabled={allPpmpsLoading}
+                  >
+                    <i className="fas fa-sync-alt" aria-hidden="true"></i>
+                    {allPpmpsLoading ? " Loading..." : " Refresh"}
+                  </button>
+                </div>
+              </div>
+              <div className="table-wrapper">
+                <table className="custom-table">
+                  <thead>
+                    <tr>
+                      <th>Office</th>
+                      <th>Title</th>
+                      <th>Year</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allPpmpsLoading ? (
+                      <tr>
+                        <td colSpan="5" style={{ textAlign: "center", color: "var(--text-muted)" }}>
+                          Loading PPMPs...
+                        </td>
+                      </tr>
+                    ) : allPpmps.length === 0 ? (
+                      <tr>
+                        <td colSpan="5" style={{ textAlign: "center", color: "var(--text-muted)" }}>
+                          No PPMPs found for FY {consolidationYear}.
+                        </td>
+                      </tr>
+                    ) : (
+                      allPpmps.map((ppmp) => (
+                        <tr key={ppmp.id}>
+                          <td>{ppmp.office_name || getOfficeLabel(ppmp.office_id)}</td>
+                          <td>{ppmp.title}</td>
+                          <td>{ppmp.fiscal_year}</td>
+                          <td>
+                            <span
+                              className={`badge ${
+                                ppmp.status === "Approved"
+                                  ? "badge-success"
+                                  : ppmp.status === "Pending Budget Review"
+                                    ? "badge-warning"
+                                    : ppmp.status === "Returned"
+                                      ? "badge-danger"
+                                      : "badge-secondary"
+                              }`}
+                            >
+                              {ppmp.status || "Draft"}
+                            </span>
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                onClick={() => handleSelectPpmp(ppmp.id)}
+                              >
+                                <i className="fas fa-expand-arrows-alt" aria-hidden="true"></i>
+                                Preview
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                disabled={downloadingPpmpId === ppmp.id}
+                                onClick={() =>
+                                  downloadPpmpById(ppmp.id, ppmp.title, ppmp.fiscal_year)
+                                }
+                              >
+                                <i className="fas fa-download" aria-hidden="true"></i>
+                                {downloadingPpmpId === ppmp.id ? " Downloading..." : " Download"}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
           {activeTab === "consolidated_apps" && user.role === "bac_admin" && (
@@ -3037,88 +3432,6 @@ function Dashboard({ token, user, onLogout }) {
               </table>
             </div>
           )}
-{/* --- VIEW PPMPs (dedicated list for end users) --- */}
-          {activeTab === "view_ppmps" && user.role === "end_user" && (
-            <div className="dashboard-card">
-              <h2 className="card-title">My Office PPMPs</h2>
-              <p className="page-subtitle" style={{ marginBottom: "1rem" }}>
-                Project Procurement Management Plans for your office. You can
-                <strong> view</strong> plans that are
-                <span className="ppmp-type-badge cse" style={{ margin: "0 6px" }}>Approved</span>
-                or
-                <span className="ppmp-type-badge noncse" style={{ margin: "0 6px" }}>Returned</span>
-                (including plans Budget unposted for revision).
-                Upload a revised Excel from the Dashboard to replace a Draft or Returned plan.
-              </p>
-
-              <table className="custom-table">
-                <thead>
-                  <tr>
-                    <th>Title</th>
-                    <th>Year</th>
-                    <th>Status</th>
-                    <th>Remarks</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ppmps.length === 0 ? (
-                    <tr>
-                      <td colSpan="5" style={{ textAlign: "center", padding: "1.5rem", color: "var(--text-muted)" }}>
-                        No PPMPs uploaded yet. Upload one from the Dashboard.
-                      </td>
-                    </tr>
-                  ) : (
-                    ppmps.map((p) => (
-                      <tr key={p.id}>
-                        <td>{p.title}</td>
-                        <td>{p.fiscal_year}</td>
-                        <td>
-                          <span className={`badge ${p.status === "Approved" ? "badge-success" : p.status === "Pending Budget Review" ? "badge-warning" : p.status === "Returned" ? "badge-danger" : "badge-secondary"}`}>
-                            {p.status}
-                          </span>
-                        </td>
-                        <td>
-                          {p.status === "Returned" && p.remarks ? (
-                            <div style={{ fontSize: "12px", color: "#d32f2f" }}>
-                              <strong>Remarks:</strong> {p.remarks}
-                            </div>
-                          ) : (
-                            <span style={{ color: "var(--text-muted)" }}>—</span>
-                          )}
-                        </td>
-                        <td>
-                          <div className="ppmp-row-actions">
-                            {(p.status === "Approved" || p.status === "Returned") && (
-                              <button className="btn" onClick={() => handleSelectPpmp(p.id)}>View</button>
-                            )}
-                            {(p.status === "Draft" || p.status === "Returned") && (
-                              <button
-                                type="button"
-                                className="btn btn-success btn-sm"
-                                onClick={() => handleSubmitPpmp(p.id)}
-                              >
-                                Submit
-                              </button>
-                            )}
-                            {p.status === "Draft" && (
-                              <button
-                                className="btn btn-danger btn-sm"
-                                onClick={() => handleDeletePpmp(p.id, p.title)}
-                              >
-                                Delete
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-
 {activeTab === "app_signatory" && user.role === "bac_admin" && (
             <div className="signatory-section">
               <div className="signatory-section-header">
@@ -3625,87 +3938,6 @@ function Dashboard({ token, user, onLogout }) {
             </div>
 
             <div className="budget-review-form-frame">
-              {renderNgpaPpmpForm(selectedPpmp)}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* --- END-USER FULL-SCREEN PPMP WORKSPACE --- */}
-      {user.role === "end_user" && selectedPpmp && (
-        <div className="ppmp-fullscreen" role="dialog" aria-modal="true">
-          <header className="ppmp-fullscreen-header">
-            <button
-              type="button"
-              className="btn btn-secondary ppmp-fullscreen-back"
-              onClick={() => setSelectedPpmp(null)}
-            >
-              <i className="fas fa-arrow-left" aria-hidden="true"></i>
-              Back to Dashboard
-            </button>
-            <div className="ppmp-fullscreen-title">
-              <h1>{selectedPpmp.ppmp.title}</h1>
-              <div className="ppmp-fullscreen-meta">
-                <span className={`badge ${selectedPpmp.ppmp.status === "Approved" ? "badge-success" : selectedPpmp.ppmp.status === "Pending Budget Review" ? "badge-warning" : selectedPpmp.ppmp.status === "Returned" ? "badge-danger" : "badge-secondary"}`}>
-                  {selectedPpmp.ppmp.status}
-                </span>
-                {renderPpmpTypeBadge(selectedPpmp.ppmp.is_cse)}
-                <span className="ppmp-fullscreen-year">
-                  Fiscal Year {selectedPpmp.ppmp.fiscal_year}
-                </span>
-              </div>
-            </div>
-            <div className="ppmp-fullscreen-actions">
-              {(selectedPpmp.ppmp.status === "Approved" ||
-                selectedPpmp.ppmp.status === "Returned") && (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn-secondary ppmp-fullscreen-submit"
-                    onClick={() => window.print()}
-                  >
-                    <i className="fas fa-print" aria-hidden="true"></i>
-                    Print
-                  </button>
-                  <button
-                    type="button"
-                    className="btn ppmp-fullscreen-submit"
-                    onClick={handleDownloadPpmpXlsx}
-                  >
-                    <i className="fas fa-file-excel" aria-hidden="true"></i>
-                    Download Excel
-                  </button>
-                </>
-              )}
-            </div>
-          </header>
-
-          <div className="ppmp-fullscreen-body">
-            {selectedPpmp.ppmp.status === "Returned" && selectedPpmp.ppmp.remarks && (
-              <div className="dashboard-card" style={{
-                backgroundColor: "var(--neuro-bg)",
-                borderLeft: "4px solid var(--danger-color)",
-                marginBottom: "24px",
-                padding: "1.25rem",
-                boxShadow: "var(--shadow-md)"
-              }}>
-                <h3 style={{ color: "var(--danger-color)", fontSize: "0.95rem", fontWeight: "700", marginBottom: "0.75rem", display: "flex", alignItems: "center", gap: "8px" }}>
-                  <i className="fas fa-exclamation-triangle"></i>
-                  Revision Required
-                </h3>
-                <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
-                  <strong>Budget Office Remarks:</strong>
-                </p>
-                <div style={{ fontSize: "0.875rem", lineHeight: "1.6", color: "var(--text-primary)", background: "var(--neuro-bg)", padding: "12px", borderRadius: "12px", border: "1px solid transparent", boxShadow: "var(--shadow-inset)", fontStyle: "italic" }}>
-                  "{selectedPpmp.ppmp.remarks}"
-                </div>
-                <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "1rem" }}>
-                  Budget returned or unposted this plan. Upload a revised Excel PPMP from the Dashboard, then submit again for validation.
-                </p>
-              </div>
-            )}
-
-            <div className="ppmp-fullscreen-columns ppmp-fullscreen-columns--readonly">
               {renderNgpaPpmpForm(selectedPpmp)}
             </div>
           </div>

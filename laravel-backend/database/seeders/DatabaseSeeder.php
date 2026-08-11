@@ -18,27 +18,37 @@ class DatabaseSeeder extends Seeder
         // 1. Create sample offices
         $bac = Office::updateOrCreate(
             ['code' => 'O-BAC'],
-            ['name' => 'Bids and Awards Committee', 'budget_allocation' => 500000.0, 'is_active' => true]
+            ['name' => 'Bids and Awards Committee', 'budget_allocation' => 500000.0, 'is_active' => true, 'created_at' => now()]
         );
 
         Office::updateOrCreate(
             ['code' => 'O-BUDGET'],
-            ['name' => 'City Budget Office', 'budget_allocation' => 1000000.0, 'is_active' => true]
+            ['name' => 'City Budget Office', 'budget_allocation' => 1000000.0, 'is_active' => true, 'created_at' => now()]
         );
 
         Office::updateOrCreate(
             ['code' => 'O-CHO'],
-            ['name' => 'City Health Office', 'budget_allocation' => 750000.0, 'is_active' => true]
+            ['name' => 'City Health Office', 'budget_allocation' => 750000.0, 'is_active' => true, 'created_at' => now()]
         );
 
         Office::updateOrCreate(
             ['code' => 'O-GSO'],
-            ['name' => 'General Services Office', 'budget_allocation' => 600000.0, 'is_active' => true]
+            ['name' => 'General Services Office', 'budget_allocation' => 600000.0, 'is_active' => true, 'created_at' => now()]
         );
 
         Office::updateOrCreate(
             ['code' => 'O-CMO'],
-            ['name' => 'City Mayor\'s Office', 'budget_allocation' => 1200000.0, 'is_active' => true]
+            ['name' => 'City Mayor\'s Office', 'budget_allocation' => 1200000.0, 'is_active' => true, 'created_at' => now()]
+        );
+
+        Office::updateOrCreate(
+            ['code' => 'IT'],
+            ['name' => 'INFORMATION TECHNOLOGY OFFICE', 'budget_allocation' => 500000.0, 'is_active' => true, 'created_at' => now()]
+        );
+
+        Office::updateOrCreate(
+            ['code' => 'LCR'],
+            ['name' => 'Local Civil Registry', 'budget_allocation' => 500000.0, 'is_active' => true, 'created_at' => now()]
         );
 
         // 2. Create default Admin User

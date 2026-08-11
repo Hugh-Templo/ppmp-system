@@ -1,4 +1,0 @@
-# Installer build output / staged payload (regenerate with prepare-runtime.ps1)
-installer/payload/
-installer/vendor/
-dist-installer/

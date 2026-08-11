@@ -11,6 +11,8 @@ class AppRow extends Model
 
     protected $table = 'approw';
 
+    public $timestamps = false;
+
     protected $fillable = [
         'app_id',
         'description',

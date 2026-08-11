@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, lazy, Suspense } from "react";
 import Login from "./Login";
-import Dashboard from "./Dashboard";
 import { apiFetch } from "./api";
+
+const Dashboard = lazy(() => import("./Dashboard"));
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem("token") || "");
@@ -23,7 +24,7 @@ function App() {
     setAuthLoading(true);
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       const response = await apiFetch("/api/auth/me", {
         headers: {
@@ -69,7 +70,18 @@ function App() {
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
       {token && user ? (
-        <Dashboard token={token} user={user} onLogout={handleLogout} />
+        <Suspense
+          fallback={
+            <div className="auth-loading-screen">
+              <div className="auth-loading-card">
+                <div className="auth-loading-spinner" aria-hidden="true" />
+                <p>Loading dashboard...</p>
+              </div>
+            </div>
+          }
+        >
+          <Dashboard token={token} user={user} onLogout={handleLogout} />
+        </Suspense>
       ) : (
         <Login onLogin={handleLogin} />
       )}

@@ -9,7 +9,9 @@ class ProcessedRow extends Model
 {
     use HasFactory;
 
-    protected $table = 'processed_row';
+    protected $table = 'processedrow';
+
+    public $timestamps = false;
 
     protected $fillable = [
         'source_file',

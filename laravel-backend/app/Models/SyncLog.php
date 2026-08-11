@@ -9,7 +9,9 @@ class SyncLog extends Model
 {
     use HasFactory;
 
-    protected $table = 'sync_log';
+    protected $table = 'synclog';
+
+    public $timestamps = false;
 
     protected $fillable = [
         'ran_at',

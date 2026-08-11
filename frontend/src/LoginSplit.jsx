@@ -33,7 +33,7 @@ function Login({ onLogin }) {
         setError(data.detail || "Incorrect username or password");
       }
     } catch (err) {
-      setError("Network error. Make sure the FastAPI backend is running.");
+      setError("Network error. Make sure the Laravel backend is running.");
     }
     setLoading(false);
   };

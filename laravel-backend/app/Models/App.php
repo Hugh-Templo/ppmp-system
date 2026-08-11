@@ -11,6 +11,8 @@ class App extends Model
 
     protected $table = 'app';
 
+    const UPDATED_AT = null;
+
     protected $fillable = [
         'title',
         'fiscal_year',

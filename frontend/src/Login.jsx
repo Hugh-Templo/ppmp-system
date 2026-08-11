@@ -19,7 +19,7 @@ function Login({ onLogin }) {
       formData.append("password", password);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       const response = await apiFetch("/api/auth/token", {
         method: "POST",
@@ -41,7 +41,7 @@ function Login({ onLogin }) {
       if (err.name === "AbortError") {
         setError("Request timed out. Restart the backend server and try again.");
       } else {
-        setError("Network error. Make sure the FastAPI backend is running.");
+        setError("Network error. Make sure the Laravel backend is running.");
       }
     } finally {
       setLoading(false);
@@ -67,8 +67,7 @@ function Login({ onLogin }) {
         
         <div className="login-left-content">
           <h1 className="login-left-title">
-            PPMP <br />
-            CONSOLIDATION
+            PPMP TO APP CONSOLIDATION SYSTEM<br />
           </h1>
           <p className="login-left-subtitle">
             Ormoc City Hall PPMP-APP Consolidation System

@@ -1,57 +1,36 @@
-# PPMP frontend (React + Vite + Electron)
+# PPMP Frontend (React + Vite)
 
-Browser UI and Windows desktop shell for the Ormoc City PPMP-APP Consolidation System. The UI talks to the FastAPI backend over `/api`.
+Browser UI for the Ormoc City PPMP-APP Consolidation System. The UI talks to the **Laravel** backend over `/api`.
 
 ## Prerequisites
 
-- Node.js 20+
-- FastAPI backend running on `http://127.0.0.1:8000` (see repo root)
+- Node.js 18+
+- Laravel backend running on `http://127.0.0.1:8000` (see repo root `README.md`)
 
-## Browser (Vite)
+## Development
 
-```bash
+```powershell
+cd frontend
 npm install
 npm run dev
 ```
 
-Open the URL Vite prints (default `http://localhost:5173`). API calls use the Vite proxy to FastAPI.
+Open `http://localhost:5173`. API calls are proxied to Laravel on port 8000.
 
-## Electron desktop
+## Production / Hostinger
 
-### Dev
+Build with your production API URL (same origin on Hostinger):
 
-1. Start FastAPI on port 8000.
-2. From the **repo root** or from `frontend`:
+```powershell
+npm run build
+```
 
-```bash
+Upload `dist/` to your Hostinger `public_html` (see `HOSTINGER_DEPLOY.md`).
+
+## Electron (optional desktop)
+
+```powershell
 npm run electron:dev
 ```
 
-(If you are already in `frontend`, the same command works there.)
-
-This starts Vite and opens an Electron window against `http://127.0.0.1:5173`. Login uses `POST /api/auth/token` (proxied to FastAPI), then `GET /api/auth/me`.
-
-### Windows installer
-
-```bash
-npm run electron:build
-```
-
-Builds the React app with `VITE_API_BASE_URL=http://127.0.0.1:8000`, then packages a Windows NSIS installer under `dist-electron/`.
-
-To point a packaged build at another API host, set `VITE_API_BASE_URL` before build (see `.env.electron.example`).
-
-## Scripts
-
-| Script | Purpose |
-|--------|---------|
-| `npm run dev` | Vite browser app |
-| `npm run build` | Production web build (`dist/`) |
-| `npm run electron:dev` | Electron + Vite HMR |
-| `npm run electron:build` | Windows `.exe` installer |
-
-## Notes
-
-- Packaged Electron loads `dist/index.html` via `loadFile` and calls FastAPI at `VITE_API_BASE_URL`.
-- Dev Electron leaves `VITE_API_BASE_URL` empty so relative `/api` paths go through the Vite proxy.
-- Backend (Postgres, Redis, Celery, Google APIs) stays on the server; it is not bundled into the desktop app.
+Packaged builds use `VITE_API_BASE_URL` or `api-config.json` for the API base URL.

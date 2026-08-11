@@ -9,7 +9,10 @@ class Office extends Model
 {
     use HasFactory;
 
-    protected $table = 'offices';
+    // Legacy SQLModel table name (singular)
+    protected $table = 'office';
+
+    public $timestamps = false;
 
     protected $fillable = [
         'name',

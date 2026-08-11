@@ -9,7 +9,9 @@ class DbmClassification extends Model
 {
     use HasFactory;
 
-    protected $table = 'dbm_classification';
+    protected $table = 'dbmclassification';
+
+    const UPDATED_AT = null;
 
     protected $fillable = [
         'code',

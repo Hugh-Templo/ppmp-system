@@ -9,7 +9,10 @@ class PpmpItem extends Model
 {
     use HasFactory;
 
-    protected $table = 'ppmp_item';
+    protected $table = 'ppmpitem';
+
+    // Legacy table has no created_at / updated_at columns
+    public $timestamps = false;
 
     protected $fillable = [
         'ppmp_id',

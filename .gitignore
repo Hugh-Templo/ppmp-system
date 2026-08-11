@@ -1,12 +1,15 @@
-# Python bytecode
+# Python bytecode (legacy)
 __pycache__/
 *.pyc
 *.pyo
+.venv/
 
 # Env / secrets
 .env
 .env.*
 !.env.example
+!laravel-backend/.env.example
+!laravel-backend/.env.hostinger.example
 !frontend/.env.electron.example
 
 # Local database & data
@@ -19,18 +22,13 @@ node_modules/
 frontend/dist/
 frontend/dist-electron/
 frontend/.vite/
+laravel-backend/node_modules/
 
 # Excel lock files
 templates/~$*.xlsx
 **/~$*.xlsx
 
 # Generated per-office PPMP template copies (created at runtime).
-# Existing shared registry files under templates/end-users/ stay tracked.
 templates/end-users/*/
 
 token.txt
-
-# Windows installer payload / output
-installer/payload/
-installer/vendor/
-dist-installer/

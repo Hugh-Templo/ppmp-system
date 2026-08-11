@@ -51,6 +51,7 @@ Route::prefix('offices')->group(function () {
 // Budget routes
 Route::prefix('budget')->middleware(['jwt', 'role:budget_office,bac_admin'])->group(function () {
     Route::get('/pending', [BudgetController::class, 'listPendingPpmps']);
+    Route::get('/ppmps/posting', [BudgetController::class, 'listPostingPpmps']);
     Route::get('/indicative/pending', [BudgetController::class, 'listPendingIndicativePpmps']);
     Route::get('/indicative', [BudgetController::class, 'listIndicativePpmps']);
     Route::get('/final', [BudgetController::class, 'listFinalPpmps']);
@@ -71,6 +72,7 @@ Route::prefix('bac')->middleware(['jwt', 'role:bac_admin'])->group(function () {
     Route::delete('/offices/{id}', [BacController::class, 'deleteOffice']);
 
     Route::post('/consolidate/{fiscal_year}', [BacController::class, 'consolidatePpmps']);
+    Route::get('/ppmps', [BacController::class, 'listAllPpmps']);
     Route::get('/ppmps/approved', [BacController::class, 'listApprovedPpmps']);
     Route::post('/indicative/ppmps/{id}/approve', [BacController::class, 'approveIndicativePpmp']);
     Route::post('/indicative/ppmps/{id}/reject', [BacController::class, 'rejectIndicativePpmp']);

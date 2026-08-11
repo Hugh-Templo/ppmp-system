@@ -13,8 +13,68 @@ class BudgetController extends Controller
     public function listPendingPpmps()
     {
         return response()->json(
-            Ppmp::where('status', 'Pending Budget Review')->get()
+            Ppmp::where('status', 'Pending Budget Review')
+                ->select([
+                    'id', 'title', 'fiscal_year', 'office_id', 'status', 'type', 'is_cse',
+                    'remarks', 'excel_path', 'excel_filename', 'excel_size',
+                    'created_at', 'updated_at',
+                ])
+                ->orderByDesc('id')
+                ->get()
         );
+    }
+
+    /**
+     * Budget-validated (Approved) PPMPs for Post-to-BAC and BAC Verified dashboard.
+     */
+    public function listPostingPpmps()
+    {
+        $hasPostingStatus = \Illuminate\Support\Facades\Schema::hasColumn('ppmp', 'posting_status');
+
+        // Never SELECT excel_blob in list endpoints (can be several MB per row).
+        $rows = Ppmp::query()
+            ->join('office', 'office.id', '=', 'ppmp.office_id')
+            ->where('ppmp.status', 'Approved')
+            ->orderByDesc('ppmp.fiscal_year')
+            ->orderBy('office.name')
+            ->orderByDesc('ppmp.is_cse')
+            ->select([
+                'ppmp.id',
+                'ppmp.title',
+                'ppmp.fiscal_year',
+                'ppmp.office_id',
+                'ppmp.status',
+                'ppmp.type',
+                'ppmp.is_cse',
+                'ppmp.remarks',
+                'ppmp.excel_path',
+                'ppmp.excel_filename',
+                'ppmp.excel_size',
+                'office.name as office_name',
+                'office.code as office_code',
+            ])
+            ->when($hasPostingStatus, function ($q) {
+                $q->addSelect('ppmp.posting_status', 'ppmp.posted_at');
+            })
+            ->get();
+
+        return response()->json($rows->map(function ($r) use ($hasPostingStatus) {
+            return [
+                'id' => $r->id,
+                'title' => $r->title,
+                'fiscal_year' => $r->fiscal_year,
+                'office_id' => $r->office_id,
+                'office_name' => $r->office_name,
+                'office_code' => $r->office_code ?? null,
+                'is_cse' => (bool) $r->is_cse,
+                'status' => $r->status,
+                'posting_status' => $hasPostingStatus
+                    ? ($r->posting_status ?: 'Draft')
+                    : 'Draft',
+                'posted_at' => $hasPostingStatus ? ($r->posted_at ?? null) : null,
+                'remarks' => $r->remarks,
+            ];
+        }));
     }
 
     public function listPendingIndicativePpmps()
@@ -33,12 +93,12 @@ class BudgetController extends Controller
 
     public function listFinalPpmps()
     {
-        $rows = FinalPpmp::join('offices', 'offices.id', '=', 'final_ppmp.office_id')
+        $rows = FinalPpmp::join('office', 'office.id', '=', 'final_ppmp.office_id')
             ->whereIn('final_ppmp.approval_status', ['Submitted', 'Approved'])
             ->orderBy('final_ppmp.office_id')
             ->orderByDesc('final_ppmp.fiscal_year')
             ->orderByDesc('final_ppmp.version')
-            ->select('final_ppmp.*', 'offices.name as office_name')
+            ->select('final_ppmp.*', 'office.name as office_name')
             ->get();
 
         return response()->json($rows->map(fn($r) => [

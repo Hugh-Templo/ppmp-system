@@ -12,7 +12,7 @@ export default defineConfig({
     // Allow the frontend to be served through tunnels (localtunnel, cloudflare, ngrok)
     allowedHosts: true,
     proxy: {
-      // Forward API calls to the FastAPI backend running on this machine.
+      // Forward API calls to the Laravel backend (php artisan serve on :8000).
       // This lets us expose only port 5173 while /api still reaches :8000.
       '/api': {
         target: 'http://127.0.0.1:8000',

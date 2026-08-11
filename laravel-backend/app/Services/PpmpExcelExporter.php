@@ -120,8 +120,8 @@ class PpmpExcelExporter
             $ws->setCellValue(self::MARK_FINAL, "FINAL");
         }
 
-        // Clear guide row
-        for ($c = 1; $c <= 12; $c++) {
+        // Clear guide row (cols 1–13)
+        for ($c = 1; $c <= 13; $c++) {
             $ws->setCellValueByColumnAndRow($c, self::GUIDE_ROW, null);
         }
 
@@ -159,8 +159,9 @@ class PpmpExcelExporter
 
                 $ws->setCellValueByColumnAndRow(11, $row, $item->supporting_docs ?? '');
                 $ws->setCellValueByColumnAndRow(12, $row, $item->remarks ?? '');
+                $ws->setCellValueByColumnAndRow(13, $row, !empty($item->is_cse) ? 'CSE' : 'NONCSE');
             } else {
-                for ($c = 1; $c <= 12; $c++) {
+                for ($c = 1; $c <= 13; $c++) {
                     $ws->setCellValueByColumnAndRow($c, $row, null);
                 }
             }

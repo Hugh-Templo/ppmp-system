@@ -29,6 +29,40 @@ class PpmpExcelParser
         ];
     }
 
+    /**
+     * Expected PPMP upload filename stem for an office, e.g. "IT (IND PPMP)".
+     */
+    public static function expectedFilenameStem(string $officeCode): string
+    {
+        return trim($officeCode) . ' (IND PPMP)';
+    }
+
+    /**
+     * Collapse whitespace and trim for filename comparisons.
+     */
+    public static function normalizeFilenameStem(string $stem): string
+    {
+        return trim(preg_replace('/\s+/u', ' ', $stem) ?? $stem);
+    }
+
+    /**
+     * Map Column 13 text to is_cse boolean, or null if invalid/blank.
+     */
+    public static function parsePpmpTypeCell($val): ?bool
+    {
+        $text = strtoupper(self::cellStr($val));
+        $text = preg_replace('/[\s_\-]+/', '', $text) ?? $text;
+
+        if ($text === 'CSE') {
+            return true;
+        }
+        if ($text === 'NONCSE') {
+            return false;
+        }
+
+        return null;
+    }
+
     public static function parseFile(string $filePath, bool $isCse = false, ?string $officeCode = null): array
     {
         if (!file_exists($filePath)) {
@@ -41,6 +75,7 @@ class PpmpExcelParser
             'fiscal_year' => null,
             'end_user' => null,
             'title' => null,
+            'used_ngpa' => false,
         ];
 
         foreach ($spreadsheet->getAllSheets() as $sheet) {
@@ -53,9 +88,12 @@ class PpmpExcelParser
             if ($sheetMeta['end_user'] && !$meta['end_user']) $meta['end_user'] = $sheetMeta['end_user'];
             if ($sheetMeta['title'] && !$meta['title']) $meta['title'] = $sheetMeta['title'];
 
-            $ngpaItems = self::parseNgpaItems($rows, $isCse, $officeCode);
-            if (!empty($ngpaItems)) {
-                $allItems = array_merge($allItems, $ngpaItems);
+            if (self::findNgpaHeaderIndex($rows) !== null) {
+                $meta['used_ngpa'] = true;
+                $ngpaItems = self::parseNgpaItems($rows, $isCse, $officeCode);
+                if (!empty($ngpaItems)) {
+                    $allItems = array_merge($allItems, $ngpaItems);
+                }
                 continue;
             }
 
@@ -120,32 +158,68 @@ class PpmpExcelParser
         ];
     }
 
-    private static function parseNgpaItems(array $rows, bool $isCse, ?string $officeCode): array
+    private static function findNgpaHeaderIndex(array $rows): ?int
     {
-        $headerIdx = null;
         foreach ($rows as $i => $row) {
             $col1 = strtolower(self::cellStr($row[0] ?? ''));
             if ($col1 === 'column 1') {
-                $headerIdx = $i;
-                break;
+                return $i;
             }
         }
+        return null;
+    }
 
+    private static function parseNgpaItems(array $rows, bool $isCse, ?string $officeCode): array
+    {
+        $headerIdx = self::findNgpaHeaderIndex($rows);
         if ($headerIdx === null) return [];
+
+        $headerRow = $rows[$headerIdx] ?? [];
+        $col13Header = strtolower(self::cellStr($headerRow[12] ?? ''));
+        if ($col13Header !== 'column 13') {
+            throw new Exception(
+                'PPMP Excel must include Column 13 (CSE / NONCSE). Update your template and set CSE or NONCSE for each item row.'
+            );
+        }
 
         $items = [];
         $dataRows = array_slice($rows, $headerIdx + 1);
+        $rowNumber = $headerIdx + 2; // 1-based spreadsheet row for messages
 
         foreach ($dataRows as $row) {
-            if (empty($row)) continue;
+            if (empty($row)) {
+                $rowNumber++;
+                continue;
+            }
 
             $joined = strtolower(implode(' ', array_map([self::class, 'cellStr'], $row)));
-            if (empty($joined) || str_starts_with($joined, 'refers to')) continue;
-            if (str_contains($joined, 'submitted by') || str_contains($joined, 'approved by')) break;
+            if (empty($joined) || str_starts_with($joined, 'refers to')) {
+                $rowNumber++;
+                continue;
+            }
+            if (str_contains($joined, 'submitted by') || str_contains($joined, 'approved by')) {
+                break;
+            }
 
             $description = self::cellStr($row[0] ?? '');
-            if (empty($description) || str_starts_with(strtolower($description), 'column ')) continue;
-            if (strlen($description) > 400 && str_contains(strtolower($description), 'refers to')) continue;
+            if (empty($description) || str_starts_with(strtolower($description), 'column ')) {
+                $rowNumber++;
+                continue;
+            }
+            if (strlen($description) > 400 && str_contains(strtolower($description), 'refers to')) {
+                $rowNumber++;
+                continue;
+            }
+
+            $itemIsCse = self::parsePpmpTypeCell($row[12] ?? '');
+            if ($itemIsCse === null) {
+                $raw = self::cellStr($row[12] ?? '');
+                throw new Exception(
+                    'Row ' . $rowNumber . ': Column 13 must be CSE or NONCSE'
+                    . ($raw !== '' ? " (found \"{$raw}\")" : ' (missing)')
+                    . '.'
+                );
+            }
 
             $projectType = self::cellStr($row[1] ?? '') ?: 'Goods';
             $quantitySize = self::cellStr($row[2] ?? '');
@@ -162,7 +236,7 @@ class PpmpExcelParser
             $items[] = [
                 'description' => $description,
                 'category' => $description,
-                'is_cse' => $isCse,
+                'is_cse' => $itemIsCse,
                 'project_type' => $projectType,
                 'quantity_size' => $quantitySize ?: null,
                 'procurement_mode' => rtrim($procurementMode, ','),
@@ -183,6 +257,7 @@ class PpmpExcelParser
                 'q4_qty' => 0,
                 'office_code' => $officeCode,
             ];
+            $rowNumber++;
         }
 
         return $items;

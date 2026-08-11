@@ -122,6 +122,7 @@ class BacController extends Controller
             'code' => $code,
             'budget_allocation' => $budget,
             'is_active' => true,
+            'created_at' => now(),
         ]);
 
         return response()->json($office);
@@ -286,6 +287,61 @@ class BacController extends Controller
         }
 
         return response()->json($app);
+    }
+
+    /**
+     * All office PPMPs for BAC download page (any status).
+     * Never SELECT excel_blob in list endpoints.
+     */
+    public function listAllPpmps(Request $request)
+    {
+        $fy = (int) $request->query('fiscal_year', date('Y') + 1);
+
+        $rows = Ppmp::query()
+            ->join('office', 'office.id', '=', 'ppmp.office_id')
+            ->where('ppmp.fiscal_year', $fy)
+            ->orderBy('office.name')
+            ->orderByDesc('ppmp.fiscal_year')
+            ->orderByDesc('ppmp.id')
+            ->select([
+                'ppmp.id',
+                'ppmp.title',
+                'ppmp.fiscal_year',
+                'ppmp.office_id',
+                'ppmp.status',
+                'ppmp.type',
+                'ppmp.is_cse',
+                'ppmp.remarks',
+                'ppmp.excel_path',
+                'ppmp.excel_filename',
+                'ppmp.excel_size',
+                'ppmp.created_at',
+                'ppmp.updated_at',
+                'office.name as office_name',
+                'office.code as office_code',
+            ])
+            ->get();
+
+        return response()->json($rows->map(function ($r) {
+            $hasExcel = !empty($r->excel_path) || !empty($r->excel_filename);
+            return [
+                'id' => $r->id,
+                'title' => $r->title,
+                'fiscal_year' => $r->fiscal_year,
+                'office_id' => $r->office_id,
+                'office_name' => $r->office_name,
+                'office_code' => $r->office_code ?? null,
+                'status' => $r->status,
+                'type' => $r->type,
+                'is_cse' => (bool) $r->is_cse,
+                'remarks' => $r->remarks,
+                'excel_filename' => $r->excel_filename,
+                'excel_size' => $r->excel_size,
+                'has_excel_file' => $hasExcel,
+                'created_at' => $r->created_at,
+                'updated_at' => $r->updated_at,
+            ];
+        }));
     }
 
     public function listApprovedPpmps(Request $request)
