@@ -10,14 +10,17 @@ use App\Http\Controllers\DbmController;
 // Health check
 Route::get('/health', function () {
     return response()->json(['status' => 'running']);
-});
+})->middleware('throttle:public');
 
 // Public endpoint for registration form
-Route::get('/offices', [OfficesController::class, 'listOfficesPublic']);
+Route::get('/offices', [OfficesController::class, 'listOfficesPublic'])
+    ->middleware('throttle:public');
 
 // Auth routes
-Route::post('/auth/token', [AuthController::class, 'login']);
-Route::post('/token', [AuthController::class, 'login']);
+Route::post('/auth/token', [AuthController::class, 'login'])
+    ->middleware('throttle:login');
+Route::post('/token', [AuthController::class, 'login'])
+    ->middleware('throttle:login');
 
 Route::middleware('jwt')->group(function () {
     Route::get('/auth/me', [AuthController::class, 'getMe']);
@@ -40,9 +43,11 @@ Route::prefix('offices')->group(function () {
         Route::put('/budget/{office_id}', [OfficesController::class, 'updateOfficeBudget']);
 
         Route::get('/ppmps', [OfficesController::class, 'listPpmps']);
-        Route::post('/ppmps/upload', [OfficesController::class, 'uploadPpmp']);
+        Route::post('/ppmps/upload', [OfficesController::class, 'uploadPpmp'])
+            ->middleware('throttle:heavy');
         Route::get('/ppmps/{id}', [OfficesController::class, 'getPpmp']);
-        Route::get('/ppmps/{id}/export', [OfficesController::class, 'exportPpmp']);
+        Route::get('/ppmps/{id}/export', [OfficesController::class, 'exportPpmp'])
+            ->middleware('throttle:heavy');
         Route::post('/ppmps/{id}/submit', [OfficesController::class, 'submitPpmp']);
         Route::delete('/ppmps/{id}', [OfficesController::class, 'deletePpmp']);
     });
@@ -71,16 +76,19 @@ Route::prefix('bac')->middleware(['jwt', 'role:bac_admin'])->group(function () {
     Route::put('/offices/{id}', [BacController::class, 'updateOffice']);
     Route::delete('/offices/{id}', [BacController::class, 'deleteOffice']);
 
-    Route::post('/consolidate/{fiscal_year}', [BacController::class, 'consolidatePpmps']);
+    Route::post('/consolidate/{fiscal_year}', [BacController::class, 'consolidatePpmps'])
+        ->middleware('throttle:heavy');
     Route::get('/ppmps', [BacController::class, 'listAllPpmps']);
     Route::get('/ppmps/approved', [BacController::class, 'listApprovedPpmps']);
     Route::post('/indicative/ppmps/{id}/approve', [BacController::class, 'approveIndicativePpmp']);
     Route::post('/indicative/ppmps/{id}/reject', [BacController::class, 'rejectIndicativePpmp']);
     Route::get('/apps', [BacController::class, 'listApps']);
     Route::get('/apps/by-year/{fiscal_year}', [BacController::class, 'getAppByYear']);
-    Route::get('/apps/{fiscal_year}/export/{kind}', [BacController::class, 'exportApp']);
+    Route::get('/apps/{fiscal_year}/export/{kind}', [BacController::class, 'exportApp'])
+        ->middleware('throttle:heavy');
     Route::get('/apps/{id}', [BacController::class, 'getApp']);
-    Route::post('/drive/upload', [BacController::class, 'uploadToDrive']);
+    Route::post('/drive/upload', [BacController::class, 'uploadToDrive'])
+        ->middleware('throttle:heavy');
 });
 
 // DBM routes

@@ -98,7 +98,33 @@ Point your domain or subfolder to the `public/` folder:
 
 ---
 
+## Step 7: Cloudflare Free (edge DDoS)
+
+Cloudflare’s **Free** plan includes unmetered DDoS mitigation and Bot Fight Mode. No paid Rate Limiting or advanced WAF is required — Laravel already rate-limits login/API traffic.
+
+1. Create a free account at [cloudflare.com](https://www.cloudflare.com) and **Add a site** for your domain.
+2. Replace Hostinger nameservers with the Cloudflare nameservers shown in the dashboard (or follow Cloudflare’s DNS import).
+3. In DNS, ensure your A/CNAME records are **proxied** (orange cloud), not DNS-only (grey cloud).
+4. SSL/TLS → Overview:
+   - Prefer **Full (strict)** if Hostinger already has a valid HTTPS certificate.
+   - Use **Full** temporarily if the origin cert is missing or self-signed, then switch to Full (strict).
+5. Security → Bots: enable **Bot Fight Mode**.
+6. During an active attack only: Security → Settings → **Under Attack Mode** (shows a challenge page). Turn it off when traffic is normal.
+7. Keep Laravel `TrustProxies` enabled (already configured in the app) so rate limits use the visitor IP (`CF-Connecting-IP` / `X-Forwarded-For`), not Cloudflare’s edge IP.
+
+Also set production CORS in `laravel-backend/.env`:
+```ini
+FRONTEND_URL=https://yourdomain.com
+CORS_ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+```
+
+Local XAMPP / `php artisan serve` does not use Cloudflare; proxying applies only to the public domain.
+
+---
+
 ## Verification
 1. Visit `https://yourdomain.com/api/health` — should return `{"status":"running"}`.
 2. Visit `https://yourdomain.com` — React login page loads.
 3. Login with `admin` / `admin123`.
+4. Confirm response headers include `X-Content-Type-Options: nosniff` (and related security headers).
+5. Rapid-fire login attempts should return HTTP `429` after the login limit.

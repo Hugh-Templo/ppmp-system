@@ -31,9 +31,15 @@ function Login({ onLogin }) {
       });
       clearTimeout(timeoutId);
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (response.ok) {
         onLogin(data.access_token);
+      } else if (response.status === 429) {
+        setError(
+          data.detail ||
+            data.message ||
+            "Too many login attempts. Wait a minute and try again."
+        );
       } else {
         setError(data.detail || "Incorrect username or password");
       }
