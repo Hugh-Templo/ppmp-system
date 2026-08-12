@@ -124,13 +124,12 @@ function Dashboard({ token, user, onLogout }) {
   const [allPpmpsLoading, setAllPpmpsLoading] = useState(false);
   const [allPpmpsStatusFilter, setAllPpmpsStatusFilter] = useState("Approved");
   const [downloadingPpmpId, setDownloadingPpmpId] = useState(null);
-  const consolidationYear = new Date().getFullYear() + 1;
+  const [consolidationYear, setConsolidationYear] = useState(new Date().getFullYear() + 1);
   const [dbmClassification, setDbmClassification] = useState([]);
   // CSE-APP / nonCSE-APP workspace
   const [approvedAppPpmps, setApprovedAppPpmps] = useState([]);
   const [kindAppPayload, setKindAppPayload] = useState({ app: null, rows: [] });
   const [appWorkspaceLoading, setAppWorkspaceLoading] = useState(false);
-  const [appDriveSyncing, setAppDriveSyncing] = useState(false);
   const [appFormPage, setAppFormPage] = useState(1);
   const [appNgpaPreviewOpen, setAppNgpaPreviewOpen] = useState(false);
   const APP_FORM_PAGE_SIZE = 10;
@@ -1406,168 +1405,79 @@ function Dashboard({ token, user, onLogout }) {
     });
   };
 
-  const loadAppWorkspace = async (kind, { syncFromDrive = true } = {}) => {
+  const loadAppWorkspace = async (kind, { autoConsolidate = true } = {}) => {
     setAppWorkspaceLoading(true);
     setAppFormPage(1);
-    let filesLoaded = false;
     try {
-      if (syncFromDrive) {
-        setAppDriveSyncing(true);
-        try {
-          const syncRes = await apiFetch(
-            `/api/bac/ppmps/sync-from-drive?kind=${kind}`,
-            {
-              method: "POST",
-              headers: { Authorization: `Bearer ${token}` },
-            }
-          );
-          if (syncRes.ok) {
-            const syncPayload = await syncRes.json();
-            setApprovedAppPpmps(
-              Array.isArray(syncPayload.files) ? syncPayload.files : []
-            );
-            filesLoaded = true;
-            if (!syncPayload.ok) {
-              const kindSync = syncPayload?.sync?.kinds?.[kind];
-              showNotification(
-                kindSync?.error ||
-                  "Drive sync had issues; showing local IT_ppmps files.",
-                "danger"
-              );
-            }
-          } else {
-            const errBody = await syncRes.json().catch(() => ({}));
-            showNotification(
-              errBody.detail ||
-                "Could not sync from Drive; loading local files.",
-              "danger"
-            );
+      const ppmpsRes = await apiFetch(
+        `/api/bac/ppmps/approved?fiscal_year=${consolidationYear}&kind=${kind}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      let approvedList = [];
+      if (ppmpsRes.ok) {
+        const payload = await ppmpsRes.json();
+        approvedList = Array.isArray(payload) ? payload : [];
+        setApprovedAppPpmps(approvedList);
+      } else {
+        setApprovedAppPpmps([]);
+      }
+
+      if (autoConsolidate && approvedList.length > 0) {
+        const consolidateRes = await apiFetch(
+          `/api/bac/consolidate/${consolidationYear}`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
           }
-        } catch (syncErr) {
+        );
+        if (!consolidateRes.ok) {
+          const errBody = await consolidateRes.json().catch(() => ({}));
           showNotification(
-            "Could not sync from Drive; loading local files.",
+            errBody.detail || "Could not auto-consolidate verified PPMPs",
             "danger"
           );
-        } finally {
-          setAppDriveSyncing(false);
         }
       }
 
-      const requests = [
-        apiFetch(
-          `/api/bac/apps/by-year/${consolidationYear}?kind=${kind}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        ),
-      ];
-      if (!filesLoaded) {
-        requests.unshift(
-          apiFetch(`/api/bac/ppmps/from-files?kind=${kind}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-        );
-      }
-
-      const results = await Promise.all(requests);
-      if (!filesLoaded) {
-        const ppmpsRes = results[0];
-        const appRes = results[1];
-        if (ppmpsRes.ok) {
-          const payload = await ppmpsRes.json();
-          setApprovedAppPpmps(
-            Array.isArray(payload) ? payload : payload.files || []
-          );
-        } else {
-          setApprovedAppPpmps([]);
-        }
-        if (appRes.ok) {
-          setKindAppPayload(await appRes.json());
-        } else {
-          setKindAppPayload({ app: null, rows: [] });
-        }
+      const appRes = await apiFetch(
+        `/api/bac/apps/by-year/${consolidationYear}?kind=${kind}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (appRes.ok) {
+        setKindAppPayload(await appRes.json());
       } else {
-        const appRes = results[0];
-        if (appRes.ok) {
-          setKindAppPayload(await appRes.json());
-        } else {
-          setKindAppPayload({ app: null, rows: [] });
-        }
+        setKindAppPayload({ app: null, rows: [] });
       }
     } catch (err) {
-      if (!filesLoaded) setApprovedAppPpmps([]);
+      setApprovedAppPpmps([]);
       setKindAppPayload({ app: null, rows: [] });
       showNotification("Failed to load APP workspace", "danger");
     } finally {
       setAppWorkspaceLoading(false);
-      setAppDriveSyncing(false);
-    }
-  };
-
-  const handleSyncPpmpsFromDrive = async (kind) => {
-    setAppDriveSyncing(true);
-    try {
-      const syncRes = await apiFetch(
-        `/api/bac/ppmps/sync-from-drive?kind=${kind}`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      if (syncRes.ok) {
-        const syncPayload = await syncRes.json();
-        setApprovedAppPpmps(
-          Array.isArray(syncPayload.files) ? syncPayload.files : []
-        );
-        if (syncPayload.ok) {
-          showNotification(
-            `Synced ${syncPayload.count ?? 0} PPMP file(s) from Drive.`
-          );
-        } else {
-          const kindSync = syncPayload?.sync?.kinds?.[kind];
-          showNotification(
-            kindSync?.error ||
-              "Drive sync had issues; showing local IT_ppmps files.",
-            "danger"
-          );
-        }
-      } else {
-        const errBody = await syncRes.json().catch(() => ({}));
-        showNotification(errBody.detail || "Drive sync failed", "danger");
-      }
-    } catch (err) {
-      showNotification("Drive sync failed", "danger");
-    } finally {
-      setAppDriveSyncing(false);
     }
   };
 
   const handleConsolidate = async (e) => {
     if (e && typeof e.preventDefault === "function") e.preventDefault();
-    const fromFiles = activeTab === "cse_app" || activeTab === "noncse_app";
-    const kind = activeTab === "cse_app" ? "cse" : activeTab === "noncse_app" ? "noncse" : null;
+    const kind =
+      activeTab === "cse_app"
+        ? "cse"
+        : activeTab === "noncse_app"
+          ? "noncse"
+          : null;
     try {
-      const url = fromFiles
-        ? `/api/bac/consolidate-from-files/${consolidationYear}?kind=${kind}`
-        : `/api/bac/consolidate/${consolidationYear}`;
-      const res = await apiFetch(url, {
+      const res = await apiFetch(`/api/bac/consolidate/${consolidationYear}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (res.ok) {
-        if (fromFiles) {
-          const uploadMsg = data?.upload?.message;
-          showNotification(
-            uploadMsg ||
-              `APP for FY ${consolidationYear} rebuilt from IT_ppmps/${kind === "cse" ? "CSE" : "nonCSE"}.`
-          );
-        } else {
-          showNotification(
-            `APP for FY ${consolidationYear} updated from approved PPMPs.`
-          );
-        }
+        showNotification(
+          `APP for FY ${consolidationYear} updated from verified PPMPs.`
+        );
         fetchApps();
-        if (fromFiles) {
-          loadAppWorkspace(kind);
+        if (kind) {
+          loadAppWorkspace(kind, { autoConsolidate: false });
         }
       } else {
         showNotification(data.detail || "Consolidation failed", "danger");
@@ -2246,7 +2156,7 @@ function Dashboard({ token, user, onLogout }) {
       0
     );
 
-    // FINAL only when every active office has a CSE PPMP file for this FY.
+    // FINAL only when every active office has a verified CSE PPMP for this FY.
     const fyNum = Number(consolidationYear);
     const submittedCodes = new Set(
       (approvedAppPpmps || [])
@@ -2279,22 +2189,14 @@ function Dashboard({ token, user, onLogout }) {
               className="form-input app-workspace-fy"
               value={consolidationYear}
               onChange={(e) => {
-                setConsolidationYear(e.target.value);
+                const next = Number(e.target.value);
+                setConsolidationYear(Number.isFinite(next) ? next : e.target.value);
                 setAppFormPage(1);
               }}
             />
           </div>
           <div className="app-workspace-toolbar__actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => handleSyncPpmpsFromDrive(kind)}
-              disabled={appDriveSyncing || appWorkspaceLoading}
-            >
-              <i className="fas fa-cloud-download-alt" aria-hidden="true"></i>
-              {appDriveSyncing ? "Syncing…" : "Sync from Drive"}
-            </button>
-            <button type="button" className="btn" onClick={handleConsolidate}>
+            <button type="button" className="btn" onClick={handleConsolidate} disabled={appWorkspaceLoading}>
               <i className="fas fa-layer-group" aria-hidden="true"></i>
               {isStaleApp ? "Clear / Rebuild APP" : "Run Consolidation"}
             </button>
@@ -2313,31 +2215,23 @@ function Dashboard({ token, user, onLogout }) {
         {isStaleApp && (
           <div className="alert alert-danger app-workspace-stale" role="status">
             The {label} NGPA form still has consolidated rows, but there are no
-            {label} PPMP files under IT_ppmps/{label === "CSE" ? "CSE" : "nonCSE"}.
-            This APP is out of date. Click <strong>Clear / Rebuild APP</strong> to
-            clear the stale form (or add Excel files and consolidate again).
+            verified {label} PPMPs for FY {consolidationYear}. This APP may be out
+            of date. Click <strong>Clear / Rebuild APP</strong> after verified
+            PPMPs are available.
           </div>
         )}
 
         <section className="dashboard-card app-workspace-source">
           <div className="app-workspace-section-head">
-            <h2 className="card-title">Approved PPMPs ({label})</h2>
+            <h2 className="card-title">Verified PPMPs ({label})</h2>
             <span className="app-workspace-stat">
               {approvedAppPpmps.length} office PPMP(s) · ₱{ngpaMoney(sourceTotal)}
             </span>
           </div>
           <p className="page-subtitle" style={{ marginBottom: "0.75rem" }}>
-            Office PPMP Excel files from{" "}
-            <code>
-              {label === "CSE"
-                ? "C:\\xampp\\htdocs\\ppmpsys\\IT_ppmps\\CSE\\{office}"
-                : "C:\\xampp\\htdocs\\ppmpsys\\IT_ppmps\\nonCSE\\{office}"}
-            </code>{" "}
-            (synced from Drive{" "}
-            {label === "CSE" ? "CSE-PPMP" : "nonCSE-PPMP"}
-            /{"{office}"}) for FY {consolidationYear}. Run consolidation to rebuild
-            this {label} APP and upload it to Google Drive (
-            {label === "CSE" ? "CSE-APP" : "nonCSE-APP"}).
+            Budget-verified (Approved) office PPMPs with {label} items for FY{" "}
+            {consolidationYear}. Opening this page consolidates them into the{" "}
+            {label} APP form below.
           </p>
           <div className="table-wrapper">
             <table className="custom-table">
@@ -2360,11 +2254,7 @@ function Dashboard({ token, user, onLogout }) {
                 ) : approvedAppPpmps.length === 0 ? (
                   <tr>
                     <td colSpan="5" style={{ textAlign: "center", color: "var(--text-muted)" }}>
-                      No {label} PPMP files found under{" "}
-                      {label === "CSE"
-                        ? "IT_ppmps\\CSE\\{office}"
-                        : "IT_ppmps\\nonCSE\\{office}"}
-                      .
+                      No verified {label} PPMPs for FY {consolidationYear}.
                     </td>
                   </tr>
                 ) : (
@@ -2375,7 +2265,7 @@ function Dashboard({ token, user, onLogout }) {
                       <td>{p.item_count}</td>
                       <td>₱{ngpaMoney(p.total_estimated_budget)}</td>
                       <td>
-                        <span className="badge badge-success">{p.status || "File"}</span>
+                        <span className="badge badge-success">{p.status || "Verified"}</span>
                       </td>
                     </tr>
                   ))
@@ -3216,6 +3106,9 @@ function Dashboard({ token, user, onLogout }) {
             </div>
             );
           })()}
+          {(activeTab === "cse_app" || activeTab === "noncse_app") &&
+            user.role === "bac_admin" &&
+            renderAppWorkspace(activeTab === "cse_app" ? "cse" : "noncse")}
           {activeTab === "consolidated_apps" && user.role === "bac_admin" && (
             <div className="grid-2">
               <div className="dashboard-card">
