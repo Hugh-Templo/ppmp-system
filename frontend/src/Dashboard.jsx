@@ -122,6 +122,7 @@ function Dashboard({ token, user, onLogout }) {
   const [offices, setOffices] = useState([]);
   const [allPpmps, setAllPpmps] = useState([]);
   const [allPpmpsLoading, setAllPpmpsLoading] = useState(false);
+  const [allPpmpsStatusFilter, setAllPpmpsStatusFilter] = useState("Approved");
   const [downloadingPpmpId, setDownloadingPpmpId] = useState(null);
   const consolidationYear = new Date().getFullYear() + 1;
   const [dbmClassification, setDbmClassification] = useState([]);
@@ -3086,18 +3087,46 @@ function Dashboard({ token, user, onLogout }) {
 
             </div>
           )}
-          {activeTab === "all_ppmps" && user.role === "bac_admin" && (
+          {activeTab === "all_ppmps" && user.role === "bac_admin" && (() => {
+            const filteredAllPpmps = allPpmpsStatusFilter === "all"
+              ? allPpmps
+              : allPpmps.filter((p) => (p.status || "Draft") === allPpmpsStatusFilter);
+            const filterEmptyLabel =
+              allPpmpsStatusFilter === "Approved"
+                ? "No verified PPMPs ready to download for FY " + consolidationYear + "."
+                : allPpmpsStatusFilter === "all"
+                  ? "No PPMPs found for FY " + consolidationYear + "."
+                  : `No PPMPs with status "${allPpmpsStatusFilter}" for FY ${consolidationYear}.`;
+            return (
             <div className="dashboard-card">
               <div className="card-title-bar" style={{ marginBottom: "1rem" }}>
                 <div>
                   <h2 className="card-title">All PPMPs</h2>
                   <p className="page-subtitle">
                     View and download office PPMPs for FY {consolidationYear}.
+                    {allPpmpsStatusFilter === "Approved"
+                      ? " Showing verified (Approved) PPMPs ready to download."
+                      : ""}
                   </p>
                 </div>
                 <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.9rem" }}>
+                    <span>Status</span>
+                    <select
+                      className="form-input"
+                      value={allPpmpsStatusFilter}
+                      onChange={(e) => setAllPpmpsStatusFilter(e.target.value)}
+                      style={{ minWidth: "200px" }}
+                    >
+                      <option value="all">All</option>
+                      <option value="Approved">Verified (Approved)</option>
+                      <option value="Pending Budget Review">Pending Budget Review</option>
+                      <option value="Draft">Draft</option>
+                      <option value="Returned">Returned</option>
+                    </select>
+                  </label>
                   <span className="badge badge-secondary">
-                    {allPpmps.length} PPMP{allPpmps.length === 1 ? "" : "s"}
+                    {filteredAllPpmps.length} PPMP{filteredAllPpmps.length === 1 ? "" : "s"}
                   </span>
                   <button
                     type="button"
@@ -3128,14 +3157,14 @@ function Dashboard({ token, user, onLogout }) {
                           Loading PPMPs...
                         </td>
                       </tr>
-                    ) : allPpmps.length === 0 ? (
+                    ) : filteredAllPpmps.length === 0 ? (
                       <tr>
                         <td colSpan="5" style={{ textAlign: "center", color: "var(--text-muted)" }}>
-                          No PPMPs found for FY {consolidationYear}.
+                          {filterEmptyLabel}
                         </td>
                       </tr>
                     ) : (
-                      allPpmps.map((ppmp) => (
+                      filteredAllPpmps.map((ppmp) => (
                         <tr key={ppmp.id}>
                           <td>{ppmp.office_name || getOfficeLabel(ppmp.office_id)}</td>
                           <td>{ppmp.title}</td>
@@ -3152,7 +3181,7 @@ function Dashboard({ token, user, onLogout }) {
                                       : "badge-secondary"
                               }`}
                             >
-                              {ppmp.status || "Draft"}
+                              {ppmp.status === "Approved" ? "Verified" : (ppmp.status || "Draft")}
                             </span>
                           </td>
                           <td>
@@ -3185,7 +3214,8 @@ function Dashboard({ token, user, onLogout }) {
                 </table>
               </div>
             </div>
-          )}
+            );
+          })()}
           {activeTab === "consolidated_apps" && user.role === "bac_admin" && (
             <div className="grid-2">
               <div className="dashboard-card">

@@ -15,12 +15,14 @@ class PpmpExcelParser
     public static function ensureItPpmpsDirs(): array
     {
         $root = self::getItPpmpsDir();
+        // Combined uploads go under IT_ppmps/{office_code}/.
+        // Legacy CSE/nonCSE paths are returned for backward reads only (not created).
         $cse = $root . DIRECTORY_SEPARATOR . 'CSE';
         $noncse = $root . DIRECTORY_SEPARATOR . 'nonCSE';
 
-        if (!file_exists($root)) mkdir($root, 0777, true);
-        if (!file_exists($cse)) mkdir($cse, 0777, true);
-        if (!file_exists($noncse)) mkdir($noncse, 0777, true);
+        if (!file_exists($root)) {
+            mkdir($root, 0777, true);
+        }
 
         return [
             'root' => $root,

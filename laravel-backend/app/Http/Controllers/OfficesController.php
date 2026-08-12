@@ -270,17 +270,16 @@ class OfficesController extends Controller
             fn ($row) => (bool) ($row['is_cse'] ?? false)
         );
 
+        // Combined CSE + NONCSE PPMP: one folder per office (no CSE/nonCSE split).
         $dirs = PpmpExcelParser::ensureItPpmpsDirs();
-        $kindFolder = $isCseFlag ? $dirs['cse'] : $dirs['noncse'];
-        $kindName = $isCseFlag ? 'CSE' : 'nonCSE';
-        $officeFolder = $kindFolder . DIRECTORY_SEPARATOR . $office->code;
+        $officeFolder = $dirs['root'] . DIRECTORY_SEPARATOR . $office->code;
         if (!file_exists($officeFolder)) {
             mkdir($officeFolder, 0777, true);
         }
 
         $destName = preg_replace('/[^\w\-]+/', '_', $expectedStem) . '.' . $ext;
         $destPath = $officeFolder . DIRECTORY_SEPARATOR . $destName;
-        $relativePath = $kindName . '/' . $office->code . '/' . $destName;
+        $relativePath = $office->code . '/' . $destName;
 
         $excelMime = $file->getClientMimeType()
             ?: ($ext === 'xls'
