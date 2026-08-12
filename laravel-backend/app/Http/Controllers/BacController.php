@@ -13,6 +13,7 @@ use App\Models\PpmpItem;
 use App\Models\IndicativePpmp;
 use App\Services\PpmpExcelParser;
 use App\Services\AppExcelExporter;
+use App\Services\GoogleDriveUploader;
 use Exception;
 
 class BacController extends Controller
@@ -464,5 +465,54 @@ class BacController extends Controller
             return response()->json(['detail' => 'APP not found'], 404);
         }
         return response()->json(['app' => $app, 'rows' => $app->rows]);
+    }
+
+    public function exportApp(int $fiscal_year, string $kind)
+    {
+        $kind = strtolower(trim($kind));
+        if (!in_array($kind, ['cse', 'noncse'], true)) {
+            return response()->json([
+                'detail' => "Invalid kind '{$kind}'. Use cse or noncse.",
+            ], 400);
+        }
+
+        try {
+            $content = $kind === 'cse'
+                ? AppExcelExporter::exportCseApp($fiscal_year)
+                : AppExcelExporter::exportNonCseApp($fiscal_year);
+        } catch (Exception $e) {
+            return response()->json(['detail' => $e->getMessage()], 400);
+        }
+
+        $label = $kind === 'cse' ? 'CSE' : 'nonCSE';
+        $filename = "APP-{$label}-FY{$fiscal_year}.xlsx";
+
+        return response($content)
+            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
+    }
+
+    public function uploadToDrive(Request $request)
+    {
+        $fy = (int) $request->query('fiscal_year', date('Y') + 1);
+        if ($fy < 2000 || $fy > 2100) {
+            return response()->json(['detail' => 'Invalid fiscal_year'], 400);
+        }
+
+        try {
+            $uploader = new GoogleDriveUploader();
+            $result = $uploader->uploadFiscalYearArtifacts($fy);
+        } catch (Exception $e) {
+            return response()->json([
+                'ok' => false,
+                'detail' => $e->getMessage(),
+                'fiscal_year' => $fy,
+                'uploaded' => [],
+                'errors' => [['type' => 'setup', 'error' => $e->getMessage()]],
+            ], 500);
+        }
+
+        $status = $result['ok'] ? 200 : (count($result['uploaded']) > 0 ? 207 : 400);
+        return response()->json($result, $status);
     }
 }

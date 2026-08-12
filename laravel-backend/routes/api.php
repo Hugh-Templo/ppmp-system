@@ -78,7 +78,9 @@ Route::prefix('bac')->middleware(['jwt', 'role:bac_admin'])->group(function () {
     Route::post('/indicative/ppmps/{id}/reject', [BacController::class, 'rejectIndicativePpmp']);
     Route::get('/apps', [BacController::class, 'listApps']);
     Route::get('/apps/by-year/{fiscal_year}', [BacController::class, 'getAppByYear']);
+    Route::get('/apps/{fiscal_year}/export/{kind}', [BacController::class, 'exportApp']);
     Route::get('/apps/{id}', [BacController::class, 'getApp']);
+    Route::post('/drive/upload', [BacController::class, 'uploadToDrive']);
 });
 
 // DBM routes

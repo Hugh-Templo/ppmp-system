@@ -130,6 +130,7 @@ function Dashboard({ token, user, onLogout }) {
   const [approvedAppPpmps, setApprovedAppPpmps] = useState([]);
   const [kindAppPayload, setKindAppPayload] = useState({ app: null, rows: [] });
   const [appWorkspaceLoading, setAppWorkspaceLoading] = useState(false);
+  const [appDriveUploading, setAppDriveUploading] = useState(false);
   const [appFormPage, setAppFormPage] = useState(1);
   const [appNgpaPreviewOpen, setAppNgpaPreviewOpen] = useState(false);
   const APP_FORM_PAGE_SIZE = 10;
@@ -1487,6 +1488,39 @@ function Dashboard({ token, user, onLogout }) {
     }
   };
 
+  const handleUploadToDrive = async () => {
+    setAppDriveUploading(true);
+    try {
+      const res = await apiFetch(
+        `/api/bac/drive/upload?fiscal_year=${consolidationYear}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      const uploadedCount = Array.isArray(data.uploaded) ? data.uploaded.length : 0;
+      const errorCount = Array.isArray(data.errors) ? data.errors.length : 0;
+      if (res.ok || (res.status === 207 && uploadedCount > 0)) {
+        const msg =
+          errorCount > 0
+            ? `Uploaded ${uploadedCount} file(s) to APP SYSTEM FILES / ${consolidationYear}; ${errorCount} issue(s).`
+            : `Uploaded ${uploadedCount} file(s) to Drive APP SYSTEM FILES / ${consolidationYear}.`;
+        showNotification(msg, errorCount > 0 ? "danger" : undefined);
+      } else {
+        const firstErr =
+          data.detail ||
+          data.errors?.[0]?.error ||
+          "Upload to Google Drive failed";
+        showNotification(firstErr, "danger");
+      }
+    } catch (err) {
+      showNotification("Upload to Google Drive failed", "danger");
+    } finally {
+      setAppDriveUploading(false);
+    }
+  };
+
   const handleExportApp = async (fiscalYear, kind) => {
     const labels = { cse: "CSE APP", noncse: "Non-CSE APP", combined: "Combined APP" };
     try {
@@ -2196,21 +2230,36 @@ function Dashboard({ token, user, onLogout }) {
             />
           </div>
           <div className="app-workspace-toolbar__actions">
-            <button type="button" className="btn" onClick={handleConsolidate} disabled={appWorkspaceLoading}>
+            <button type="button" className="btn" onClick={handleConsolidate} disabled={appWorkspaceLoading || appDriveUploading}>
               <i className="fas fa-layer-group" aria-hidden="true"></i>
               {isStaleApp ? "Clear / Rebuild APP" : "Run Consolidation"}
             </button>
             <button
               type="button"
               className="btn btn-secondary"
+              onClick={handleUploadToDrive}
+              disabled={appWorkspaceLoading || appDriveUploading}
+              title={`Upload verified PPMPs and APP Excels to Drive APP SYSTEM FILES / ${consolidationYear}`}
+            >
+              <i className="fas fa-cloud-upload-alt" aria-hidden="true"></i>
+              {appDriveUploading ? "Uploading…" : "Upload to Drive"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
               onClick={() => handleExportApp(consolidationYear, kind)}
-              disabled={!kindAppPayload.app || rows.length === 0}
+              disabled={!kindAppPayload.app || rows.length === 0 || appDriveUploading}
             >
               <i className="fas fa-file-excel" aria-hidden="true"></i>
               Download {label} Excel
             </button>
           </div>
         </div>
+
+        <p className="page-subtitle" style={{ marginBottom: "0.75rem" }}>
+          Upload to Drive sends verified PPMPs and CSE/nonCSE APP Excels to{" "}
+          <code>APP SYSTEM FILES / {consolidationYear} / …</code>.
+        </p>
 
         {isStaleApp && (
           <div className="alert alert-danger app-workspace-stale" role="status">
@@ -2916,6 +2965,16 @@ function Dashboard({ token, user, onLogout }) {
                       </span>
                       <button type="button" className="btn" onClick={() => handleConsolidate()} disabled={!allOfficesVerified}>
                         Run Consolidation
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={handleUploadToDrive}
+                        disabled={appDriveUploading}
+                        title={`Upload verified PPMPs and APP Excels to Drive APP SYSTEM FILES / ${consolidationYear}`}
+                      >
+                        <i className="fas fa-cloud-upload-alt" aria-hidden="true"></i>
+                        {appDriveUploading ? "Uploading…" : "Upload to Drive"}
                       </button>
                     </div>
                   </div>
