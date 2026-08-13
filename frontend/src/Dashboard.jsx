@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { apiFetch } from "./api";
 
+const USERS_PAGE_SIZE = 10;
+
 const PPMP_PROJECT_TYPES = ["Goods", "Infrastructure", "Consulting Services"];
 
 const PPMP_PROCUREMENT_MODES = [
@@ -164,6 +166,7 @@ function Dashboard({ token, user, onLogout }) {
   const [editingUserId, setEditingUserId] = useState(null);
   const [newUserActive, setNewUserActive] = useState(true);
   const [registeredUsers, setRegisteredUsers] = useState([]);
+  const [usersPage, setUsersPage] = useState(1);
   const [revealedUserPasswords, setRevealedUserPasswords] = useState({});
   const [passwordRevealModal, setPasswordRevealModal] = useState({
     open: false,
@@ -1571,6 +1574,14 @@ function Dashboard({ token, user, onLogout }) {
     return labels[role] || role.replace(/_/g, " ");
   };
 
+  const usersTotalPages = Math.max(1, Math.ceil(registeredUsers.length / USERS_PAGE_SIZE));
+  const safeUsersPage = Math.min(Math.max(1, usersPage), usersTotalPages);
+  const usersPageStart = (safeUsersPage - 1) * USERS_PAGE_SIZE;
+  const pagedRegisteredUsers = registeredUsers.slice(
+    usersPageStart,
+    usersPageStart + USERS_PAGE_SIZE
+  );
+
   const pageTitles = {
     dashboard: "Dashboard",
     all_ppmps: "All PPMPs",
@@ -1698,7 +1709,7 @@ function Dashboard({ token, user, onLogout }) {
                   REMARKS
                 </th>
                 <th rowSpan={2} className="ngpa-ppmp-table__group ngpa-ppmp-table__group--vertical">
-                  PPMP Type (CSE / NONCSE)
+                  PPMP Type (CSE / NON-CSE)
                 </th>
               </tr>
               <tr>
@@ -1739,7 +1750,7 @@ function Dashboard({ token, user, onLogout }) {
                   <td>{item?.supporting_docs || ""}</td>
                   <td>{item?.remarks || ""}</td>
                   <td className="ngpa-ppmp-table__center">
-                    {item ? (item.is_cse ? "CSE" : "NONCSE") : ""}
+                    {item ? (item.is_cse ? "CSE" : "NON-CSE") : ""}
                   </td>
                 </tr>
               ))}
@@ -2782,14 +2793,14 @@ function Dashboard({ token, user, onLogout }) {
                           <>
                             <strong>Revision required:</strong> Budget returned your PPMP.
                             Upload a revised NGPA Excel named <strong>{expectedUploadName}</strong>{" "}
-                            (Column 13 must be CSE or NONCSE per item) to replace the Returned plan,
+                            (column M must be CSE or NON-CSE per item) to replace the Returned plan,
                             then submit again for review.
                           </>
                         ) : (
                           <>
                             <strong>Note:</strong> Filename must be{" "}
                             <strong>{expectedUploadName}</strong>. Include{" "}
-                            <strong>Column 13</strong> with CSE or NONCSE for each item.
+                            <strong>column M</strong> with CSE or NON-CSE for each item.
                             Uploads create or replace a <strong>Draft</strong> for the same fiscal year.
                             Use <strong>Preview</strong> anytime for a view-only form (no editing).
                           </>
@@ -3623,7 +3634,7 @@ function Dashboard({ token, user, onLogout }) {
                           <td colSpan="8">No users registered yet.</td>
                         </tr>
                       ) : (
-                        registeredUsers.map((u) => (
+                        pagedRegisteredUsers.map((u) => (
                           <tr key={u.id}>
                             <td>{u.username}</td>
                             <td>
@@ -3719,6 +3730,37 @@ function Dashboard({ token, user, onLogout }) {
                     </tbody>
                   </table>
                 </div>
+                {registeredUsers.length > 0 && (
+                  <div className="table-pagination" role="navigation" aria-label="Registered users pages">
+                    <button
+                      type="button"
+                      className="table-pagination__arrow"
+                      disabled={safeUsersPage <= 1}
+                      onClick={() => setUsersPage((p) => Math.max(1, p - 1))}
+                      aria-label="Previous page"
+                      title="Previous page"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <polyline points="15 18 9 12 15 6" />
+                      </svg>
+                    </button>
+                    <span className="table-pagination__status">
+                      {usersPageStart + 1}–{usersPageStart + pagedRegisteredUsers.length} of {registeredUsers.length}
+                    </span>
+                    <button
+                      type="button"
+                      className="table-pagination__arrow"
+                      disabled={safeUsersPage >= usersTotalPages}
+                      onClick={() => setUsersPage((p) => Math.min(usersTotalPages, p + 1))}
+                      aria-label="Next page"
+                      title="Next page"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}

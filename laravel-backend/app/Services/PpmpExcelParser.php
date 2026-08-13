@@ -48,7 +48,7 @@ class PpmpExcelParser
     }
 
     /**
-     * Map Column 13 text to is_cse boolean, or null if invalid/blank.
+     * Map column M (CSE / NON-CSE) text to is_cse boolean, or null if invalid/blank.
      */
     public static function parsePpmpTypeCell($val): ?bool
     {
@@ -80,26 +80,49 @@ class PpmpExcelParser
             'used_ngpa' => false,
         ];
 
+        $sheetRows = [];
+        $hasNgpa = false;
+
         foreach ($spreadsheet->getAllSheets() as $sheet) {
             $rows = $sheet->toArray(null, true, true, false);
-
-            if (empty($rows)) continue;
+            if (empty($rows)) {
+                continue;
+            }
 
             $sheetMeta = self::extractMeta($rows);
-            if ($sheetMeta['fiscal_year'] && !$meta['fiscal_year']) $meta['fiscal_year'] = $sheetMeta['fiscal_year'];
-            if ($sheetMeta['end_user'] && !$meta['end_user']) $meta['end_user'] = $sheetMeta['end_user'];
-            if ($sheetMeta['title'] && !$meta['title']) $meta['title'] = $sheetMeta['title'];
+            if ($sheetMeta['fiscal_year'] && !$meta['fiscal_year']) {
+                $meta['fiscal_year'] = $sheetMeta['fiscal_year'];
+            }
+            if ($sheetMeta['end_user'] && !$meta['end_user']) {
+                $meta['end_user'] = $sheetMeta['end_user'];
+            }
+            if ($sheetMeta['title'] && !$meta['title']) {
+                $meta['title'] = $sheetMeta['title'];
+            }
 
-            if (self::findNgpaHeaderIndex($rows) !== null) {
+            $isNgpa = self::findNgpaHeaderIndex($rows) !== null;
+            if ($isNgpa) {
+                $hasNgpa = true;
+            }
+            $sheetRows[] = ['rows' => $rows, 'is_ngpa' => $isNgpa];
+        }
+
+        // Prefer NGPA sheets; skip legacy AIP sheets when an NGPA form is present
+        // (office workbooks often include old PPMP/APP tabs alongside the NGPA form).
+        foreach ($sheetRows as $entry) {
+            if ($hasNgpa) {
+                if (!$entry['is_ngpa']) {
+                    continue;
+                }
                 $meta['used_ngpa'] = true;
-                $ngpaItems = self::parseNgpaItems($rows, $isCse, $officeCode);
+                $ngpaItems = self::parseNgpaItems($entry['rows'], $isCse, $officeCode);
                 if (!empty($ngpaItems)) {
                     $allItems = array_merge($allItems, $ngpaItems);
                 }
                 continue;
             }
 
-            $legacyItems = self::parseLegacyItems($rows, $isCse, $officeCode);
+            $legacyItems = self::parseLegacyItems($entry['rows'], $isCse, $officeCode);
             if (!empty($legacyItems)) {
                 $allItems = array_merge($allItems, $legacyItems);
             }
@@ -171,19 +194,32 @@ class PpmpExcelParser
         return null;
     }
 
+    private static function isNgpaFooterRow(string $description, string $joined): bool
+    {
+        if (str_contains($joined, 'submitted by') || str_contains($joined, 'approved by')) {
+            return true;
+        }
+
+        $descLower = strtolower($description);
+        if (str_contains($descLower, 'charges') && str_contains($descLower, 'amount')) {
+            return true;
+        }
+        // Numbered expense summary lines after items, e.g. "1) FUEL, OIL AND LUBRICANT..."
+        if (preg_match('/^\d+\)\s+/', $description)) {
+            return true;
+        }
+
+        return false;
+    }
+
     private static function parseNgpaItems(array $rows, bool $isCse, ?string $officeCode): array
     {
         $headerIdx = self::findNgpaHeaderIndex($rows);
-        if ($headerIdx === null) return [];
-
-        $headerRow = $rows[$headerIdx] ?? [];
-        $col13Header = strtolower(self::cellStr($headerRow[12] ?? ''));
-        if ($col13Header !== 'column 13') {
-            throw new Exception(
-                'PPMP Excel must include Column 13 (CSE / NONCSE). Update your template and set CSE or NONCSE for each item row.'
-            );
+        if ($headerIdx === null) {
+            return [];
         }
 
+        // Column M holds CSE / NON-CSE whether or not the header says "Column 13".
         $items = [];
         $dataRows = array_slice($rows, $headerIdx + 1);
         $rowNumber = $headerIdx + 2; // 1-based spreadsheet row for messages
@@ -199,11 +235,12 @@ class PpmpExcelParser
                 $rowNumber++;
                 continue;
             }
-            if (str_contains($joined, 'submitted by') || str_contains($joined, 'approved by')) {
+
+            $description = self::cellStr($row[0] ?? '');
+            if (self::isNgpaFooterRow($description, $joined)) {
                 break;
             }
 
-            $description = self::cellStr($row[0] ?? '');
             if (empty($description) || str_starts_with(strtolower($description), 'column ')) {
                 $rowNumber++;
                 continue;
@@ -213,25 +250,33 @@ class PpmpExcelParser
                 continue;
             }
 
+            $projectTypeRaw = self::cellStr($row[1] ?? '');
+            $quantitySize = self::cellStr($row[2] ?? '');
+            $budget = self::cellFloat($row[9] ?? 0);
             $itemIsCse = self::parsePpmpTypeCell($row[12] ?? '');
+
             if ($itemIsCse === null) {
                 $raw = self::cellStr($row[12] ?? '');
+                $looksLikeItem = $projectTypeRaw !== '' || $quantitySize !== '' || $budget > 0;
+                if (!$looksLikeItem) {
+                    // Blank/guide/summary rows without column M — skip, do not fail the upload.
+                    $rowNumber++;
+                    continue;
+                }
                 throw new Exception(
-                    'Row ' . $rowNumber . ': Column 13 must be CSE or NONCSE'
+                    'Row ' . $rowNumber . ': Column M must be CSE or NON-CSE'
                     . ($raw !== '' ? " (found \"{$raw}\")" : ' (missing)')
                     . '.'
                 );
             }
 
-            $projectType = self::cellStr($row[1] ?? '') ?: 'Goods';
-            $quantitySize = self::cellStr($row[2] ?? '');
+            $projectType = $projectTypeRaw ?: 'Goods';
             $procurementMode = self::cellStr($row[3] ?? '') ?: 'Competitive Bidding';
             $preProc = self::yesNoBool($row[4] ?? '');
             $procStart = self::cellStr($row[5] ?? '');
             $procEnd = self::cellStr($row[6] ?? '');
             $delivery = self::cellStr($row[7] ?? '');
             $fundSource = self::cellStr($row[8] ?? '');
-            $budget = self::cellFloat($row[9] ?? 0);
             $supporting = self::cellStr($row[10] ?? '');
             $remarks = self::cellStr($row[11] ?? '');
 

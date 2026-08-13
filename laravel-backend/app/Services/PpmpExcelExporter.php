@@ -159,7 +159,7 @@ class PpmpExcelExporter
 
                 $ws->setCellValueByColumnAndRow(11, $row, $item->supporting_docs ?? '');
                 $ws->setCellValueByColumnAndRow(12, $row, $item->remarks ?? '');
-                $ws->setCellValueByColumnAndRow(13, $row, !empty($item->is_cse) ? 'CSE' : 'NONCSE');
+                $ws->setCellValueByColumnAndRow(13, $row, !empty($item->is_cse) ? 'CSE' : 'NON-CSE');
             } else {
                 for ($c = 1; $c <= 13; $c++) {
                     $ws->setCellValueByColumnAndRow($c, $row, null);
