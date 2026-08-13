@@ -29,6 +29,8 @@ Route::middleware('jwt')->group(function () {
         Route::post('/auth/register', [AuthController::class, 'register']);
         Route::get('/auth/users', [AuthController::class, 'listUsers']);
         Route::put('/auth/users/{id}', [AuthController::class, 'updateUser']);
+        Route::post('/auth/users/{id}/reveal-password', [AuthController::class, 'revealPassword'])
+            ->middleware('throttle:login');
         Route::delete('/auth/users/{id}', [AuthController::class, 'deleteUser']);
     });
 });

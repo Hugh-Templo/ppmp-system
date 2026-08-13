@@ -1689,7 +1689,6 @@ function Dashboard({ token, user, onLogout }) {
               <col style={{ minWidth: 140 }} />
               <col style={{ minWidth: 170 }} />
               <col style={{ minWidth: 200 }} />
-              <col style={{ minWidth: 120 }} />
             </colgroup>
             <thead>
               <tr>
@@ -1708,9 +1707,6 @@ function Dashboard({ token, user, onLogout }) {
                 <th rowSpan={2} className="ngpa-ppmp-table__group ngpa-ppmp-table__group--vertical">
                   REMARKS
                 </th>
-                <th rowSpan={2} className="ngpa-ppmp-table__group ngpa-ppmp-table__group--vertical">
-                  PPMP Type (CSE / NON-CSE)
-                </th>
               </tr>
               <tr>
                 <th>Title / Category of Items</th>
@@ -1725,7 +1721,7 @@ function Dashboard({ token, user, onLogout }) {
                 <th>Estimated Budget / Authorized Budgetary Allocation (PhP)</th>
               </tr>
               <tr className="ngpa-ppmp-table__col-numbers">
-                {Array.from({ length: 13 }, (_, i) => (
+                {Array.from({ length: 12 }, (_, i) => (
                   <th key={i}>Column {i + 1}</th>
                 ))}
               </tr>
@@ -1749,9 +1745,6 @@ function Dashboard({ token, user, onLogout }) {
                   </td>
                   <td>{item?.supporting_docs || ""}</td>
                   <td>{item?.remarks || ""}</td>
-                  <td className="ngpa-ppmp-table__center">
-                    {item ? (item.is_cse ? "CSE" : "NON-CSE") : ""}
-                  </td>
                 </tr>
               ))}
               <tr className="ngpa-ppmp-table__total">
@@ -1760,7 +1753,7 @@ function Dashboard({ token, user, onLogout }) {
                 <td className="ngpa-ppmp-table__amount ngpa-ppmp-table__total-value">
                   {ngpaMoney(totalBudget)}
                 </td>
-                <td colSpan={3}></td>
+                <td colSpan={2}></td>
               </tr>
             </tbody>
           </table>

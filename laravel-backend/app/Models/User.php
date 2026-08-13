@@ -16,6 +16,7 @@ class User extends Authenticatable
         'username',
         'email',
         'hashed_password',
+        'password_encrypted',
         'is_active',
         'role',
         'office_id',
@@ -23,6 +24,8 @@ class User extends Authenticatable
 
     protected $hidden = [
         'hashed_password',
+        'password_encrypted',
+        'remember_token',
     ];
 
     protected function casts(): array

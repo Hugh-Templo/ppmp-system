@@ -3,11 +3,13 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
 use App\Models\Office;
 use App\Services\JwtService;
 use App\Services\OfficeResolver;
+use Throwable;
 
 class AuthController extends Controller
 {
@@ -94,6 +96,7 @@ class AuthController extends Controller
             'username' => $username,
             'email' => $email,
             'hashed_password' => Hash::make($password),
+            'password_encrypted' => $password ? Crypt::encryptString((string) $password) : null,
             'role' => $role,
             'office_id' => $role === 'end_user' ? $officeId : null,
             'is_active' => true,
@@ -173,7 +176,9 @@ class AuthController extends Controller
         }
 
         if ($request->input('password')) {
-            $target->hashed_password = Hash::make($request->input('password'));
+            $plain = (string) $request->input('password');
+            $target->hashed_password = Hash::make($plain);
+            $target->password_encrypted = Crypt::encryptString($plain);
         }
 
         if ($request->has('is_active')) {
@@ -197,6 +202,60 @@ class AuthController extends Controller
                 'is_active' => (bool)$target->is_active,
                 'created_at' => $target->created_at,
             ],
+        ]);
+    }
+
+    public function revealPassword(Request $request, int $id)
+    {
+        $admin = $request->attributes->get('auth_user') ?: auth()->user();
+        if (!$admin || $admin->role !== 'bac_admin') {
+            return response()->json(['detail' => 'Access denied'], 403);
+        }
+
+        $adminPassword = (string) $request->input('password', '');
+        if ($adminPassword === '') {
+            return response()->json(['detail' => 'Enter your administrator password'], 400);
+        }
+
+        if (!Hash::check($adminPassword, $admin->hashed_password)) {
+            return response()->json(['detail' => 'Incorrect administrator password'], 401);
+        }
+
+        $target = User::find($id);
+        if (!$target) {
+            return response()->json(['detail' => 'User not found'], 404);
+        }
+
+        if (!in_array($target->role, ['end_user', 'budget_office'], true)) {
+            return response()->json([
+                'detail' => 'Password reveal is only available for end-user and budget office accounts',
+            ], 400);
+        }
+
+        if (empty($target->password_encrypted)) {
+            return response()->json([
+                'detail' => 'No recoverable password is stored for this account. Edit the user and set a new password, then you can reveal it.',
+            ], 404);
+        }
+
+        try {
+            $plain = Crypt::decryptString($target->password_encrypted);
+        } catch (Throwable $e) {
+            return response()->json([
+                'detail' => 'Stored password could not be decrypted. Edit the user and set a new password.',
+            ], 500);
+        }
+
+        if ($plain === '') {
+            return response()->json([
+                'detail' => 'No recoverable password is stored for this account. Edit the user and set a new password, then you can reveal it.',
+            ], 404);
+        }
+
+        return response()->json([
+            'password' => $plain,
+            'user_id' => $target->id,
+            'username' => $target->username,
         ]);
     }
 
