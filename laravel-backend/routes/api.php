@@ -59,6 +59,7 @@ Route::prefix('offices')->group(function () {
 Route::prefix('budget')->middleware(['jwt', 'role:budget_office,bac_admin'])->group(function () {
     Route::get('/pending', [BudgetController::class, 'listPendingPpmps']);
     Route::get('/ppmps/posting', [BudgetController::class, 'listPostingPpmps']);
+    Route::get('/office-tracker', [BudgetController::class, 'officeTracker']);
     Route::get('/indicative/pending', [BudgetController::class, 'listPendingIndicativePpmps']);
     Route::get('/indicative', [BudgetController::class, 'listIndicativePpmps']);
     Route::get('/final', [BudgetController::class, 'listFinalPpmps']);

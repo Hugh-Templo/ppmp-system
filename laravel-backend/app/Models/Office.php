@@ -34,6 +34,45 @@ class Office extends Model
         'is_active' => 'boolean',
     ];
 
+    public function setNameAttribute($value): void
+    {
+        $this->attributes['name'] = mb_strtoupper(trim((string) $value), 'UTF-8');
+    }
+
+    public function setCodeAttribute($value): void
+    {
+        $this->attributes['code'] = mb_strtoupper(trim((string) $value), 'UTF-8');
+    }
+
+    private function upperOrNull($value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $text = mb_strtoupper(trim((string) $value), 'UTF-8');
+        return $text === '' ? null : $text;
+    }
+
+    public function setPreparedByAttribute($value): void
+    {
+        $this->attributes['prepared_by'] = $this->upperOrNull($value);
+    }
+
+    public function setPreparedByDesignationAttribute($value): void
+    {
+        $this->attributes['prepared_by_designation'] = $this->upperOrNull($value);
+    }
+
+    public function setSubmittedByAttribute($value): void
+    {
+        $this->attributes['submitted_by'] = $this->upperOrNull($value);
+    }
+
+    public function setSubmittedByDesignationAttribute($value): void
+    {
+        $this->attributes['submitted_by_designation'] = $this->upperOrNull($value);
+    }
+
     public function users()
     {
         return $this->hasMany(User::class, 'office_id');

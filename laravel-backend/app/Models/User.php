@@ -40,6 +40,11 @@ class User extends Authenticatable
         return 'hashed_password';
     }
 
+    public function setUsernameAttribute($value): void
+    {
+        $this->attributes['username'] = mb_strtoupper(trim((string) $value), 'UTF-8');
+    }
+
     public function office()
     {
         return $this->belongsTo(Office::class, 'office_id');

@@ -6,7 +6,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Models\Office;
-use App\Models\User;
 use App\Models\Ppmp;
 use App\Models\PpmpItem;
 use App\Models\CseCatalogItem;
@@ -70,7 +69,7 @@ class OfficesController extends Controller
 
     public function getSignatory(Request $request)
     {
-        $user = $request->attributes->get('auth_user') ?: auth()->user();
+        $user = $this->authUser($request);
         $officeId = $request->query('office_id') ?: $user->office_id;
 
         if (!$officeId) {
@@ -103,7 +102,7 @@ class OfficesController extends Controller
 
     public function updateSignatory(Request $request)
     {
-        $user = $request->attributes->get('auth_user') ?: auth()->user();
+        $user = $this->authUser($request);
         $officeId = $request->input('office_id') ?: $user->office_id;
 
         if (!$officeId) {
@@ -156,7 +155,7 @@ class OfficesController extends Controller
 
     public function getOfficeBudget(Request $request, int $office_id)
     {
-        $user = $request->attributes->get('auth_user') ?: auth()->user();
+        $user = $this->authUser($request);
         if ($user->role === 'end_user' && (int)$user->office_id !== $office_id) {
             return response()->json(['detail' => 'Access denied to this office\'s budget'], 403);
         }
@@ -171,7 +170,7 @@ class OfficesController extends Controller
 
     public function updateOfficeBudget(Request $request, int $office_id)
     {
-        $user = $request->attributes->get('auth_user') ?: auth()->user();
+        $user = $this->authUser($request);
         if ($user->role === 'end_user' && (int)$user->office_id !== $office_id) {
             return response()->json(['detail' => 'Access denied to update this office\'s budget'], 403);
         }
@@ -192,7 +191,7 @@ class OfficesController extends Controller
 
     public function listPpmps(Request $request)
     {
-        $user = $request->attributes->get('auth_user') ?: auth()->user();
+        $user = $this->authUser($request);
         $office = OfficeResolver::ensureUserOffice($user);
         if (!$office) {
             return response()->json(['detail' => 'User is not assigned to any office'], 400);
@@ -213,7 +212,7 @@ class OfficesController extends Controller
 
     public function uploadPpmp(Request $request)
     {
-        $user = $request->attributes->get('auth_user') ?: auth()->user();
+        $user = $this->authUser($request);
         $office = OfficeResolver::ensureUserOffice($user);
         if (!$office || !$office->is_active) {
             return response()->json(['detail' => 'User is not assigned to any office'], 400);
@@ -381,6 +380,10 @@ class OfficesController extends Controller
             ], 500);
         }
 
+        if (!$newPpmp) {
+            return response()->json(['detail' => 'Failed to save PPMP'], 500);
+        }
+
         // Store LONGBLOB AFTER commit, on a fresh connection.
         $storedInDb = $this->storeExcelBlob($newPpmp->id, $excelBytes);
 
@@ -502,7 +505,7 @@ class OfficesController extends Controller
             return response()->json(['detail' => 'PPMP not found'], 404);
         }
 
-        $user = $request->attributes->get('auth_user') ?: auth()->user();
+        $user = $this->authUser($request);
         if ($user->role === 'end_user' && (int)$ppmp->office_id !== (int)$user->office_id) {
             return response()->json(['detail' => 'Access denied to this office\'s PPMP'], 403);
         }
@@ -535,7 +538,7 @@ class OfficesController extends Controller
             return response()->json(['detail' => 'PPMP not found'], 404);
         }
 
-        $user = $request->attributes->get('auth_user') ?: auth()->user();
+        $user = $this->authUser($request);
         if ($user->role === 'end_user' && (int)$ppmp->office_id !== (int)$user->office_id) {
             return response()->json(['detail' => 'Access denied to this office\'s PPMP'], 403);
         }
@@ -583,7 +586,7 @@ class OfficesController extends Controller
 
     public function submitPpmp(Request $request, int $id)
     {
-        $user = $request->attributes->get('auth_user') ?: auth()->user();
+        $user = $this->authUser($request);
         $ppmp = Ppmp::find($id);
 
         if (!$ppmp) {
@@ -609,7 +612,7 @@ class OfficesController extends Controller
 
     public function deletePpmp(Request $request, int $id)
     {
-        $user = $request->attributes->get('auth_user') ?: auth()->user();
+        $user = $this->authUser($request);
         $ppmp = Ppmp::find($id);
 
         if (!$ppmp) {

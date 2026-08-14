@@ -7,6 +7,9 @@ use Exception;
 
 class PpmpExcelParser
 {
+    /** NGPA Indicative PPMP tab in the standard office workbook (e.g. OCHO (IND PPMP).xls). */
+    public const PPMP_IMPORT_SHEET = 'Sheet7';
+
     public static function getItPpmpsDir(): string
     {
         return base_path('IT_ppmps');
@@ -72,59 +75,43 @@ class PpmpExcelParser
         }
 
         $spreadsheet = IOFactory::load($filePath);
-        $allItems = [];
+
+        $sheet = $spreadsheet->getSheetByName(self::PPMP_IMPORT_SHEET);
+        if ($sheet === null) {
+            foreach ($spreadsheet->getAllSheets() as $candidate) {
+                if (strcasecmp($candidate->getTitle(), self::PPMP_IMPORT_SHEET) === 0) {
+                    $sheet = $candidate;
+                    break;
+                }
+            }
+        }
+        if ($sheet === null) {
+            throw new Exception(
+                'PPMP worksheet "' . self::PPMP_IMPORT_SHEET . '" was not found. '
+                . 'Upload the standard office PPMP file and keep Sheet7.'
+            );
+        }
+
+        $rows = $sheet->toArray(null, true, true, false);
         $meta = [
             'fiscal_year' => null,
             'end_user' => null,
             'title' => null,
             'used_ngpa' => false,
         ];
+        $allItems = [];
 
-        $sheetRows = [];
-        $hasNgpa = false;
-
-        foreach ($spreadsheet->getAllSheets() as $sheet) {
-            $rows = $sheet->toArray(null, true, true, false);
-            if (empty($rows)) {
-                continue;
-            }
-
+        if (!empty($rows)) {
             $sheetMeta = self::extractMeta($rows);
-            if ($sheetMeta['fiscal_year'] && !$meta['fiscal_year']) {
-                $meta['fiscal_year'] = $sheetMeta['fiscal_year'];
-            }
-            if ($sheetMeta['end_user'] && !$meta['end_user']) {
-                $meta['end_user'] = $sheetMeta['end_user'];
-            }
-            if ($sheetMeta['title'] && !$meta['title']) {
-                $meta['title'] = $sheetMeta['title'];
-            }
+            $meta['fiscal_year'] = $sheetMeta['fiscal_year'];
+            $meta['end_user'] = $sheetMeta['end_user'];
+            $meta['title'] = $sheetMeta['title'];
 
-            $isNgpa = self::findNgpaHeaderIndex($rows) !== null;
-            if ($isNgpa) {
-                $hasNgpa = true;
-            }
-            $sheetRows[] = ['rows' => $rows, 'is_ngpa' => $isNgpa];
-        }
-
-        // Prefer NGPA sheets; skip legacy AIP sheets when an NGPA form is present
-        // (office workbooks often include old PPMP/APP tabs alongside the NGPA form).
-        foreach ($sheetRows as $entry) {
-            if ($hasNgpa) {
-                if (!$entry['is_ngpa']) {
-                    continue;
-                }
+            if (self::findNgpaHeaderIndex($rows) !== null) {
                 $meta['used_ngpa'] = true;
-                $ngpaItems = self::parseNgpaItems($entry['rows'], $isCse, $officeCode);
-                if (!empty($ngpaItems)) {
-                    $allItems = array_merge($allItems, $ngpaItems);
-                }
-                continue;
-            }
-
-            $legacyItems = self::parseLegacyItems($entry['rows'], $isCse, $officeCode);
-            if (!empty($legacyItems)) {
-                $allItems = array_merge($allItems, $legacyItems);
+                $allItems = self::parseNgpaItems($rows, $isCse, $officeCode);
+            } else {
+                $allItems = self::parseLegacyItems($rows, $isCse, $officeCode);
             }
         }
 

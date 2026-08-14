@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use App\Models\Office;
 use App\Models\User;
 use App\Models\App as AppModel;
@@ -54,12 +55,12 @@ class BacController extends Controller
     {
         $row = $this->getOrCreateAppSignatory();
 
-        $row->prepared_by = trim($request->input('prepared_by', '')) ?: null;
-        $row->prepared_by_designation = trim($request->input('prepared_by_designation', '')) ?: null;
-        $row->recommended_by = trim($request->input('recommended_by', '')) ?: null;
-        $row->recommended_by_designation = trim($request->input('recommended_by_designation', '')) ?: null;
-        $row->approved_by_name = trim($request->input('approved_by_name', '')) ?: null;
-        $row->approved_by_designation = trim($request->input('approved_by_designation', '')) ?: null;
+        $row->prepared_by = mb_strtoupper(trim((string) $request->input('prepared_by', '')), 'UTF-8') ?: null;
+        $row->prepared_by_designation = mb_strtoupper(trim((string) $request->input('prepared_by_designation', '')), 'UTF-8') ?: null;
+        $row->recommended_by = mb_strtoupper(trim((string) $request->input('recommended_by', '')), 'UTF-8') ?: null;
+        $row->recommended_by_designation = mb_strtoupper(trim((string) $request->input('recommended_by_designation', '')), 'UTF-8') ?: null;
+        $row->approved_by_name = mb_strtoupper(trim((string) $request->input('approved_by_name', '')), 'UTF-8') ?: null;
+        $row->approved_by_designation = mb_strtoupper(trim((string) $request->input('approved_by_designation', '')), 'UTF-8') ?: null;
         $row->save();
 
         return response()->json([
@@ -89,15 +90,15 @@ class BacController extends Controller
 
     public function createOffice(Request $request)
     {
-        $code = trim($request->input('code', ''));
-        $name = trim($request->input('name', ''));
+        $code = mb_strtoupper(trim($request->input('code', '')), 'UTF-8');
+        $name = mb_strtoupper(trim($request->input('name', '')), 'UTF-8');
         $budget = (float)$request->input('budget_allocation', 0);
 
         if (!$code || !$name) {
             return response()->json(['detail' => 'Office name and code are required'], 400);
         }
 
-        $existing = Office::where('code', $code)->first();
+        $existing = Office::whereRaw('UPPER(code) = ?', [$code])->first();
         if ($existing) {
             if ($existing->is_active) {
                 return response()->json(['detail' => 'Office code already exists'], 400);
@@ -109,12 +110,12 @@ class BacController extends Controller
             return response()->json($existing);
         }
 
-        $nameClash = Office::where('name', $name)->first();
+        $nameClash = Office::whereRaw('UPPER(name) = ?', [$name])->first();
         if ($nameClash) {
             if ($nameClash->is_active) {
                 return response()->json(['detail' => 'Office name already exists'], 400);
             }
-            $nameClash->name = "{$name} (archived-{$nameClash->id})";
+            $nameClash->name = "{$name} (ARCHIVED-{$nameClash->id})";
             $nameClash->save();
         }
 
@@ -140,16 +141,16 @@ class BacController extends Controller
         }
 
         if ($request->has('code') && $request->input('code') !== $office->code) {
-            $code = trim($request->input('code'));
-            if (Office::where('code', $code)->where('id', '!=', $id)->exists()) {
+            $code = mb_strtoupper(trim($request->input('code')), 'UTF-8');
+            if (Office::whereRaw('UPPER(code) = ?', [$code])->where('id', '!=', $id)->exists()) {
                 return response()->json(['detail' => 'Office code already exists'], 400);
             }
             $office->code = $code;
         }
 
         if ($request->has('name') && $request->input('name') !== $office->name) {
-            $name = trim($request->input('name'));
-            $clash = Office::where('name', $name)->where('id', '!=', $id)->first();
+            $name = mb_strtoupper(trim($request->input('name')), 'UTF-8');
+            $clash = Office::whereRaw('UPPER(name) = ?', [$name])->where('id', '!=', $id)->first();
             if ($clash && $clash->is_active) {
                 return response()->json(['detail' => 'Office name already exists'], 400);
             }
@@ -386,7 +387,7 @@ class BacController extends Controller
 
     public function approveIndicativePpmp(Request $request, int $id)
     {
-        $user = $request->attributes->get('auth_user') ?: auth()->user();
+        $user = $this->authUser($request);
         $ppmp = IndicativePpmp::find($id);
 
         if (!$ppmp) {
@@ -397,7 +398,7 @@ class BacController extends Controller
         }
 
         $ppmp->posting_status = 'Approved';
-        $ppmp->approved_at = now();
+        $ppmp->approved_at = Carbon::now();
         $ppmp->approved_by = $user->id;
         $ppmp->save();
 
@@ -411,7 +412,7 @@ class BacController extends Controller
 
     public function rejectIndicativePpmp(Request $request, int $id)
     {
-        $user = $request->attributes->get('auth_user') ?: auth()->user();
+        $user = $this->authUser($request);
         $ppmp = IndicativePpmp::find($id);
 
         if (!$ppmp) {
@@ -422,7 +423,7 @@ class BacController extends Controller
         }
 
         $ppmp->posting_status = 'Rejected';
-        $ppmp->rejected_at = now();
+        $ppmp->rejected_at = Carbon::now();
         $ppmp->rejected_by = $user->id;
         $ppmp->rejection_remarks = $request->input('remarks', '');
         $ppmp->save();

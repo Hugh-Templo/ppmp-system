@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use App\Models\User;
 use App\Models\Office;
 use App\Services\JwtService;
@@ -15,14 +16,21 @@ class AuthController extends Controller
 {
     public function login(Request $request)
     {
-        $username = $request->input('username');
+        $username = mb_strtoupper(trim((string) $request->input('username')), 'UTF-8');
         $password = $request->input('password');
 
         if (!$username || !$password) {
             return response()->json(['detail' => 'Incorrect username or password'], 401);
         }
 
-        $user = User::where('username', $username)->first();
+        try {
+            $user = User::whereRaw('UPPER(username) = ?', [$username])->first();
+        } catch (Throwable $e) {
+            Log::error('Login database error', ['error' => $e->getMessage()]);
+            return response()->json([
+                'detail' => 'Database is unavailable. Start MySQL in XAMPP and try again.',
+            ], 503);
+        }
 
         if (!$user || !Hash::check($password, $user->hashed_password)) {
             return response()->json(['detail' => 'Incorrect username or password'], 401);
@@ -62,7 +70,7 @@ class AuthController extends Controller
             return response()->json(['detail' => 'Access denied: Only BAC administrators can register users'], 403);
         }
 
-        $username = trim($request->input('username', ''));
+        $username = mb_strtoupper(trim($request->input('username', '')), 'UTF-8');
         $email = trim($request->input('email', ''));
         $password = $request->input('password') ?: $request->input('hashed_password');
         $role = $request->input('role', 'end_user');
@@ -133,7 +141,7 @@ class AuthController extends Controller
         $currentUser = $request->attributes->get('auth_user') ?: auth()->user();
 
         if ($request->has('username') && $request->input('username') !== $target->username) {
-            $username = trim($request->input('username'));
+            $username = mb_strtoupper(trim($request->input('username')), 'UTF-8');
             if (User::where('username', $username)->where('id', '!=', $id)->exists()) {
                 return response()->json(['detail' => 'Username already registered'], 400);
             }

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use App\Models\Ppmp;
 use App\Models\Office;
 use App\Models\IndicativePpmp;
@@ -22,6 +23,83 @@ class BudgetController extends Controller
                 ->orderByDesc('id')
                 ->get()
         );
+    }
+
+    /**
+     * Office PPMP compliance tracker for a fiscal year.
+     * One status per active office based on its latest PPMP (id desc).
+     */
+    public function officeTracker(Request $request)
+    {
+        $fiscalYear = (int) ($request->query('fiscal_year') ?: (date('Y') + 1));
+
+        $offices = Office::where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'name', 'code']);
+
+        $ppmps = Ppmp::query()
+            ->where('fiscal_year', $fiscalYear)
+            ->whereIn('office_id', $offices->pluck('id'))
+            ->select([
+                'id', 'title', 'fiscal_year', 'office_id', 'status',
+                'created_at', 'updated_at',
+            ])
+            ->orderByDesc('id')
+            ->get()
+            ->groupBy('office_id');
+
+        $totals = [
+            'offices' => $offices->count(),
+            'submitted' => 0,
+            'verified' => 0,
+            'uploaded_not_submitted' => 0,
+            'needs_revision' => 0,
+            'not_started' => 0,
+            'pending_review' => 0,
+        ];
+
+        $rows = $offices->map(function (Office $office) use ($ppmps, &$totals) {
+            $latest = $ppmps->get($office->id)?->first();
+            $rawStatus = $latest?->status;
+
+            [$statusKey, $statusLabel] = match ($rawStatus) {
+                'Draft' => ['uploaded_not_submitted', 'Uploaded, not submitted'],
+                'Returned' => ['needs_revision', 'Needs revision'],
+                'Pending Budget Review' => ['submitted', 'Submitted'],
+                'Approved' => ['verified', 'Verified'],
+                default => ['not_started', 'Not started'],
+            };
+
+            if ($statusKey === 'submitted') {
+                $totals['pending_review']++;
+                $totals['submitted']++;
+            } elseif ($statusKey === 'verified') {
+                $totals['verified']++;
+                $totals['submitted']++;
+            } else {
+                $totals[$statusKey]++;
+            }
+
+            return [
+                'id' => $office->id,
+                'name' => $office->name,
+                'code' => $office->code,
+                'status_key' => $statusKey,
+                'status_label' => $statusLabel,
+                'ppmp' => $latest ? [
+                    'id' => $latest->id,
+                    'title' => $latest->title,
+                    'status' => $latest->status,
+                    'updated_at' => $latest->updated_at,
+                ] : null,
+            ];
+        })->values();
+
+        return response()->json([
+            'fiscal_year' => $fiscalYear,
+            'totals' => $totals,
+            'offices' => $rows,
+        ]);
     }
 
     /**
@@ -118,7 +196,7 @@ class BudgetController extends Controller
 
     public function postIndicativePpmp(Request $request, int $id)
     {
-        $user = $request->attributes->get('auth_user') ?: auth()->user();
+        $user = $this->authUser($request);
         $ppmp = IndicativePpmp::find($id);
 
         if (!$ppmp) {
@@ -130,7 +208,7 @@ class BudgetController extends Controller
         }
 
         $ppmp->posting_status = 'Posted';
-        $ppmp->posted_at = now();
+        $ppmp->posted_at = Carbon::now();
         $ppmp->posted_by = $user->id;
         $ppmp->save();
 
@@ -176,7 +254,7 @@ class BudgetController extends Controller
             return response()->json(['detail' => 'Office not found'], 404);
         }
 
-        $totalPpmpCost = $ppmp->items->sum(fn($it) => (float)$it->estimated_budget);
+        $totalPpmpCost = (float) $ppmp->items()->sum('estimated_budget');
 
         return response()->json([
             'ppmp_id' => $ppmp->id,

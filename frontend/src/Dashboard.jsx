@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { apiFetch } from "./api";
+import BudgetOfficeTracker from "./BudgetOfficeTracker";
 
 const USERS_PAGE_SIZE = 10;
 
@@ -113,6 +114,8 @@ function Dashboard({ token, user, onLogout }) {
   const [remarks, setRemarks] = useState("");
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviseModalOpen, setReviseModalOpen] = useState(false);
+  const [officeTracker, setOfficeTracker] = useState(null);
+  const [officeTrackerLoading, setOfficeTrackerLoading] = useState(false);
 
   // BAC Admin state
   const [apps, setApps] = useState([]);
@@ -305,6 +308,12 @@ function Dashboard({ token, user, onLogout }) {
   }, [activeTab, user.role]);
 
   useEffect(() => {
+    if (user.role === "budget_office" && activeTab === "office_tracker") {
+      fetchOfficeTracker(consolidationYear);
+    }
+  }, [activeTab, user.role, consolidationYear]);
+
+  useEffect(() => {
     if (user.role === "bac_admin" && activeTab === "audit") {
       fetchPendingPpmps();
       fetchIndicativePpmps();
@@ -440,6 +449,30 @@ function Dashboard({ token, user, onLogout }) {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const fetchOfficeTracker = async (fiscalYear = consolidationYear) => {
+    setOfficeTrackerLoading(true);
+    try {
+      const res = await apiFetch(
+        `/api/budget/office-tracker?fiscal_year=${encodeURIComponent(fiscalYear)}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setOfficeTracker(data);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showNotification(err.detail || "Failed to load office tracker", "danger");
+      }
+    } catch (err) {
+      console.error(err);
+      showNotification("Failed to load office tracker", "danger");
+    } finally {
+      setOfficeTrackerLoading(false);
     }
   };
 
@@ -739,12 +772,13 @@ function Dashboard({ token, user, onLogout }) {
       });
       if (res.ok) {
         const data = await res.json();
-        setAppSigPreparedBy(data.prepared_by || "");
-        setAppSigPreparedDesig(data.prepared_by_designation || "");
-        setAppSigRecommendedBy(data.recommended_by || "");
-        setAppSigRecommendedDesig(data.recommended_by_designation || "");
-        setAppSigApprovedBy(data.approved_by_name || "");
-        setAppSigApprovedDesig(data.approved_by_designation || "");
+        const up = (v) => String(v || "").toUpperCase();
+        setAppSigPreparedBy(up(data.prepared_by));
+        setAppSigPreparedDesig(up(data.prepared_by_designation));
+        setAppSigRecommendedBy(up(data.recommended_by));
+        setAppSigRecommendedDesig(up(data.recommended_by_designation));
+        setAppSigApprovedBy(up(data.approved_by_name));
+        setAppSigApprovedDesig(up(data.approved_by_designation));
         setAppSignatoryLoaded(true);
       }
     } catch (err) {
@@ -762,12 +796,12 @@ function Dashboard({ token, user, onLogout }) {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          prepared_by: appSigPreparedBy,
-          prepared_by_designation: appSigPreparedDesig,
-          recommended_by: appSigRecommendedBy,
-          recommended_by_designation: appSigRecommendedDesig,
-          approved_by_name: appSigApprovedBy,
-          approved_by_designation: appSigApprovedDesig,
+          prepared_by: appSigPreparedBy.trim().toUpperCase(),
+          prepared_by_designation: appSigPreparedDesig.trim().toUpperCase(),
+          recommended_by: appSigRecommendedBy.trim().toUpperCase(),
+          recommended_by_designation: appSigRecommendedDesig.trim().toUpperCase(),
+          approved_by_name: appSigApprovedBy.trim().toUpperCase(),
+          approved_by_designation: appSigApprovedDesig.trim().toUpperCase(),
         }),
       });
       if (res.ok) {
@@ -1148,8 +1182,8 @@ function Dashboard({ token, user, onLogout }) {
   const handleSaveOffice = async (e) => {
     e.preventDefault();
     const payload = {
-      name: newOfficeName.trim(),
-      code: newOfficeCode.trim(),
+      name: newOfficeName.trim().toUpperCase(),
+      code: newOfficeCode.trim().toUpperCase(),
       budget_allocation: parseFloat(newOfficeBudget) || 0,
     };
     try {
@@ -1298,8 +1332,8 @@ function Dashboard({ token, user, onLogout }) {
     }
 
     if (newUserRole === "end_user") {
-      const officeName = newOfficeName.trim();
-      const officeCode = newOfficeCode.trim();
+      const officeName = newOfficeName.trim().toUpperCase();
+      const officeCode = newOfficeCode.trim().toUpperCase();
       if (!officeName || !officeCode) {
         showNotification("Please enter both the end-user office name and code", "danger");
         return;
@@ -1310,14 +1344,14 @@ function Dashboard({ token, user, onLogout }) {
       let res;
       if (isEdit) {
         const body = {
-          username: newUsername.trim(),
+          username: newUsername.trim().toUpperCase(),
           email: newEmail.trim(),
           role: newUserRole,
           office_id: newUserRole === "end_user" && newUserOfficeId ? parseInt(newUserOfficeId, 10) : null,
           is_active: newUserActive,
         };
         if (newUserRole === "end_user") {
-          body.office_name = newOfficeName.trim();
+          body.office_name = newOfficeName.trim().toUpperCase();
           body.office_code = newOfficeCode.trim().toUpperCase();
         }
         if (newPassword) body.password = newPassword;
@@ -1337,12 +1371,12 @@ function Dashboard({ token, user, onLogout }) {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
-            username: newUsername.trim(),
+            username: newUsername.trim().toUpperCase(),
             email: newEmail.trim(),
             hashed_password: newPassword,
             role: newUserRole,
             office_id: newUserRole === "end_user" && newUserOfficeId ? parseInt(newUserOfficeId, 10) : null,
-            office_name: newUserRole === "end_user" ? newOfficeName.trim() : undefined,
+            office_name: newUserRole === "end_user" ? newOfficeName.trim().toUpperCase() : undefined,
             office_code: newUserRole === "end_user" ? newOfficeCode.trim().toUpperCase() : undefined,
           }),
         });
@@ -1587,6 +1621,7 @@ function Dashboard({ token, user, onLogout }) {
     all_ppmps: "All PPMPs",
     indicative: "Post to BAC",
     final: "Final PPMP",
+    office_tracker: "Office Tracker",
     cse_app: "CSE Annual Procurement Plan",
     noncse_app: "nonCSE Annual Procurement Plan",
     consolidated_apps: "Consolidated APPs",
@@ -1677,18 +1712,18 @@ function Dashboard({ token, user, onLogout }) {
         <div className="ngpa-ppmp-form__table-wrapper">
           <table className="ngpa-ppmp-table">
             <colgroup>
-              <col style={{ minWidth: 220 }} />
-              <col style={{ minWidth: 140 }} />
-              <col style={{ minWidth: 160 }} />
-              <col style={{ minWidth: 170 }} />
-              <col style={{ minWidth: 120 }} />
-              <col style={{ minWidth: 110 }} />
-              <col style={{ minWidth: 110 }} />
-              <col style={{ minWidth: 150 }} />
-              <col style={{ minWidth: 140 }} />
-              <col style={{ minWidth: 140 }} />
-              <col style={{ minWidth: 170 }} />
-              <col style={{ minWidth: 200 }} />
+              <col style={{ width: "14%" }} />
+              <col style={{ width: "9%" }} />
+              <col style={{ width: "11%" }} />
+              <col style={{ width: "10%" }} />
+              <col style={{ width: "6%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "6%" }} />
             </colgroup>
             <thead>
               <tr>
@@ -2653,6 +2688,16 @@ function Dashboard({ token, user, onLogout }) {
               <i className="fas fa-th-large" aria-hidden="true"></i>
               Dashboard
             </button>
+            {user.role === "budget_office" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "office_tracker" ? "active" : ""}`}
+                onClick={() => { setActiveTab("office_tracker"); setSelectedPpmp(null); setSelectedApp(null); }}
+              >
+                <i className="fas fa-chart-pie" aria-hidden="true"></i>
+                Office Tracker
+              </button>
+            )}
             {user.role === "bac_admin" && (
               <button
                 type="button"
@@ -3316,6 +3361,20 @@ function Dashboard({ token, user, onLogout }) {
               </div>
             </div>
           )}
+          {activeTab === "office_tracker" && user.role === "budget_office" && (
+            <BudgetOfficeTracker
+              data={officeTracker}
+              loading={officeTrackerLoading}
+              fiscalYear={consolidationYear}
+              onFiscalYearChange={setConsolidationYear}
+              yearOptions={[
+                consolidationYear - 1,
+                consolidationYear,
+                consolidationYear + 1,
+                consolidationYear + 2,
+              ]}
+            />
+          )}
           {activeTab === "indicative" && user.role === "budget_office" && (
             <div className="dashboard-card">
               <h2 className="card-title">Post to BAC</h2>
@@ -3437,8 +3496,11 @@ function Dashboard({ token, user, onLogout }) {
                         id="appSigPreparedBy"
                         className="form-input"
                         value={appSigPreparedBy}
-                        onChange={(e) => setAppSigPreparedBy(e.target.value)}
-                        placeholder="Printed name"
+                        onChange={(e) => setAppSigPreparedBy(e.target.value.toUpperCase())}
+                        placeholder="PRINTED NAME"
+                        style={{ textTransform: "uppercase" }}
+                        autoCapitalize="characters"
+                        spellCheck={false}
                       />
                     </div>
                     <div className="form-group">
@@ -3447,8 +3509,11 @@ function Dashboard({ token, user, onLogout }) {
                         id="appSigPreparedDesig"
                         className="form-input"
                         value={appSigPreparedDesig}
-                        onChange={(e) => setAppSigPreparedDesig(e.target.value)}
-                        placeholder="e.g. Head, BAC Secretariat"
+                        onChange={(e) => setAppSigPreparedDesig(e.target.value.toUpperCase())}
+                        placeholder="E.G. HEAD, BAC SECRETARIAT"
+                        style={{ textTransform: "uppercase" }}
+                        autoCapitalize="characters"
+                        spellCheck={false}
                       />
                     </div>
                   </div>
@@ -3461,8 +3526,11 @@ function Dashboard({ token, user, onLogout }) {
                         id="appSigRecommendedBy"
                         className="form-input"
                         value={appSigRecommendedBy}
-                        onChange={(e) => setAppSigRecommendedBy(e.target.value)}
-                        placeholder="Printed name"
+                        onChange={(e) => setAppSigRecommendedBy(e.target.value.toUpperCase())}
+                        placeholder="PRINTED NAME"
+                        style={{ textTransform: "uppercase" }}
+                        autoCapitalize="characters"
+                        spellCheck={false}
                       />
                     </div>
                     <div className="form-group">
@@ -3471,8 +3539,11 @@ function Dashboard({ token, user, onLogout }) {
                         id="appSigRecommendedDesig"
                         className="form-input"
                         value={appSigRecommendedDesig}
-                        onChange={(e) => setAppSigRecommendedDesig(e.target.value)}
-                        placeholder="e.g. BAC Chairperson"
+                        onChange={(e) => setAppSigRecommendedDesig(e.target.value.toUpperCase())}
+                        placeholder="E.G. BAC CHAIRPERSON"
+                        style={{ textTransform: "uppercase" }}
+                        autoCapitalize="characters"
+                        spellCheck={false}
                       />
                     </div>
                   </div>
@@ -3485,8 +3556,11 @@ function Dashboard({ token, user, onLogout }) {
                         id="appSigApprovedBy"
                         className="form-input"
                         value={appSigApprovedBy}
-                        onChange={(e) => setAppSigApprovedBy(e.target.value)}
-                        placeholder="Printed name"
+                        onChange={(e) => setAppSigApprovedBy(e.target.value.toUpperCase())}
+                        placeholder="PRINTED NAME"
+                        style={{ textTransform: "uppercase" }}
+                        autoCapitalize="characters"
+                        spellCheck={false}
                       />
                     </div>
                     <div className="form-group">
@@ -3495,8 +3569,11 @@ function Dashboard({ token, user, onLogout }) {
                         id="appSigApprovedDesig"
                         className="form-input"
                         value={appSigApprovedDesig}
-                        onChange={(e) => setAppSigApprovedDesig(e.target.value)}
-                        placeholder="e.g. City Mayor"
+                        onChange={(e) => setAppSigApprovedDesig(e.target.value.toUpperCase())}
+                        placeholder="E.G. CITY MAYOR"
+                        style={{ textTransform: "uppercase" }}
+                        autoCapitalize="characters"
+                        spellCheck={false}
                       />
                     </div>
                   </div>
@@ -3565,19 +3642,24 @@ function Dashboard({ token, user, onLogout }) {
                     <>
                       <input
                         type="text"
-                        placeholder="Office / End-User Name"
+                        placeholder="OFFICE / END-USER NAME"
                         className="form-input"
                         value={newOfficeName}
-                        onChange={(e) => setNewOfficeName(e.target.value)}
+                        onChange={(e) => setNewOfficeName(e.target.value.toUpperCase())}
+                        style={{ textTransform: "uppercase" }}
+                        autoCapitalize="characters"
+                        spellCheck={false}
                         required
                       />
                       <input
                         type="text"
-                        placeholder="Office Code (e.g. CMO, CHO, GSO)"
+                        placeholder="OFFICE CODE (E.G. CMO, CHO, GSO)"
                         className="form-input"
                         value={newOfficeCode}
                         onChange={(e) => setNewOfficeCode(e.target.value.toUpperCase())}
                         style={{ textTransform: "uppercase" }}
+                        autoCapitalize="characters"
+                        spellCheck={false}
                         required
                       />
                     </>

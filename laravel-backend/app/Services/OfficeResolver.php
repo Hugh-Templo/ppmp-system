@@ -21,8 +21,8 @@ class OfficeResolver
             return Office::find($officeId);
         }
 
-        $name = trim((string) $officeName);
-        $code = strtoupper(trim((string) $officeCode));
+        $name = mb_strtoupper(trim((string) $officeName), 'UTF-8');
+        $code = mb_strtoupper(trim((string) $officeCode), 'UTF-8');
 
         if ($name === '' && $code === '') {
             return null;
@@ -34,9 +34,9 @@ class OfficeResolver
             ], 400));
         }
 
-        $existingByCode = Office::where('code', $code)->first();
+        $existingByCode = Office::whereRaw('UPPER(code) = ?', [$code])->first();
         if ($existingByCode) {
-            if ($existingByCode->name !== $name) {
+            if (mb_strtoupper((string) $existingByCode->name, 'UTF-8') !== $name) {
                 $existingByCode->name = $name;
             }
             if (!$existingByCode->is_active) {
@@ -47,9 +47,9 @@ class OfficeResolver
             return $existingByCode;
         }
 
-        $existingByName = Office::where('name', $name)->first();
+        $existingByName = Office::whereRaw('UPPER(name) = ?', [$name])->first();
         if ($existingByName) {
-            if ($existingByName->code !== $code) {
+            if (mb_strtoupper((string) $existingByName->code, 'UTF-8') !== $code) {
                 $existingByName->code = $code;
                 $existingByName->save();
             }
