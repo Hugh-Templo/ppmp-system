@@ -6,6 +6,7 @@ use App\Http\Controllers\OfficesController;
 use App\Http\Controllers\BudgetController;
 use App\Http\Controllers\BacController;
 use App\Http\Controllers\DbmController;
+use App\Http\Controllers\SuperadminController;
 
 // Health check
 Route::get('/health', function () {
@@ -92,6 +93,14 @@ Route::prefix('bac')->middleware(['jwt', 'role:bac_admin'])->group(function () {
     Route::get('/apps/{id}', [BacController::class, 'getApp']);
     Route::post('/drive/upload', [BacController::class, 'uploadToDrive'])
         ->middleware('throttle:heavy');
+});
+
+// Superadmin monitoring
+Route::prefix('superadmin')->middleware(['jwt', 'role:super_admin'])->group(function () {
+    Route::get('/overview', [SuperadminController::class, 'overview']);
+    Route::get('/activity', [SuperadminController::class, 'activity']);
+    Route::get('/logins', [SuperadminController::class, 'logins']);
+    Route::get('/errors', [SuperadminController::class, 'errors']);
 });
 
 // DBM routes

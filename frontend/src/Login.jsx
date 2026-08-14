@@ -1,5 +1,21 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { apiFetch } from "./api";
+
+const isIosDevice = () =>
+  /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+const isStandaloneDisplay = () =>
+  window.matchMedia("(display-mode: standalone)").matches ||
+  window.navigator.standalone === true;
+
+const detectMobile = () => {
+  if (typeof window === "undefined") return false;
+  const coarse = window.matchMedia("(pointer: coarse)").matches;
+  const narrow = window.matchMedia("(max-width: 900px)").matches;
+  const uaMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  return uaMobile || (coarse && narrow);
+};
 
 function Login({ onLogin }) {
   const [username, setUsername] = useState("");
@@ -7,6 +23,48 @@ function Login({ onLogin }) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [showIosTip, setShowIosTip] = useState(false);
+
+  useEffect(() => {
+    const refresh = () => {
+      setIsMobile(detectMobile());
+      setIsStandalone(isStandaloneDisplay());
+    };
+    refresh();
+    window.addEventListener("resize", refresh);
+    const onBip = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener("beforeinstallprompt", onBip);
+    return () => {
+      window.removeEventListener("resize", refresh);
+      window.removeEventListener("beforeinstallprompt", onBip);
+    };
+  }, []);
+
+  const showInstall = isMobile && !isStandalone;
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      try {
+        await deferredPrompt.userChoice;
+      } catch {
+        // ignore
+      }
+      setDeferredPrompt(null);
+      return;
+    }
+    if (isIosDevice()) {
+      setShowIosTip(true);
+      return;
+    }
+    setShowIosTip(true);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -55,7 +113,7 @@ function Login({ onLogin }) {
   };
 
   return (
-    <div className="split-login-container">
+    <div className={`split-login-container${isMobile ? " is-mobile-login" : ""}`}>
       {/* Left Pane: Visual branding with silhouette */}
       <div className="login-left-pane">
         <div className="dev-silhouette-container">
@@ -65,12 +123,11 @@ function Login({ onLogin }) {
             className="bg-logo"
           />
           <img
-            //src={`${import.meta.env.BASE_URL}dev.png`}
             alt="Developer Silhouette"
             className="dev-silhouette"
           />
         </div>
-        
+
         <div className="login-left-content">
           <h1 className="login-left-title">
             PPMP TO APP CONSOLIDATION SYSTEM<br />
@@ -161,13 +218,56 @@ function Login({ onLogin }) {
             </button>
           </form>
 
-          <div className="mt-20" style={{ textAlign: 'center' }}>
-            <p className="login-form-subtitle" style={{ fontSize: '0.85rem' }}>
+          {showInstall && (
+            <button
+              type="button"
+              className="btn-install-app"
+              onClick={handleInstallClick}
+            >
+              <i className="fas fa-download" aria-hidden="true"></i>
+              Install App
+            </button>
+          )}
+
+          <div className="mt-20" style={{ textAlign: "center" }}>
+            <p className="login-form-subtitle" style={{ fontSize: "0.85rem" }}>
               &copy; {new Date().getFullYear()} Ormoc City Government. All rights reserved.
             </p>
           </div>
         </div>
       </div>
+
+      {showIosTip && (
+        <div
+          className="pwa-ios-tip-overlay"
+          role="presentation"
+          onClick={() => setShowIosTip(false)}
+        >
+          <div
+            className="pwa-ios-tip"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pwa-ios-tip-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="pwa-ios-tip-title">Add to Home Screen</h3>
+            <ol>
+              <li>
+                Tap the <strong>Share</strong> button in Safari
+              </li>
+              <li>
+                Scroll and tap <strong>Add to Home Screen</strong>
+              </li>
+              <li>
+                Tap <strong>Add</strong> to install PPMP Portal
+              </li>
+            </ol>
+            <button type="button" className="btn" onClick={() => setShowIosTip(false)}>
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

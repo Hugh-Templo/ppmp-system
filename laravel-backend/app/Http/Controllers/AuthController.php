@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use App\Models\User;
 use App\Models\Office;
+use App\Models\SystemLoginLog;
 use App\Services\JwtService;
 use App\Services\OfficeResolver;
 use Throwable;
@@ -20,6 +21,7 @@ class AuthController extends Controller
         $password = $request->input('password');
 
         if (!$username || !$password) {
+            $this->recordLoginAttempt($request, $username ?: null, null, false);
             return response()->json(['detail' => 'Incorrect username or password'], 401);
         }
 
@@ -33,9 +35,16 @@ class AuthController extends Controller
         }
 
         if (!$user || !Hash::check($password, $user->hashed_password)) {
+            $this->recordLoginAttempt($request, $username, $user?->id, false);
             return response()->json(['detail' => 'Incorrect username or password'], 401);
         }
 
+        if (!$user->is_active) {
+            $this->recordLoginAttempt($request, $username, $user->id, false);
+            return response()->json(['detail' => 'Incorrect username or password'], 401);
+        }
+
+        $this->recordLoginAttempt($request, $username, $user->id, true);
         $token = JwtService::createToken(['sub' => $user->username]);
 
         return response()->json([
@@ -44,9 +53,25 @@ class AuthController extends Controller
         ]);
     }
 
+    private function recordLoginAttempt(Request $request, ?string $username, ?int $userId, bool $success): void
+    {
+        try {
+            SystemLoginLog::create([
+                'user_id' => $userId,
+                'username' => $username ? mb_substr($username, 0, 255) : null,
+                'ip_address' => $request->ip(),
+                'user_agent' => mb_substr((string) $request->userAgent(), 0, 2000),
+                'success' => $success,
+                'created_at' => now(),
+            ]);
+        } catch (Throwable $e) {
+            Log::warning('Failed to write login log', ['error' => $e->getMessage()]);
+        }
+    }
+
     public function getMe(Request $request)
     {
-        $user = $request->attributes->get('auth_user') ?: auth()->user();
+        $user = $this->authUser($request);
         if ($user->role === 'end_user') {
             OfficeResolver::ensureUserOffice($user);
             $user->refresh();
@@ -65,7 +90,7 @@ class AuthController extends Controller
 
     public function register(Request $request)
     {
-        $currentUser = $request->attributes->get('auth_user') ?: auth()->user();
+        $currentUser = $this->authUser($request);
         if ($currentUser->role !== 'bac_admin') {
             return response()->json(['detail' => 'Access denied: Only BAC administrators can register users'], 403);
         }
@@ -138,7 +163,7 @@ class AuthController extends Controller
             return response()->json(['detail' => 'User not found'], 404);
         }
 
-        $currentUser = $request->attributes->get('auth_user') ?: auth()->user();
+        $currentUser = $this->authUser($request);
 
         if ($request->has('username') && $request->input('username') !== $target->username) {
             $username = mb_strtoupper(trim($request->input('username')), 'UTF-8');
@@ -215,7 +240,7 @@ class AuthController extends Controller
 
     public function revealPassword(Request $request, int $id)
     {
-        $admin = $request->attributes->get('auth_user') ?: auth()->user();
+        $admin = $this->authUser($request);
         if (!$admin || $admin->role !== 'bac_admin') {
             return response()->json(['detail' => 'Access denied'], 403);
         }
@@ -274,7 +299,7 @@ class AuthController extends Controller
             return response()->json(['detail' => 'User not found'], 404);
         }
 
-        $currentUser = $request->attributes->get('auth_user') ?: auth()->user();
+        $currentUser = $this->authUser($request);
         if ($target->id === $currentUser->id) {
             return response()->json(['detail' => 'You cannot delete your own account'], 400);
         }

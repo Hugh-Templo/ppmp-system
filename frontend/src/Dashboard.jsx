@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { apiFetch } from "./api";
 import BudgetOfficeTracker from "./BudgetOfficeTracker";
+import SuperadminMonitor from "./SuperadminMonitor";
 
 const USERS_PAGE_SIZE = 10;
 
@@ -59,7 +60,9 @@ const composeQuantitySize = (qty, unit, name) =>
   [qty, (unit || "").trim(), (name || "").trim()].filter(Boolean).join(" ").trim();
 
 function Dashboard({ token, user, onLogout }) {
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab] = useState(
+    user.role === "super_admin" ? "monitor" : "dashboard"
+  );
   const [ppmps, setPpmps] = useState([]);
   const [selectedPpmp, setSelectedPpmp] = useState(null);
   const notificationTimerRef = useRef(null);
@@ -1604,6 +1607,7 @@ function Dashboard({ token, user, onLogout }) {
       bac_admin: "BAC Administrator",
       budget_office: "Budget Office",
       end_user: "End User",
+      super_admin: "Superadmin",
     };
     return labels[role] || role.replace(/_/g, " ");
   };
@@ -1618,6 +1622,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const pageTitles = {
     dashboard: "Dashboard",
+    monitor: "System Monitor",
     all_ppmps: "All PPMPs",
     indicative: "Post to BAC",
     final: "Final PPMP",
@@ -2680,14 +2685,26 @@ function Dashboard({ token, user, onLogout }) {
         <nav className="sidebar-nav">
           <div className="nav-section">
             <div className="nav-section-title">Navigation</div>
-            <button
-              type="button"
-              className={`nav-link ${activeTab === "dashboard" ? "active" : ""}`}
-              onClick={() => { setActiveTab("dashboard"); setSelectedPpmp(null); setSelectedApp(null); }}
-            >
-              <i className="fas fa-th-large" aria-hidden="true"></i>
-              Dashboard
-            </button>
+            {user.role !== "super_admin" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "dashboard" ? "active" : ""}`}
+                onClick={() => { setActiveTab("dashboard"); setSelectedPpmp(null); setSelectedApp(null); }}
+              >
+                <i className="fas fa-th-large" aria-hidden="true"></i>
+                Dashboard
+              </button>
+            )}
+            {user.role === "super_admin" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "monitor" ? "active" : ""}`}
+                onClick={() => { setActiveTab("monitor"); setSelectedPpmp(null); setSelectedApp(null); }}
+              >
+                <i className="fas fa-shield-alt" aria-hidden="true"></i>
+                System Monitor
+              </button>
+            )}
             {user.role === "budget_office" && (
               <button
                 type="button"
@@ -2783,6 +2800,10 @@ function Dashboard({ token, user, onLogout }) {
         </div>
 
         <div className="workspace">
+
+          {activeTab === "monitor" && user.role === "super_admin" && (
+            <SuperadminMonitor token={token} />
+          )}
 
           {activeTab === "dashboard" && (
             <div>

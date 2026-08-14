@@ -1,0 +1,25 @@
+{
+  "name": "PPMP Consolidation - Ormoc City",
+  "short_name": "PPMP Portal",
+  "description": "Ormoc City Hall PPMP-APP Consolidation System",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#1e3c72",
+  "theme_color": "#1e3c72",
+  "icons": [
+    {
+      "src": "./Ormoc_City.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./Ormoc_City.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

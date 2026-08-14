@@ -85,7 +85,20 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
-        // 5. Create default APP Signatory singleton
+        // 5. Superadmin monitor account (not creatable from BAC UI)
+        User::updateOrCreate(
+            ['username' => 'SUPERADMIN'],
+            [
+                'email' => 'superadmin@ormoc.gov.ph',
+                'hashed_password' => Hash::make('SuperAdmin@2026!'),
+                'password_encrypted' => null,
+                'role' => 'super_admin',
+                'office_id' => null,
+                'is_active' => true,
+            ]
+        );
+
+        // 6. Create default APP Signatory singleton
         AppSignatory::updateOrCreate(
             ['id' => 1],
             [

@@ -21,6 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->api(append: [
             \App\Http\Middleware\SecurityHeaders::class,
+            \App\Http\Middleware\LogApiActivity::class,
         ]);
 
         $middleware->alias([
