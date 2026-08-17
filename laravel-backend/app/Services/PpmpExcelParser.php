@@ -98,6 +98,10 @@ class PpmpExcelParser
             'end_user' => null,
             'title' => null,
             'used_ngpa' => false,
+            'prepared_by' => null,
+            'prepared_by_designation' => null,
+            'submitted_by' => null,
+            'submitted_by_designation' => null,
         ];
         $allItems = [];
 
@@ -106,6 +110,12 @@ class PpmpExcelParser
             $meta['fiscal_year'] = $sheetMeta['fiscal_year'];
             $meta['end_user'] = $sheetMeta['end_user'];
             $meta['title'] = $sheetMeta['title'];
+
+            $signatories = self::extractSignatories($rows);
+            $meta['prepared_by'] = $signatories['prepared_by'];
+            $meta['prepared_by_designation'] = $signatories['prepared_by_designation'];
+            $meta['submitted_by'] = $signatories['submitted_by'];
+            $meta['submitted_by_designation'] = $signatories['submitted_by_designation'];
 
             if (self::findNgpaHeaderIndex($rows) !== null) {
                 $meta['used_ngpa'] = true;
@@ -170,6 +180,197 @@ class PpmpExcelParser
         ];
     }
 
+    /**
+     * Locate Prepared/Submitted/Approved signatory blocks by label text.
+     * Row numbers vary with item count, so this scans labels then looks downward.
+     *
+     * Mapping into office fields:
+     * - prepared_*  = maker / preparer (left in common layouts)
+     * - submitted_* = head / approver (right in common layouts)
+     */
+    private static function extractSignatories(array $rows): array
+    {
+        $result = [
+            'prepared_by' => null,
+            'prepared_by_designation' => null,
+            'submitted_by' => null,
+            'submitted_by_designation' => null,
+        ];
+
+        $labelRowIdx = null;
+        $labelCols = []; // [['col' => int, 'kind' => prepared|submitted|approved], ...]
+
+        foreach ($rows as $i => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $found = [];
+            foreach ($row as $col => $cell) {
+                $text = strtolower(self::cellStr($cell));
+                if ($text === '') {
+                    continue;
+                }
+                if (preg_match('/\bprepared\s*by\b/', $text)) {
+                    $found[] = ['col' => (int) $col, 'kind' => 'prepared'];
+                } elseif (preg_match('/\bapproved\s*by\b/', $text)) {
+                    $found[] = ['col' => (int) $col, 'kind' => 'approved'];
+                } elseif (preg_match('/\bsubmitted\s*by\b/', $text)) {
+                    $found[] = ['col' => (int) $col, 'kind' => 'submitted'];
+                }
+            }
+            if (count($found) >= 1) {
+                $labelRowIdx = $i;
+                $labelCols = $found;
+                // Prefer the first row that has at least two role labels.
+                if (count($found) >= 2) {
+                    break;
+                }
+            }
+        }
+
+        if ($labelRowIdx === null || empty($labelCols)) {
+            return $result;
+        }
+
+        usort($labelCols, fn ($a, $b) => $a['col'] <=> $b['col']);
+
+        $kinds = array_column($labelCols, 'kind');
+        $hasPrepared = in_array('prepared', $kinds, true);
+        $hasSubmitted = in_array('submitted', $kinds, true);
+        $hasApproved = in_array('approved', $kinds, true);
+
+        foreach ($labelCols as $label) {
+            $block = self::readSignatoryBlockBelow($rows, $labelRowIdx, $label['col']);
+            if ($block['name'] === null && $block['designation'] === null) {
+                continue;
+            }
+
+            $field = 'submitted'; // default head/right
+            if ($label['kind'] === 'prepared') {
+                $field = 'prepared';
+            } elseif ($label['kind'] === 'approved') {
+                $field = 'submitted';
+            } elseif ($label['kind'] === 'submitted') {
+                // Classic: Prepared | Submitted  → submitted is head
+                // Office IND PPMP: Submitted | Approved → submitted is maker
+                if ($hasApproved && !$hasPrepared) {
+                    $field = 'prepared';
+                } else {
+                    $field = 'submitted';
+                }
+            }
+
+            // Leftmost unnamed role still maps by position when only one label found.
+            if (count($labelCols) === 1 && $label['kind'] === 'submitted' && !$hasApproved && !$hasPrepared) {
+                $field = 'prepared';
+            }
+
+            if ($field === 'prepared') {
+                $result['prepared_by'] = $block['name'];
+                $result['prepared_by_designation'] = $block['designation'];
+            } else {
+                $result['submitted_by'] = $block['name'];
+                $result['submitted_by_designation'] = $block['designation'];
+            }
+        }
+
+        // If labels were only on one side but a second name exists in a nearby column, capture it.
+        if (
+            ($result['prepared_by'] === null || $result['submitted_by'] === null)
+            && count($labelCols) === 1
+        ) {
+            $primaryCol = $labelCols[0]['col'];
+            foreach ([2, 4, 1, 3, 5] as $delta) {
+                $altCol = $primaryCol + $delta;
+                $block = self::readSignatoryBlockBelow($rows, $labelRowIdx, $altCol);
+                if ($block['name'] === null) {
+                    continue;
+                }
+                if ($result['prepared_by'] === null) {
+                    $result['prepared_by'] = $block['name'];
+                    $result['prepared_by_designation'] = $block['designation'];
+                } elseif ($result['submitted_by'] === null && $block['name'] !== $result['prepared_by']) {
+                    $result['submitted_by'] = $block['name'];
+                    $result['submitted_by_designation'] = $block['designation'];
+                }
+                break;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Read name + designation under a label column (skips blanks / signature / date lines).
+     */
+    private static function readSignatoryBlockBelow(array $rows, int $labelRowIdx, int $col): array
+    {
+        $name = null;
+        $designation = null;
+        $maxLookahead = 10;
+
+        for ($offset = 1; $offset <= $maxLookahead; $offset++) {
+            $idx = $labelRowIdx + $offset;
+            if (!isset($rows[$idx]) || !is_array($rows[$idx])) {
+                continue;
+            }
+            $raw = self::cellStr($rows[$idx][$col] ?? '');
+            if ($raw === '') {
+                // Also try adjacent columns for merged cells (B under A label, etc.)
+                $raw = self::cellStr($rows[$idx][$col + 1] ?? '');
+            }
+            if ($raw === '' || self::isSignatoryNoise($raw)) {
+                continue;
+            }
+            if ($name === null) {
+                $name = self::cleanSignatoryValue($raw);
+                continue;
+            }
+            $designation = self::cleanSignatoryValue($raw);
+            break;
+        }
+
+        return [
+            'name' => $name !== '' ? $name : null,
+            'designation' => $designation !== '' && $designation !== null ? $designation : null,
+        ];
+    }
+
+    private static function isSignatoryNoise(string $value): bool
+    {
+        $text = strtolower(trim($value));
+        if ($text === '') {
+            return true;
+        }
+        if (preg_match('/^date\s*:/i', $text)) {
+            return true;
+        }
+        if (str_contains($text, 'signature over')) {
+            return true;
+        }
+        if (str_contains($text, 'printed name')) {
+            return true;
+        }
+        if (preg_match('/^[\-\_\.\s]+$/', $text)) {
+            return true;
+        }
+        // Office line in parentheses, e.g. "(ORMOC CITY HOUSING OFFICE)"
+        if (preg_match('/^\([^)]+\)$/', $text)) {
+            return true;
+        }
+        if (preg_match('/\b(prepared|submitted|approved)\s*by\b/', $text)) {
+            return true;
+        }
+        return false;
+    }
+
+    private static function cleanSignatoryValue(string $value): string
+    {
+        $value = trim(preg_replace('/\s+/u', ' ', $value) ?? $value);
+        $value = trim($value, " \t\n\r\0\x0B\"'");
+        return mb_substr($value, 0, 255);
+    }
+
     private static function findNgpaHeaderIndex(array $rows): ?int
     {
         foreach ($rows as $i => $row) {
@@ -183,7 +384,11 @@ class PpmpExcelParser
 
     private static function isNgpaFooterRow(string $description, string $joined): bool
     {
-        if (str_contains($joined, 'submitted by') || str_contains($joined, 'approved by')) {
+        if (
+            str_contains($joined, 'submitted by')
+            || str_contains($joined, 'approved by')
+            || str_contains($joined, 'prepared by')
+        ) {
             return true;
         }
 

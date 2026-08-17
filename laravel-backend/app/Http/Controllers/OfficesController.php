@@ -264,6 +264,34 @@ class OfficesController extends Controller
             return response()->json(['detail' => 'No PPMP line items found in the uploaded Excel file'], 400);
         }
 
+        // Persist signatories from the Excel footer onto the office record.
+        // Labels move with item count, so values come from parser meta (not fixed rows).
+        $signatoryTouched = false;
+        foreach ([
+            'prepared_by',
+            'prepared_by_designation',
+            'submitted_by',
+            'submitted_by_designation',
+        ] as $field) {
+            $value = isset($meta[$field]) ? trim((string) $meta[$field]) : '';
+            if ($value !== '') {
+                $office->{$field} = $value;
+                $signatoryTouched = true;
+            }
+        }
+        if ($signatoryTouched) {
+            try {
+                $templatePath = PpmpExcelExporter::writeSignatory($office);
+                $office->ppmp_template_path = $templatePath;
+            } catch (Exception $e) {
+                Log::warning('PPMP upload: signatory template refresh failed', [
+                    'office_id' => $office->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+            $office->save();
+        }
+
         // Parent is_cse true only when every item is CSE (mixed → false)
         $isCseFlag = !empty($itemsData) && collect($itemsData)->every(
             fn ($row) => (bool) ($row['is_cse'] ?? false)
