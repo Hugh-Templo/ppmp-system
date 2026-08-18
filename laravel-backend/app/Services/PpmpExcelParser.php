@@ -456,7 +456,7 @@ class PpmpExcelParser
                     continue;
                 }
                 throw new Exception(
-                    'Row ' . $rowNumber . ': Column M must be CSE or NON-CSE'
+                    'IT error detected. Row ' . $rowNumber . ': Column M must be CSE or NON-CSE'
                     . ($raw !== '' ? " (found \"{$raw}\")" : ' (missing)')
                     . '.'
                 );

@@ -90,7 +90,7 @@ class PpmpExcelExporter
 
         $ws->setCellValue(self::CELL_SUBMITTED_NAME, $office->submitted_by ?? '');
         $ws->setCellValue(self::CELL_SUBMITTED_DESIG, $office->submitted_by_designation ?? '');
-        $ws->setCellValue(self::CELL_SUBMITTED_UNIT, $officeName ? "Head of {$officeName}" : '');
+        $ws->setCellValue(self::CELL_SUBMITTED_UNIT, $officeName ? mb_strtoupper("Head of {$officeName}", 'UTF-8') : '');
 
         $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
         $writer->save($dest);

@@ -1825,7 +1825,7 @@ function Dashboard({ token, user, onLogout }) {
             </div>
             <div className="ngpa-ppmp-form__sig-caption">Position/Designation</div>
             <div className="ngpa-ppmp-form__sig-unit">
-              {officeName ? `Head of ${officeName}` : ""}
+              {officeName ? `HEAD OF ${String(officeName).toUpperCase()}` : ""}
             </div>
             <div className="ngpa-ppmp-form__sig-caption">
               [Head of the End-User or Implementing Unit]
