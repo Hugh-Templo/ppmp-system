@@ -8,14 +8,29 @@ use App\Http\Controllers\BacController;
 use App\Http\Controllers\DbmController;
 use App\Http\Controllers\SuperadminController;
 use App\Http\Controllers\OfficeNotificationController;
+use App\Http\Controllers\MaintenanceController;
 
-// Health check
+// Health check (no throttle — used to diagnose Hostinger / API outages)
 Route::get('/health', function () {
-    return response()->json(['status' => 'running']);
-})->middleware('throttle:public');
+    $database = 'ok';
+    try {
+        \Illuminate\Support\Facades\DB::select('select 1');
+    } catch (\Throwable $e) {
+        $database = 'error';
+    }
+
+    return response()->json([
+        'status' => 'running',
+        'database' => $database,
+    ]);
+});
 
 // Public endpoint for registration form
 Route::get('/offices', [OfficesController::class, 'listOfficesPublic'])
+    ->middleware('throttle:public');
+
+// Public maintenance status (login page banner)
+Route::get('/maintenance', [MaintenanceController::class, 'status'])
     ->middleware('throttle:public');
 
 // Auth routes
@@ -104,6 +119,9 @@ Route::prefix('bac')->middleware(['jwt', 'role:bac_admin'])->group(function () {
     Route::delete('/office-notifications/{id}', [OfficeNotificationController::class, 'destroy']);
     Route::post('/office-notifications/{id}/publish', [OfficeNotificationController::class, 'publish'])
         ->middleware('throttle:heavy');
+
+    Route::get('/maintenance', [MaintenanceController::class, 'show']);
+    Route::put('/maintenance', [MaintenanceController::class, 'update']);
 });
 
 // Superadmin monitoring

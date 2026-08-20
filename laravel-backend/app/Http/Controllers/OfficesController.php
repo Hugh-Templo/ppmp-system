@@ -11,6 +11,7 @@ use App\Models\PpmpItem;
 use App\Models\CseCatalogItem;
 use App\Services\PpmpExcelParser;
 use App\Services\PpmpExcelExporter;
+use App\Services\AppExcelExporter;
 use App\Services\OfficeResolver;
 use Exception;
 use Throwable;
@@ -580,13 +581,20 @@ class OfficesController extends Controller
             ?: ('NGPA_PPMP_' . preg_replace('/[^\w\-]+/', '_', $ppmp->title ?: 'PPMP') . "_FY{$ppmp->fiscal_year}.xlsx");
         $mime = $ppmp->excel_mime
             ?: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        if (!str_contains(strtolower($filename), '.xls')) {
+            $filename .= '.xlsx';
+        }
 
         // Prefer original uploaded file: disk path first, then MySQL LONGBLOB
         $diskPath = $ppmp->absoluteExcelPath();
         if ($diskPath && is_file($diskPath)) {
-            return response()->download($diskPath, $filename, [
-                'Content-Type' => $mime,
-            ]);
+            $diskBytes = file_get_contents($diskPath);
+            if ($diskBytes !== false && AppExcelExporter::isExcelBinary($diskBytes)) {
+                return response()->download($diskPath, $filename, [
+                    'Content-Type' => $mime,
+                    'Cache-Control' => 'no-store, no-cache, must-revalidate',
+                ]);
+            }
         }
 
         $blobRow = \Illuminate\Support\Facades\DB::table('ppmp')
@@ -594,10 +602,12 @@ class OfficesController extends Controller
             ->select('excel_blob')
             ->first();
         $blob = $blobRow->excel_blob ?? null;
-        if ($blob !== null && $blob !== '') {
-            return response($blob)
-                ->header('Content-Type', $mime)
-                ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
+        if ($blob !== null && $blob !== '' && AppExcelExporter::isExcelBinary((string) $blob)) {
+            try {
+                return AppExcelExporter::excelDownload((string) $blob, $filename, $mime);
+            } catch (Exception $e) {
+                return response()->json(['detail' => $e->getMessage()], 500);
+            }
         }
 
         // Fallback: regenerate Excel from DB line items
@@ -607,9 +617,15 @@ class OfficesController extends Controller
             return response()->json(['detail' => 'PPMP export failed: ' . $e->getMessage()], 500);
         }
 
-        return response($content)
-            ->header('Content-Type', $mime)
-            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
+        if (!AppExcelExporter::isExcelBinary($content)) {
+            return response()->json(['detail' => 'PPMP export produced an invalid Excel file'], 500);
+        }
+
+        try {
+            return AppExcelExporter::excelDownload($content, $filename, $mime);
+        } catch (Exception $e) {
+            return response()->json(['detail' => $e->getMessage()], 500);
+        }
     }
 
     public function submitPpmp(Request $request, int $id)

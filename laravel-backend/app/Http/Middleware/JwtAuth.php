@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 use App\Services\JwtService;
 use App\Models\User;
+use App\Models\SystemMaintenance;
 
 class JwtAuth
 {
@@ -32,6 +33,13 @@ class JwtAuth
 
         if (!$user || !$user->is_active) {
             return response()->json(['detail' => 'Could not validate credentials'], 401);
+        }
+
+        $allowedDuringMaintenance = in_array($user->role, ['bac_admin', 'super_admin'], true);
+        if (SystemMaintenance::isEnabled() && !$allowedDuringMaintenance) {
+            return response()->json([
+                'detail' => SystemMaintenance::bannerMessage(),
+            ], 503);
         }
 
         // Attach user to request attributes and auth user

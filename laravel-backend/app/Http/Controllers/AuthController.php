@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Log;
 use App\Models\User;
 use App\Models\Office;
 use App\Models\SystemLoginLog;
+use App\Models\SystemMaintenance;
 use App\Services\JwtService;
 use App\Services\OfficeResolver;
 use Throwable;
@@ -42,6 +43,14 @@ class AuthController extends Controller
         if (!$user->is_active) {
             $this->recordLoginAttempt($request, $username, $user->id, false);
             return response()->json(['detail' => 'Incorrect username or password'], 401);
+        }
+
+        $allowedDuringMaintenance = in_array($user->role, ['bac_admin', 'super_admin'], true);
+        if (SystemMaintenance::isEnabled() && !$allowedDuringMaintenance) {
+            $this->recordLoginAttempt($request, $username, $user->id, false);
+            return response()->json([
+                'detail' => SystemMaintenance::bannerMessage(),
+            ], 503);
         }
 
         $this->recordLoginAttempt($request, $username, $user->id, true);

@@ -35,6 +35,10 @@ class AppServiceProvider extends ServiceProvider
         });
 
         RateLimiter::for('api', function (Request $request) {
+            if ($request->is('api/health')) {
+                return Limit::none();
+            }
+
             $user = $request->attributes->get('auth_user') ?? $request->user();
 
             return Limit::perMinute(180)->by($user?->username ?: $request->ip());

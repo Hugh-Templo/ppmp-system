@@ -729,6 +729,194 @@ textarea.form-input {
   box-shadow: var(--shadow-sm);
 }
 
+.alert-warning {
+  background: var(--neuro-bg);
+  color: var(--warning-color, #b45309);
+  border-left: 4px solid var(--warning-color, #f59e0b);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ===================== MAINTENANCE PAGE ===================== */
+
+.maintenance-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.25rem;
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(30, 64, 175, 0.18), transparent 55%),
+    radial-gradient(ellipse 60% 50% at 100% 100%, rgba(5, 150, 105, 0.08), transparent 50%),
+    linear-gradient(165deg, #dfe5ee 0%, var(--neuro-bg) 45%, #d8dee8 100%);
+}
+
+.maintenance-page__glow {
+  position: absolute;
+  inset: auto;
+  width: 28rem;
+  height: 28rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.12), transparent 70%);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -52%);
+  pointer-events: none;
+}
+
+.maintenance-page__card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 520px;
+  text-align: center;
+  padding: 2.5rem 2rem 1.75rem;
+  border-radius: var(--border-radius-lg);
+  background: var(--neuro-bg);
+  box-shadow: var(--shadow-lg);
+  animation: maintenanceFadeUp 0.55s ease-out;
+}
+
+@keyframes maintenanceFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.maintenance-page__logo-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 1.25rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: default;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.maintenance-page__logo-btn:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 4px;
+}
+
+.maintenance-page__logo {
+  width: min(168px, 42vw);
+  height: auto;
+  display: block;
+  border-radius: 50%;
+  background: #0a0a0a;
+  box-shadow: var(--shadow-md);
+}
+
+.maintenance-page__brand {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--primary-dark);
+}
+
+.maintenance-page__title {
+  margin: 0 0 0.85rem;
+  font-size: clamp(1.55rem, 4vw, 1.9rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.maintenance-page__lead {
+  margin: 0 auto 1.35rem;
+  max-width: 38ch;
+  font-size: 0.98rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.maintenance-page__meta {
+  margin-bottom: 0.25rem;
+}
+
+.maintenance-page__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #92400e;
+  background: var(--neuro-bg);
+  box-shadow: var(--shadow-sm);
+}
+
+.maintenance-page__badge i {
+  color: var(--warning-color);
+}
+
+.maintenance-page__contact {
+  margin: 0.9rem 0 0;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.maintenance-page__admin {
+  margin-top: 1.5rem;
+  padding-top: 1.35rem;
+  border-top: 1px solid rgba(200, 204, 209, 0.9);
+  text-align: left;
+  animation: maintenanceFadeUp 0.35s ease-out;
+}
+
+.maintenance-page__admin-header {
+  margin-bottom: 1.1rem;
+  text-align: center;
+}
+
+.maintenance-page__admin-header h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--primary-dark);
+}
+
+.maintenance-page__admin-header p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.maintenance-page__footer {
+  margin-top: 1.75rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid rgba(200, 204, 209, 0.7);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+@media (max-width: 520px) {
+  .maintenance-page__card {
+    padding: 2rem 1.25rem 1.5rem;
+  }
+}
+
 .alert-success {
   background: var(--neuro-bg);
   color: var(--success-color);
@@ -2691,7 +2879,8 @@ pre.json-block {
   overflow: auto;
 }
 
-.app-ngpa-preview__body .ngpa-app-form__table-wrapper {
+.app-ngpa-preview__body .ngpa-app-form__table-wrapper,
+.app-ngpa-preview__body .app-cse-2027__table-wrap {
   max-height: none;
 }
 
@@ -2976,7 +3165,8 @@ pre.json-block {
     justify-content: center;
   }
 
-  .ngpa-app-form__table-wrapper {
+  .ngpa-app-form__table-wrapper,
+  .app-cse-2027__table-wrap {
     max-height: none;
   }
 
@@ -3011,7 +3201,8 @@ pre.json-block {
     background: #ffffff !important;
   }
 
-  .ngpa-app-form__table-wrapper {
+  .ngpa-app-form__table-wrapper,
+  .app-cse-2027__table-wrap {
     overflow: visible;
     max-height: none;
     border: none;
@@ -3022,9 +3213,221 @@ pre.json-block {
     min-width: 0;
   }
 
+  .app-cse-2027-table {
+    font-size: 7pt;
+    min-width: 0;
+  }
+
   @page {
     size: A4 landscape;
     margin: 10mm;
+  }
+}
+
+/* APP-CSE 2027 Form (bacadmin CSE-APP workspace) */
+.app-cse-2027 {
+  --cse-orange: #f4b083;
+  --cse-peach: #f7caac;
+  --cse-yellow: #ffe598;
+  --cse-blue: #8eaadb;
+  --cse-border: #7a7a7a;
+  font-family: Tahoma, "Segoe UI", sans-serif;
+  color: #000;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.85rem 1rem 1.15rem;
+}
+
+.app-cse-2027__banner {
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+}
+
+.app-cse-2027__title {
+  text-align: center;
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0.35rem 0 0.85rem;
+  line-height: 1.3;
+}
+
+.app-cse-2027__intro h2,
+.app-cse-2027__reminders h2 {
+  font-size: 0.95rem;
+  font-style: italic;
+  font-weight: 700;
+  margin: 0 0 0.35rem;
+}
+
+.app-cse-2027__intro p,
+.app-cse-2027__reminders li {
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.app-cse-2027__intro {
+  margin-bottom: 0.75rem;
+}
+
+.app-cse-2027__reminders ol {
+  margin: 0;
+  padding-left: 1.4rem;
+}
+
+.app-cse-2027__reminders li {
+  margin-bottom: 0.28rem;
+}
+
+.app-cse-2027__note {
+  font-style: italic;
+  font-weight: 700;
+  font-size: 0.82rem;
+  margin: 0.85rem 0;
+}
+
+.app-cse-2027__agency {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem 1rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.78rem;
+}
+
+.app-cse-2027__agency span {
+  display: block;
+  color: #333;
+}
+
+.app-cse-2027__agency strong {
+  display: block;
+  min-height: 1.15em;
+  border-bottom: 1px solid #333;
+  padding-bottom: 0.1rem;
+}
+
+.app-cse-2027__table-wrap {
+  overflow: auto;
+  border: 1px solid var(--cse-border);
+  max-height: calc(100vh - 280px);
+}
+
+.app-cse-2027-table {
+  width: 100%;
+  min-width: 1680px;
+  border-collapse: collapse;
+  font-size: 0.68rem;
+}
+
+.app-cse-2027-table th,
+.app-cse-2027-table td {
+  border: 1px solid var(--cse-border);
+  padding: 0.22rem 0.28rem;
+  vertical-align: middle;
+}
+
+.app-cse-2027-table__head {
+  background: var(--cse-orange);
+  font-weight: 700;
+  text-align: center;
+}
+
+.app-cse-2027-table__month {
+  background: var(--cse-peach);
+  font-weight: 700;
+  text-align: center;
+}
+
+.app-cse-2027__part-row td {
+  background: var(--cse-yellow);
+  font-weight: 700;
+  text-align: left;
+}
+
+.app-cse-2027__part-note td {
+  font-weight: 600;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.app-cse-2027__cat-row td,
+.app-cse-2027__total-row td {
+  background: var(--cse-blue);
+  font-weight: 700;
+}
+
+.app-cse-2027__center {
+  text-align: center;
+}
+
+.app-cse-2027__amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.app-cse-2027__offices {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.62rem;
+  color: #444;
+  font-weight: 400;
+}
+
+.app-cse-2027__unmatched td {
+  background: #fff4e5;
+}
+
+.app-cse-2027__empty {
+  text-align: center;
+  color: #555;
+  padding: 1rem;
+}
+
+.app-cse-2027__warrant {
+  margin: 0.9rem 0 0.75rem;
+  font-weight: 700;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.app-cse-2027__signatories {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  text-align: center;
+  font-size: 0.78rem;
+}
+
+.app-cse-2027__sig-role {
+  font-weight: 700;
+  margin-bottom: 1.4rem;
+  min-height: 2.4em;
+}
+
+.app-cse-2027__sig-line {
+  border-top: 1px solid #333;
+  margin: 0 0.6rem 0.25rem;
+  padding-top: 0.25rem;
+}
+
+.app-cse-2027__sig-caption {
+  font-weight: 600;
+  margin-bottom: 0.45rem;
+}
+
+.app-cse-2027__sig-date {
+  font-size: 0.72rem;
+}
+
+@media (max-width: 900px) {
+  .app-cse-2027__agency,
+  .app-cse-2027__signatories {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -3723,6 +4126,73 @@ pre.json-block {
 
 .office-mail-quota.is-blocked {
   border-left-color: var(--warning-color, #f59e0b);
+}
+
+.office-maintenance-card {
+  padding: 0.9rem 1.1rem;
+  border-radius: 14px;
+  background: var(--neuro-bg);
+  box-shadow: var(--shadow-sm);
+  border-left: 4px solid var(--primary-color);
+}
+
+.office-maintenance-card.is-on {
+  border-left-color: var(--warning-color, #f59e0b);
+}
+
+.office-maintenance-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.45rem;
+}
+
+.office-maintenance-card__title {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.office-maintenance-card__title i {
+  margin-right: 0.4rem;
+  color: var(--primary-color);
+}
+
+.office-maintenance-card.is-on .office-maintenance-card__title i {
+  color: var(--warning-color, #f59e0b);
+}
+
+.office-maintenance-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: var(--neuro-bg);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.office-maintenance-chip.is-on {
+  color: var(--warning-color, #b45309);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.office-maintenance-card__help {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.office-maintenance-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
 }
 
 .office-mail-quota__title {

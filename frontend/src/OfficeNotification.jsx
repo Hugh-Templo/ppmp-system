@@ -46,6 +46,9 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [mailQuota, setMailQuota] = useState(null);
+  const [maintenance, setMaintenance] = useState({ is_enabled: false, message: "" });
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
+  const [maintenanceSaving, setMaintenanceSaving] = useState(false);
 
   const yearOptions = useMemo(() => {
     const base = defaultFiscalYear();
@@ -55,6 +58,92 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
   const emailBlockedByQuota = Boolean(
     mailQuota && !mailQuota.can_email_all_recipients && (mailQuota.active_end_user_recipients || 0) > 0
   );
+
+  const loadMaintenance = async () => {
+    setMaintenanceLoading(true);
+    try {
+      const res = await apiFetch("/api/bac/maintenance", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMaintenance({
+          is_enabled: Boolean(data.is_enabled),
+          message: data.message || "",
+        });
+      }
+    } catch {
+      // non-fatal
+    } finally {
+      setMaintenanceLoading(false);
+    }
+  };
+
+  const saveMaintenance = async (next) => {
+    setMaintenanceSaving(true);
+    try {
+      const res = await apiFetch("/api/bac/maintenance", {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          is_enabled: Boolean(next.is_enabled),
+          message: (next.message || "").trim() || null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showNotification(data.detail || data.message || "Failed to update maintenance mode", "error");
+        return false;
+      }
+      setMaintenance({
+        is_enabled: Boolean(data.is_enabled),
+        message: data.message || "",
+      });
+      showNotification(
+        data.is_enabled ? "Maintenance mode enabled" : "Maintenance mode disabled",
+        "success"
+      );
+      return true;
+    } catch {
+      showNotification("Failed to update maintenance mode", "error");
+      return false;
+    } finally {
+      setMaintenanceSaving(false);
+    }
+  };
+
+  const handleSaveMaintenanceMessage = async () => {
+    await saveMaintenance({
+      is_enabled: maintenance.is_enabled,
+      message: maintenance.message,
+    });
+  };
+
+  const handleToggleMaintenance = () => {
+    if (maintenance.is_enabled) {
+      saveMaintenance({
+        is_enabled: false,
+        message: maintenance.message,
+      });
+      return;
+    }
+
+    showConfirm({
+      title: "Enable maintenance mode?",
+      message:
+        "End users and Budget Office will be signed out and cannot log in. BAC Admin can still sign in to turn this off.",
+      confirmLabel: "Enable",
+      onConfirm: async () => {
+        await saveMaintenance({
+          is_enabled: true,
+          message: maintenance.message,
+        });
+      },
+    });
+  };
 
   const loadMailQuota = async () => {
     try {
@@ -92,6 +181,7 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
 
   useEffect(() => {
     loadItems();
+    loadMaintenance();
   }, [token]);
 
   const resetForm = () => {
@@ -346,6 +436,61 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
 
   return (
     <div className="office-notification-page">
+      <div
+        className={`office-maintenance-card${maintenance.is_enabled ? " is-on" : ""}`}
+        role="status"
+      >
+        <div className="office-maintenance-card__header">
+          <div className="office-maintenance-card__title">
+            <i className="fas fa-tools" aria-hidden="true" />
+            System Maintenance Mode
+          </div>
+          <span
+            className={`office-maintenance-chip${maintenance.is_enabled ? " is-on" : ""}`}
+          >
+            {maintenanceLoading ? "…" : maintenance.is_enabled ? "On" : "Off"}
+          </span>
+        </div>
+        <p className="office-maintenance-card__help">
+          When enabled, end users and Budget Office cannot sign in. BAC Admin and Super Admin can
+          still log in to turn this off. The optional message appears on the login page.
+        </p>
+        <div className="form-group" style={{ marginBottom: "0.75rem" }}>
+          <label className="form-label" htmlFor="maintenance-message">
+            Login banner message (optional)
+          </label>
+          <textarea
+            id="maintenance-message"
+            className="form-input"
+            rows={3}
+            value={maintenance.message}
+            onChange={(e) =>
+              setMaintenance((prev) => ({ ...prev, message: e.target.value }))
+            }
+            placeholder="System is under maintenance until 6:00 PM."
+            disabled={maintenanceLoading || maintenanceSaving}
+          />
+        </div>
+        <div className="office-maintenance-card__actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleSaveMaintenanceMessage}
+            disabled={maintenanceLoading || maintenanceSaving}
+          >
+            {maintenanceSaving ? "Saving..." : "Save message"}
+          </button>
+          <button
+            type="button"
+            className={maintenance.is_enabled ? "btn btn-success" : "btn btn-danger"}
+            onClick={handleToggleMaintenance}
+            disabled={maintenanceLoading || maintenanceSaving}
+          >
+            {maintenance.is_enabled ? "Disable maintenance" : "Enable maintenance"}
+          </button>
+        </div>
+      </div>
+
       {mailQuota && (
         <div
           className={`office-mail-quota ${emailBlockedByQuota ? "is-blocked" : ""}`}

@@ -487,10 +487,13 @@ class BacController extends Controller
 
         $label = $kind === 'cse' ? 'CSE' : 'nonCSE';
         $filename = "APP-{$label}-FY{$fiscal_year}.xlsx";
+        $mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-        return response($content)
-            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
+        try {
+            return AppExcelExporter::excelDownload($content, $filename, $mime);
+        } catch (Exception $e) {
+            return response()->json(['detail' => $e->getMessage()], 500);
+        }
     }
 
     public function uploadToDrive(Request $request)

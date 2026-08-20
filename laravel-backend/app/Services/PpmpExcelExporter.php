@@ -93,6 +93,7 @@ class PpmpExcelExporter
         $ws->setCellValue(self::CELL_SUBMITTED_UNIT, $officeName ? mb_strtoupper("Head of {$officeName}", 'UTF-8') : '');
 
         $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
+        $writer->setPreCalculateFormulas(false);
         $writer->save($dest);
 
         return $dest;
@@ -178,8 +179,9 @@ class PpmpExcelExporter
         $ws->getStyleByColumnAndRow(10, $totalRow)->getNumberFormat()->setFormatCode('#,##0.00');
         $ws->getStyleByColumnAndRow(10, $totalRow)->getFont()->setBold(true);
 
-        $tempFile = tempnam(sys_get_temp_dir(), 'ppmp_exp_');
+        $tempFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'ppmp_exp_' . uniqid('', true) . '.xlsx';
         $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
+        $writer->setPreCalculateFormulas(false);
         $writer->save($tempFile);
 
         $content = file_get_contents($tempFile);

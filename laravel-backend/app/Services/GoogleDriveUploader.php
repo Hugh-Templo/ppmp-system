@@ -11,6 +11,7 @@ use Google\Client as GoogleClient;
 use Google\Service\Drive as GoogleDrive;
 use Google\Service\Drive\DriveFile;
 use Illuminate\Support\Facades\DB;
+use App\Services\AppExcelExporter;
 use Exception;
 
 class GoogleDriveUploader
@@ -346,14 +347,14 @@ class GoogleDriveUploader
         $diskPath = $ppmp->absoluteExcelPath();
         if ($diskPath && is_file($diskPath)) {
             $content = file_get_contents($diskPath);
-            if ($content !== false && $content !== '') {
+            if ($content !== false && AppExcelExporter::isExcelBinary($content)) {
                 return $content;
             }
         }
 
         $blobRow = DB::table('ppmp')->where('id', $ppmp->id)->select('excel_blob')->first();
         $blob = $blobRow->excel_blob ?? null;
-        if ($blob !== null && $blob !== '') {
+        if ($blob !== null && $blob !== '' && AppExcelExporter::isExcelBinary((string) $blob)) {
             return (string) $blob;
         }
 

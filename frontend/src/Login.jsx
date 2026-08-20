@@ -1,9 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { apiFetch } from "./api";
-
-const isIosDevice = () =>
-  /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
 const isStandaloneDisplay = () =>
   window.matchMedia("(display-mode: standalone)").matches ||
@@ -17,6 +13,10 @@ const detectMobile = () => {
   return uaMobile || (coarse && narrow);
 };
 
+const LOGO_SRC = `${import.meta.env.BASE_URL}Ormoc_City.png`;
+const SECRET_CLICKS = 5;
+const SECRET_CLICK_WINDOW_MS = 2500;
+
 function Login({ onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -27,6 +27,13 @@ function Login({ onLogin }) {
   const [isStandalone, setIsStandalone] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showIosTip, setShowIosTip] = useState(false);
+  const [maintenance, setMaintenance] = useState({
+    is_enabled: false,
+    message: null,
+    loaded: false,
+  });
+  const [adminUnlock, setAdminUnlock] = useState(false);
+  const clickTimesRef = useRef([]);
 
   useEffect(() => {
     const refresh = () => {
@@ -46,6 +53,70 @@ function Login({ onLogin }) {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadMaintenance = async () => {
+      try {
+        const res = await apiFetch("/api/maintenance");
+        if (!res.ok) {
+          if (!cancelled) {
+            setMaintenance((prev) => ({ ...prev, loaded: true }));
+          }
+          return;
+        }
+        const data = await res.json();
+        if (!cancelled) {
+          setMaintenance({
+            is_enabled: Boolean(data.is_enabled),
+            message: data.message || null,
+            loaded: true,
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setMaintenance((prev) => ({ ...prev, loaded: true }));
+        }
+      }
+    };
+    loadMaintenance();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!maintenance.is_enabled || adminUnlock) return undefined;
+
+    const onKeyDown = (e) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === "M" || e.key === "m")) {
+        e.preventDefault();
+        setAdminUnlock(true);
+        setError("");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [maintenance.is_enabled, adminUnlock]);
+
+  const unlockAdminAccess = () => {
+    setAdminUnlock(true);
+    setError("");
+    clickTimesRef.current = [];
+  };
+
+  const handleSecretLogoClick = () => {
+    if (adminUnlock || !maintenance.is_enabled) return;
+    const now = Date.now();
+    const recent = clickTimesRef.current.filter(
+      (t) => now - t < SECRET_CLICK_WINDOW_MS
+    );
+    recent.push(now);
+    clickTimesRef.current = recent;
+    if (recent.length >= SECRET_CLICKS) {
+      unlockAdminAccess();
+    }
+  };
+
   const showInstall = isMobile && !isStandalone;
 
   const handleInstallClick = async () => {
@@ -57,10 +128,6 @@ function Login({ onLogin }) {
         // ignore
       }
       setDeferredPrompt(null);
-      return;
-    }
-    if (isIosDevice()) {
-      setShowIosTip(true);
       return;
     }
     setShowIosTip(true);
@@ -77,7 +144,7 @@ function Login({ onLogin }) {
       formData.append("password", password);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
       const response = await apiFetch("/api/auth/token", {
         method: "POST",
@@ -98,27 +165,157 @@ function Login({ onLogin }) {
             data.message ||
             "Too many login attempts. Wait a minute and try again."
         );
+      } else if (response.status === 503) {
+        setError(
+          data.detail ||
+            data.message ||
+            "System is under maintenance. Please try again later."
+        );
+      } else if (response.status >= 500) {
+        setError(
+          "The server is not accepting logins right now (API error). This is not website traffic — check Hostinger Laravel logs and .env."
+        );
       } else {
-        setError(data.detail || "Incorrect username or password");
+        setError(data.detail || data.message || "Incorrect username or password");
       }
     } catch (err) {
       if (err.name === "AbortError") {
-        setError("Request timed out. Restart the backend server and try again.");
+        setError("Request timed out. The API did not respond in time.");
       } else {
-        setError("Network error. Make sure the Laravel backend is running.");
+        setError("Network error. The login API could not be reached.");
       }
     } finally {
       setLoading(false);
     }
   };
 
+  const loginFormFields = (
+    <form onSubmit={handleSubmit} className="form-stack">
+      <div className="form-group">
+        <label className="form-label" htmlFor="username">
+          Username
+        </label>
+        <input
+          id="username"
+          type="text"
+          className="form-input"
+          value={username}
+          onChange={(e) => setUsername(e.target.value.toUpperCase())}
+          placeholder="YOUR OFFICE"
+          autoComplete="username"
+          autoCapitalize="characters"
+          spellCheck={false}
+          style={{ textTransform: "uppercase" }}
+          required
+        />
+      </div>
+
+      <div className="form-group">
+        <label className="form-label" htmlFor="password">
+          Password
+        </label>
+        <div className="password-input-wrapper">
+          <input
+            id="password"
+            type={showPassword ? "text" : "password"}
+            className="form-input"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            autoComplete="current-password"
+            required
+          />
+          <button
+            type="button"
+            className="password-toggle-btn"
+            onClick={() => setShowPassword((prev) => !prev)}
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            tabIndex={-1}
+          >
+            {showPassword ? (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+            ) : (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            )}
+          </button>
+        </div>
+      </div>
+
+      <button type="submit" className="btn-login" disabled={loading}>
+        {loading ? "Authenticating..." : adminUnlock ? "Administrator Sign In" : "Access System"}
+      </button>
+    </form>
+  );
+
+  if (maintenance.loaded && maintenance.is_enabled) {
+    return (
+      <div className="maintenance-page">
+        <div className="maintenance-page__glow" aria-hidden="true" />
+        <div className="maintenance-page__card">
+          <button
+            type="button"
+            className="maintenance-page__logo-btn"
+            onClick={handleSecretLogoClick}
+            aria-label="City of Ormoc official seal"
+          >
+            <img
+              src={LOGO_SRC}
+              alt="City of Ormoc Official Seal"
+              className="maintenance-page__logo"
+              draggable={false}
+            />
+          </button>
+
+          <p className="maintenance-page__brand">City of Ormoc</p>
+          <h1 className="maintenance-page__title">System Under Maintenance</h1>
+          <p className="maintenance-page__lead">
+            {maintenance.message ||
+              "The PPMP to APP Consolidation System is temporarily unavailable while we perform scheduled maintenance."}
+          </p>
+
+          <div className="maintenance-page__meta">
+            <span className="maintenance-page__badge">
+              <i className="fas fa-tools" aria-hidden="true" />
+              Offline for end users
+            </span>
+            <p className="maintenance-page__contact">
+              For assistance, contact the BAC Office.
+            </p>
+          </div>
+
+          {adminUnlock && (
+            <div className="maintenance-page__admin">
+              <div className="maintenance-page__admin-header">
+                <h2>Administrator Access</h2>
+                <p>Authorized BAC Admin and Super Admin accounts only.</p>
+              </div>
+              {error && <div className="alert alert-danger">{error}</div>}
+              {loginFormFields}
+            </div>
+          )}
+
+          <footer className="maintenance-page__footer">
+            <span>PPMP to APP Consolidation System</span>
+            <span>&copy; {new Date().getFullYear()} Ormoc City Government</span>
+          </footer>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`split-login-container${isMobile ? " is-mobile-login" : ""}`}>
-      {/* Left Pane: Visual branding with silhouette */}
       <div className="login-left-pane">
         <div className="dev-silhouette-container">
           <img
-            src={`${import.meta.env.BASE_URL}Ormoc_City.png`}
+            src={LOGO_SRC}
             alt="Background Logo"
             className="bg-logo"
           />
@@ -145,7 +342,6 @@ function Login({ onLogin }) {
         </div>
       </div>
 
-      {/* Right Pane: Login Form Area */}
       <div className="login-right-pane">
         <div className="login-form-wrapper">
           <div className="login-form-header">
@@ -155,68 +351,7 @@ function Login({ onLogin }) {
 
           {error && <div className="alert alert-danger">{error}</div>}
 
-          <form onSubmit={handleSubmit} className="form-stack">
-            <div className="form-group">
-              <label className="form-label" htmlFor="username">
-                Username
-              </label>
-              <input
-                id="username"
-                type="text"
-                className="form-input"
-                value={username}
-                onChange={(e) => setUsername(e.target.value.toUpperCase())}
-                placeholder="YOUR OFFICE"
-                autoComplete="username"
-                autoCapitalize="characters"
-                spellCheck={false}
-                style={{ textTransform: "uppercase" }}
-                required
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="password">
-                Password
-              </label>
-              <div className="password-input-wrapper">
-                <input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  className="form-input"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  autoComplete="current-password"
-                  required
-                />
-                <button
-                  type="button"
-                  className="password-toggle-btn"
-                  onClick={() => setShowPassword((prev) => !prev)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  tabIndex={-1}
-                >
-                  {showPassword ? (
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                      <line x1="1" y1="1" x2="23" y2="23" />
-                    </svg>
-                  ) : (
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                      <circle cx="12" cy="12" r="3" />
-                    </svg>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <button type="submit" className="btn-login" disabled={loading}>
-              {loading ? "Authenticating..." : "Access System"}
-            </button>
-          </form>
+          {loginFormFields}
 
           {showInstall && (
             <button
