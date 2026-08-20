@@ -809,6 +809,145 @@ textarea.form-input {
   }
 }
 
+/* ===================== PPMP UPLOAD OVERLAY ===================== */
+
+.ppmp-upload-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2300;
+  background: var(--modal-overlay);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  animation: fadeIn 0.18s ease-out;
+}
+
+.ppmp-upload-card {
+  width: min(420px, 100%);
+  background: var(--neuro-bg);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid transparent;
+  padding: 2rem 1.75rem 1.55rem;
+  text-align: center;
+  animation: toastSlideIn 0.22s ease-out;
+}
+
+.ppmp-upload-spinner {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  margin: 0 auto 1.2rem;
+}
+
+.ppmp-upload-spinner__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid rgba(59, 130, 246, 0.16);
+  border-top-color: var(--primary-color);
+  animation: ppmp-upload-spin 0.85s linear infinite;
+}
+
+.ppmp-upload-spinner__ring--inner {
+  inset: 11px;
+  border-width: 2.5px;
+  border-color: rgba(30, 64, 175, 0.1);
+  border-bottom-color: var(--primary-dark);
+  animation-duration: 1.3s;
+  animation-direction: reverse;
+}
+
+.ppmp-upload-spinner__icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary-color);
+  font-size: 1.15rem;
+}
+
+.ppmp-upload-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ppmp-upload-file {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.ppmp-upload-status {
+  margin: 0 0 1rem;
+  min-height: 1.4em;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--primary-dark);
+}
+
+.ppmp-upload-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--neuro-bg);
+  box-shadow: var(--shadow-inset);
+  overflow: hidden;
+}
+
+.ppmp-upload-bar__fill {
+  display: block;
+  height: 100%;
+  width: 38%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary-color), var(--primary-light));
+  animation: ppmp-upload-bar 1.35s ease-in-out infinite;
+}
+
+.ppmp-upload-hint {
+  margin: 0.9rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+@keyframes ppmp-upload-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ppmp-upload-bar {
+  0% {
+    transform: translateX(-130%);
+  }
+  100% {
+    transform: translateX(280%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ppmp-upload-overlay,
+  .ppmp-upload-card {
+    animation: none;
+  }
+
+  .ppmp-upload-spinner__ring,
+  .ppmp-upload-bar__fill {
+    animation: none;
+  }
+
+  .ppmp-upload-bar__fill {
+    width: 70%;
+    margin: 0 auto;
+  }
+}
+
 /* ===================== CONFIRM MODAL ===================== */
 
 .confirm-modal-overlay {
@@ -1631,6 +1770,11 @@ pre.json-block {
   min-width: 0;
 }
 
+.end-user-deadline-slot {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
 @media (max-width: 1024px) {
   .end-user-dashboard {
     grid-template-columns: 1fr;
@@ -2198,6 +2342,7 @@ pre.json-block {
   .alert,
   .notification-toast,
   .confirm-modal-overlay,
+  .ppmp-upload-overlay,
   .ppmp-add-item-card {
     display: none !important;
   }
@@ -3558,5 +3703,178 @@ pre.json-block {
   .superadmin-split {
     grid-template-columns: 1fr;
   }
+}
+
+/* ===================== OFFICE NOTIFICATION ===================== */
+
+.office-notification-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.office-mail-quota {
+  padding: 0.9rem 1.1rem;
+  border-radius: 14px;
+  background: var(--neuro-bg);
+  box-shadow: var(--shadow-sm);
+  border-left: 4px solid var(--primary-color);
+}
+
+.office-mail-quota.is-blocked {
+  border-left-color: var(--warning-color, #f59e0b);
+}
+
+.office-mail-quota__title {
+  font-weight: 700;
+  margin-bottom: 0.45rem;
+  color: var(--text-primary);
+}
+
+.office-mail-quota__title i {
+  margin-right: 0.4rem;
+  color: var(--primary-color);
+}
+
+.office-mail-quota__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+}
+
+.office-mail-quota__warn {
+  margin: 0.55rem 0 0;
+  font-size: 0.85rem;
+  color: var(--warning-color, #b45309);
+  font-weight: 600;
+}
+
+.office-notification-form .form-group {
+  margin-bottom: 0.85rem;
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 720px) {
+  .form-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.office-notification-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.5rem;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.office-deadline-banner {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 1rem 1.15rem;
+  border-radius: 16px;
+  background: var(--neuro-bg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid transparent;
+  border-left: 5px solid var(--primary-color);
+}
+
+.office-deadline-banner.urgency-soon {
+  border-left-color: var(--warning-color, #f59e0b);
+}
+
+.office-deadline-banner.urgency-overdue {
+  border-left-color: var(--danger-color);
+}
+
+.office-deadline-banner__icon {
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--neuro-bg);
+  box-shadow: var(--shadow-sm);
+  color: var(--primary-color);
+}
+
+.office-deadline-banner.urgency-soon .office-deadline-banner__icon {
+  color: var(--warning-color, #f59e0b);
+}
+
+.office-deadline-banner.urgency-overdue .office-deadline-banner__icon {
+  color: var(--danger-color);
+}
+
+.office-deadline-banner__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.office-deadline-banner__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.office-deadline-banner__top strong {
+  font-size: 1.05rem;
+  color: var(--text-primary);
+}
+
+.office-deadline-banner__chip {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--neuro-bg);
+  box-shadow: var(--shadow-sm);
+  color: var(--primary-color);
+}
+
+.office-deadline-banner__chip.urgency-soon {
+  color: var(--warning-color, #f59e0b);
+}
+
+.office-deadline-banner__chip.urgency-overdue {
+  color: var(--danger-color);
+}
+
+.office-deadline-banner__message {
+  margin: 0 0 0.65rem;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.office-deadline-banner__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.office-deadline-banner__meta i {
+  margin-right: 0.35rem;
 }
 

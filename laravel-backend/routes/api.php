@@ -7,6 +7,7 @@ use App\Http\Controllers\BudgetController;
 use App\Http\Controllers\BacController;
 use App\Http\Controllers\DbmController;
 use App\Http\Controllers\SuperadminController;
+use App\Http\Controllers\OfficeNotificationController;
 
 // Health check
 Route::get('/health', function () {
@@ -44,6 +45,8 @@ Route::prefix('offices')->group(function () {
         Route::post('/signatory', [OfficesController::class, 'updateSignatory']);
         Route::get('/budget/{office_id}', [OfficesController::class, 'getOfficeBudget']);
         Route::put('/budget/{office_id}', [OfficesController::class, 'updateOfficeBudget']);
+
+        Route::get('/notifications/active', [OfficeNotificationController::class, 'active']);
 
         Route::get('/ppmps', [OfficesController::class, 'listPpmps']);
         Route::post('/ppmps/upload', [OfficesController::class, 'uploadPpmp'])
@@ -92,6 +95,14 @@ Route::prefix('bac')->middleware(['jwt', 'role:bac_admin'])->group(function () {
         ->middleware('throttle:heavy');
     Route::get('/apps/{id}', [BacController::class, 'getApp']);
     Route::post('/drive/upload', [BacController::class, 'uploadToDrive'])
+        ->middleware('throttle:heavy');
+
+    Route::get('/office-notifications', [OfficeNotificationController::class, 'list']);
+    Route::get('/office-notifications/mail-quota', [OfficeNotificationController::class, 'mailQuota']);
+    Route::post('/office-notifications', [OfficeNotificationController::class, 'create']);
+    Route::put('/office-notifications/{id}', [OfficeNotificationController::class, 'update']);
+    Route::delete('/office-notifications/{id}', [OfficeNotificationController::class, 'destroy']);
+    Route::post('/office-notifications/{id}/publish', [OfficeNotificationController::class, 'publish'])
         ->middleware('throttle:heavy');
 });
 

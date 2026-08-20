@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { apiFetch } from "./api";
 import BudgetOfficeTracker from "./BudgetOfficeTracker";
 import SuperadminMonitor from "./SuperadminMonitor";
+import OfficeNotificationPanel, { OfficeDeadlineBanner } from "./OfficeNotification";
 
 const USERS_PAGE_SIZE = 10;
 
@@ -48,6 +49,12 @@ const PPMP_MONTHS = [
   "October",
   "November",
   "December",
+];
+
+const PPMP_UPLOAD_STEPS = [
+  "Reading the Excel workbook…",
+  "Validating PPMP line items…",
+  "Saving your procurement plan…",
 ];
 
 const formatMonthYear = (month, year) => {
@@ -161,6 +168,7 @@ function Dashboard({ token, user, onLogout }) {
   // End-user Excel upload
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadStep, setUploadStep] = useState(0);
 
   // Registration state
   const [newUsername, setNewUsername] = useState("");
@@ -185,6 +193,7 @@ function Dashboard({ token, user, onLogout }) {
   const [showAdminRevealPassword, setShowAdminRevealPassword] = useState(false);
 
   const [notification, setNotification] = useState({ message: "", type: "" });
+  const [activeOfficeNotice, setActiveOfficeNotice] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState({
     open: false,
     title: "",
@@ -251,6 +260,22 @@ function Dashboard({ token, user, onLogout }) {
   }, []);
 
   useEffect(() => {
+    if (!uploadBusy) {
+      setUploadStep(0);
+      return undefined;
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const timer = window.setInterval(() => {
+      setUploadStep((step) => (step + 1) % PPMP_UPLOAD_STEPS.length);
+    }, 2200);
+    return () => {
+      window.clearInterval(timer);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [uploadBusy]);
+
+  useEffect(() => {
     loadDashboardData();
   }, [user]);
 
@@ -258,6 +283,7 @@ function Dashboard({ token, user, onLogout }) {
     if (user.role === "end_user") {
       fetchOfficePpmps();
       fetchOffices();
+      fetchActiveOfficeNotice();
       return;
     }
     if (user.role === "budget_office") {
@@ -367,6 +393,20 @@ function Dashboard({ token, user, onLogout }) {
       if (res.ok) {
         const data = await res.json();
         setPpmps(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchActiveOfficeNotice = async () => {
+    try {
+      const res = await apiFetch("/api/offices/notifications/active", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setActiveOfficeNotice(data || null);
       }
     } catch (err) {
       console.error(err);
@@ -1632,6 +1672,7 @@ function Dashboard({ token, user, onLogout }) {
     consolidated_apps: "Consolidated APPs",
     app_signatory: "APP Signatory",
     offices: "Users & Offices",
+    office_notification: "Office Notification",
     users: "Manage Users",
     dbm: "DBM Classification",
     audit: "Pending PPMP Review",
@@ -2775,6 +2816,16 @@ function Dashboard({ token, user, onLogout }) {
                 Users & Offices
               </button>
             )}
+            {user.role === "bac_admin" && (
+              <button
+                type="button"
+                className={`nav-link ${activeTab === "office_notification" ? "active" : ""}`}
+                onClick={() => { setActiveTab("office_notification"); setSelectedPpmp(null); setSelectedApp(null); }}
+              >
+                <i className="fas fa-bell" aria-hidden="true"></i>
+                Office Notification
+              </button>
+            )}
           </div>
         </nav>
 
@@ -2820,6 +2871,11 @@ function Dashboard({ token, user, onLogout }) {
 
                 return (
                 <div className="end-user-dashboard">
+                  {activeOfficeNotice && (
+                    <div className="end-user-deadline-slot">
+                      <OfficeDeadlineBanner notice={activeOfficeNotice} />
+                    </div>
+                  )}
                   <div className={`dashboard-card end-user-upload-card${canUpload ? "" : " is-locked"}`}>
                     {!canUpload && (
                       <div className="end-user-upload-lock" role="status" aria-live="polite">
@@ -2880,7 +2936,16 @@ function Dashboard({ token, user, onLogout }) {
                         disabled={!canUpload || uploadBusy}
                       />
                       <button type="submit" className="btn" disabled={!canUpload || uploadBusy}>
-                        {uploadBusy ? "Uploading…" : hasReturnedPpmp ? "Upload Revised PPMP" : "Upload PPMP"}
+                        {uploadBusy ? (
+                          <>
+                            <i className="fas fa-spinner fa-spin" aria-hidden="true"></i>
+                            Uploading…
+                          </>
+                        ) : hasReturnedPpmp ? (
+                          "Upload Revised PPMP"
+                        ) : (
+                          "Upload PPMP"
+                        )}
                       </button>
                     </form>
                   </div>
@@ -3612,6 +3677,14 @@ function Dashboard({ token, user, onLogout }) {
             </div>
           )}
 
+          {activeTab === "office_notification" && user.role === "bac_admin" && (
+            <OfficeNotificationPanel
+              token={token}
+              showNotification={showNotification}
+              showConfirm={showConfirm}
+            />
+          )}
+
           {activeTab === "offices" && user.role === "bac_admin" && (
             <div className="grid-2-wide">
               <div className="dashboard-card">
@@ -4087,6 +4160,40 @@ function Dashboard({ token, user, onLogout }) {
           >
             <i className="fas fa-times" aria-hidden="true"></i>
           </button>
+        </div>
+      )}
+
+      {uploadBusy && (
+        <div
+          className="ppmp-upload-overlay"
+          role="alertdialog"
+          aria-modal="true"
+          aria-busy="true"
+          aria-labelledby="ppmp-upload-title"
+          aria-describedby="ppmp-upload-status"
+        >
+          <div className="ppmp-upload-card">
+            <div className="ppmp-upload-spinner" aria-hidden="true">
+              <span className="ppmp-upload-spinner__ring" />
+              <span className="ppmp-upload-spinner__ring ppmp-upload-spinner__ring--inner" />
+              <span className="ppmp-upload-spinner__icon">
+                <i className="fas fa-file-excel"></i>
+              </span>
+            </div>
+            <h2 id="ppmp-upload-title" className="ppmp-upload-title">
+              Uploading PPMP
+            </h2>
+            {uploadFile?.name && (
+              <p className="ppmp-upload-file">{uploadFile.name}</p>
+            )}
+            <p id="ppmp-upload-status" className="ppmp-upload-status">
+              {PPMP_UPLOAD_STEPS[uploadStep]}
+            </p>
+            <div className="ppmp-upload-bar" aria-hidden="true">
+              <span className="ppmp-upload-bar__fill" />
+            </div>
+            <p className="ppmp-upload-hint">Please wait. This can take several seconds.</p>
+          </div>
         </div>
       )}
 
