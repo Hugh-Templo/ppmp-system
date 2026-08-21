@@ -57,7 +57,7 @@ class OfficeNotificationController extends Controller
             'fiscal_year' => $data['fiscal_year'],
             'title' => $data['title'],
             'message' => $data['message'],
-            'deadline_at' => $data['deadline_at'],
+            'deadline_at' => $data['deadline_at'] ?? null,
             'status' => 'draft',
             'created_by' => $user->id,
             'emails_queued' => 0,
@@ -84,7 +84,7 @@ class OfficeNotificationController extends Controller
         $row->fiscal_year = $data['fiscal_year'];
         $row->title = $data['title'];
         $row->message = $data['message'];
-        $row->deadline_at = $data['deadline_at'];
+        $row->deadline_at = $data['deadline_at'] ?? null;
         $row->save();
 
         return response()->json([
@@ -206,7 +206,7 @@ class OfficeNotificationController extends Controller
             'fiscal_year' => 'required|integer|min:2000|max:2100',
             'title' => 'required|string|max:255',
             'message' => 'required|string|max:5000',
-            'deadline_at' => 'required|date',
+            'deadline_at' => 'nullable|date',
         ]);
 
         if ($validator->fails()) {
@@ -220,6 +220,7 @@ class OfficeNotificationController extends Controller
         $data['title'] = trim($data['title']);
         $data['message'] = trim($data['message']);
         $data['fiscal_year'] = (int) $data['fiscal_year'];
+        $data['deadline_at'] = !empty($data['deadline_at']) ? $data['deadline_at'] : null;
 
         return $data;
     }

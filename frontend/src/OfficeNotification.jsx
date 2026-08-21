@@ -207,7 +207,7 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
     fiscal_year: parseInt(form.fiscal_year, 10),
     title: form.title.trim(),
     message: form.message.trim(),
-    deadline_at: form.deadline_at,
+    deadline_at: form.deadline_at || null,
   });
 
   const publishNotification = async (id, { sendEmail = true } = {}) => {
@@ -227,8 +227,8 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
   const handleSaveDraft = async (e) => {
     e.preventDefault();
     const payload = buildPayload();
-    if (!payload.title || !payload.message || !payload.deadline_at || !payload.fiscal_year) {
-      showNotification("Please fill in title, message, fiscal year, and deadline.", "error");
+    if (!payload.title || !payload.message || !payload.fiscal_year) {
+      showNotification("Please fill in title, message, and fiscal year.", "error");
       return;
     }
 
@@ -370,8 +370,8 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
   const handlePublishFromForm = async (e, { sendEmail = true } = {}) => {
     e.preventDefault();
     const payload = buildPayload();
-    if (!payload.title || !payload.message || !payload.deadline_at || !payload.fiscal_year) {
-      showNotification("Please fill in title, message, fiscal year, and deadline.", "error");
+    if (!payload.title || !payload.message || !payload.fiscal_year) {
+      showNotification("Please fill in title, message, and fiscal year.", "error");
       return;
     }
 
@@ -515,7 +515,7 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
           </div>
           {emailBlockedByQuota && (
             <p className="office-mail-quota__warn">
-              Emailing all recipients would exceed the free tier. You can still publish the deadline
+              Emailing all recipients would exceed the free tier. You can still publish the notice
               to dashboards without email, or wait until quota resets.
             </p>
           )}
@@ -527,9 +527,10 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
           {editingId ? "Edit Office Notification" : "New Office Notification"}
         </h2>
         <p className="page-subtitle" style={{ marginBottom: "1rem" }}>
-          Set one PPMP submission deadline for all offices. Publishing emails every active end user
-          and shows the notice on their dashboard. Email sends are capped at Resend free-tier limits
-          (100/day, 3,000/month).
+          Publish a notice to all offices — PPMP deadline, maintenance schedule, or other reminders.
+          Leave the deadline blank when the date/time belongs in the message (for example scheduled
+          maintenance). Publishing emails every active end user and shows the notice on their dashboard.
+          Email sends are capped at Resend free-tier limits (100/day, 3,000/month).
         </p>
         <form className="office-notification-form" onSubmit={handleSaveDraft}>
           <div className="form-grid-2">
@@ -553,7 +554,7 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="on-deadline">
-                Deadline
+                Deadline (optional)
               </label>
               <input
                 id="on-deadline"
@@ -561,8 +562,11 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
                 className="form-input"
                 value={form.deadline_at}
                 onChange={handleChange("deadline_at")}
-                required
               />
+              <p className="form-help" style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)" }}>
+                Optional. Use this for PPMP due dates. For maintenance, leave this blank and type the
+                schedule in the message.
+              </p>
             </div>
           </div>
           <div className="form-group">
@@ -590,7 +594,7 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
               rows={5}
               value={form.message}
               onChange={handleChange("message")}
-              placeholder="Instructions or notes for all offices…"
+              placeholder="e.g. Indicative PPMP due Friday, or: System maintenance on Aug 21, 8:00–10:00 PM."
               maxLength={5000}
               required
             />
@@ -663,7 +667,7 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
                     </div>
                   </td>
                   <td>{row.fiscal_year}</td>
-                  <td>{formatDate(row.deadline_at)}</td>
+                  <td>{row.deadline_at ? formatDate(row.deadline_at) : "—"}</td>
                   <td>
                     <span
                       className={`badge ${
@@ -774,10 +778,12 @@ export function OfficeDeadlineBanner({ notice }) {
           <span>
             <i className="fas fa-calendar-alt" aria-hidden="true" /> Fiscal Year {notice.fiscal_year}
           </span>
-          <span>
-            <i className="fas fa-hourglass-half" aria-hidden="true" /> Deadline{" "}
-            {formatDate(notice.deadline_at)}
-          </span>
+          {notice.deadline_at ? (
+            <span>
+              <i className="fas fa-hourglass-half" aria-hidden="true" /> Deadline{" "}
+              {formatDate(notice.deadline_at)}
+            </span>
+          ) : null}
         </div>
       </div>
     </div>

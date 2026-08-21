@@ -13,7 +13,7 @@ return new class extends Migration
             $table->unsignedSmallInteger('fiscal_year')->index();
             $table->string('title', 255);
             $table->text('message');
-            $table->date('deadline_at')->index();
+            $table->date('deadline_at')->nullable()->index();
             $table->string('status', 20)->default('draft')->index();
             $table->timestamp('emailed_at')->nullable();
             $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();

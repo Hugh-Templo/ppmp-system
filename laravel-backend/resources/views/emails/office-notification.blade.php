@@ -9,10 +9,13 @@ Hello,
 
 {{ $message }}
 
-**Fiscal Year:** {{ $fiscalYear }}  
-**PPMP Submission Deadline:** {{ $deadline }}
+**Fiscal Year:** {{ $fiscalYear }}
+@if ($deadline)
 
-Please log in to the APP Consolidation System to upload and submit your office PPMP before the deadline.
+**PPMP Submission Deadline:** {{ $deadline }}
+@endif
+
+Please log in to the APP Consolidation System for details.
 
 @if ($appUrl)
 <x-mail::button :url="$appUrl">
