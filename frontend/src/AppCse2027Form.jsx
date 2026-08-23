@@ -116,13 +116,43 @@ function buildFilledCatalog(rows) {
   });
 
   const qtyByRow = new Map();
-  const unmatched = [];
+  const unmatchedByKey = new Map();
 
   (rows || []).forEach((row) => {
     const match = matchCatalogItem(row, items, descIndex, codeIndex);
     const qty = quarterQuantities(row);
     if (!match) {
-      unmatched.push({ row, qty });
+      const unmatchedKey =
+        normalizeCseKey(row?.description) || `__empty_${unmatchedByKey.size}`;
+      const prev = unmatchedByKey.get(unmatchedKey) || {
+        row: { ...row },
+        qty: { q1: 0, q2: 0, q3: 0, q4: 0 },
+        offices: new Set(),
+      };
+      prev.qty.q1 += qty.q1;
+      prev.qty.q2 += qty.q2;
+      prev.qty.q3 += qty.q3;
+      prev.qty.q4 += qty.q4;
+      prev.row.total_estimated_budget =
+        Number(prev.row.total_estimated_budget || 0) +
+        Number(row.total_estimated_budget || 0);
+      prev.row.total_quantity =
+        Number(prev.row.total_quantity || 0) + Number(row.total_quantity || 0);
+      if (!prev.row.unit_cost && row.unit_cost) {
+        prev.row.unit_cost = row.unit_cost;
+      }
+      if (!prev.row.unit_of_measure && row.unit_of_measure) {
+        prev.row.unit_of_measure = row.unit_of_measure;
+      }
+      if (row.end_user_offices) {
+        String(row.end_user_offices)
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .forEach((office) => prev.offices.add(office));
+      }
+      prev.row.end_user_offices = Array.from(prev.offices).join(", ");
+      unmatchedByKey.set(unmatchedKey, prev);
       return;
     }
     const prev = qtyByRow.get(match.row) || {
@@ -150,6 +180,11 @@ function buildFilledCatalog(rows) {
     }
     qtyByRow.set(match.row, prev);
   });
+
+  const unmatched = Array.from(unmatchedByKey.values()).map((entry) => ({
+    row: entry.row,
+    qty: entry.qty,
+  }));
 
   const displayEntries = [];
   let pendingPart = null;

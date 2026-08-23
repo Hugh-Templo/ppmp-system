@@ -36,6 +36,200 @@ class BacController extends Controller
         return $row;
     }
 
+    /** Normalize Procurement Project name for nonCSE merge keys. */
+    private function normalizeProcurementProject(string $description): string
+    {
+        return strtolower(preg_replace('/\s+/', ' ', trim($description)) ?? '');
+    }
+
+    /**
+     * Join comma-separated values without repeating the same value
+     * (case-insensitive). Used for fund source and similar fields.
+     */
+    private function uniqueJoinValues(?string ...$parts): ?string
+    {
+        $seen = [];
+        $out = [];
+        foreach ($parts as $part) {
+            if ($part === null || $part === '') {
+                continue;
+            }
+            foreach (preg_split('/\s*,\s*/', (string) $part) ?: [] as $token) {
+                $token = trim($token);
+                if ($token === '') {
+                    continue;
+                }
+                $key = strtolower($token);
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $out[] = $token;
+            }
+        }
+        return $out ? implode(', ', $out) : null;
+    }
+
+    /** Official Mode of Procurement labels (longest match preferred). */
+    private function knownProcurementModes(): array
+    {
+        static $modes = null;
+        if ($modes !== null) {
+            return $modes;
+        }
+        $modes = [
+            'Competitive Bidding',
+            'Limited Source Bidding',
+            'Competitive Dialogue',
+            'Unsolicited Offer with Bid Matching',
+            'Direct Contracting',
+            'Direct Acquisition',
+            'Repeat Order',
+            'Small Value Procurement',
+            'Direct Sales',
+            'Direct Procurement for Science, Technology and Innovation',
+            'Direct Procurement for Science, Technology, and Innovation',
+            'Negotiated Procurement',
+            'NP - Two Failed Biddings',
+            'NP - Emergency Cases',
+            'NP - Take-over of Contracts',
+            'NP - Adjacent or Contiguous Projects',
+            'NP - Agency-to-Agency',
+            'NP - Highly Specialized Services',
+            'NP - Lease of Real Property and Venue',
+            'Negotiated Procurement - Two Failed Bidding',
+            'Negotiated Procurement - Emergency Cases',
+            'Negotiated Procurement - Take Over of Contracts',
+            'Negotiated Procurement - Adjacent or Contiguous',
+            'Negotiated Procurement - Agency-to-Agency',
+            'Negotiated Procurement - Scientific, Scholarly or Artistic Work, Exclusive Technology',
+            'Negotiated Procurement - Highly Technical Consultants',
+            'Negotiated Procurement - Defense Cooperation Agreements and Inventory-Based Items',
+            'Negotiated Procurement - Lease of Real Property and Venue',
+            'Negotiated Procurement - Non-Government Organization (NGO) Participation',
+            'Negotiated Procurement - Community Participation',
+            'Negotiated Procurement - United Nations (UN) Agencies, International Organizations',
+            'Negotiated Procurement - Direct Retail Purchase of Petroleum Fuel, Oil and Lubricants',
+        ];
+        usort($modes, fn ($a, $b) => strlen($b) <=> strlen($a));
+        return $modes;
+    }
+
+    /** Collapse "Phrase Phrase Phrase" → "Phrase". */
+    private function collapseRepeatedPhrase(string $token): string
+    {
+        $text = preg_replace('/\s+/', ' ', trim($token)) ?? '';
+        if ($text === '') {
+            return '';
+        }
+        $words = explode(' ', $text);
+        $count = count($words);
+        for ($len = 1; $len <= intdiv($count, 2); $len++) {
+            if ($count % $len !== 0) {
+                continue;
+            }
+            $phrase = implode(' ', array_slice($words, 0, $len));
+            $phraseKey = strtolower($phrase);
+            $allMatch = true;
+            $repeats = intdiv($count, $len);
+            for ($i = 1; $i < $repeats; $i++) {
+                $chunk = implode(' ', array_slice($words, $i * $len, $len));
+                if (strtolower($chunk) !== $phraseKey) {
+                    $allMatch = false;
+                    break;
+                }
+            }
+            if ($allMatch) {
+                return $phrase;
+            }
+        }
+        return $text;
+    }
+
+    /**
+     * Deduplicate Mode of Procurement values.
+     * Same mode once; different modes stay comma-separated.
+     * Handles space-repeated copies (not only comma-separated).
+     */
+    private function uniqueProcurementModes(?string ...$parts): ?string
+    {
+        $seen = [];
+        $out = [];
+        $add = function (string $label) use (&$seen, &$out): void {
+            $cleaned = preg_replace('/\s+/', ' ', trim($label)) ?? '';
+            if ($cleaned === '') {
+                return;
+            }
+            $key = strtolower($cleaned);
+            if (isset($seen[$key])) {
+                return;
+            }
+            $seen[$key] = true;
+            $out[] = $cleaned;
+        };
+
+        foreach ($parts as $part) {
+            if ($part === null || $part === '') {
+                continue;
+            }
+            $working = preg_replace('/\s+/', ' ', trim((string) $part)) ?? '';
+            if ($working === '') {
+                continue;
+            }
+
+            foreach ($this->knownProcurementModes() as $mode) {
+                $pattern = '/' . preg_quote($mode, '/') . '/i';
+                if (!preg_match($pattern, $working)) {
+                    continue;
+                }
+                $add($mode);
+                $working = preg_replace($pattern, ',', $working) ?? '';
+                $working = preg_replace('/\s+/', ' ', trim($working)) ?? '';
+            }
+
+            foreach (preg_split('/\s*,\s*/', $working) ?: [] as $token) {
+                $collapsed = $this->collapseRepeatedPhrase($token);
+                if ($collapsed !== '') {
+                    $add($collapsed);
+                }
+            }
+        }
+
+        return $out ? implode(', ', $out) : null;
+    }
+
+    /** Prefer the chronologically earlier MM/YYYY (or raw string) value. */
+    private function earlierTimeline(?string $a, ?string $b): ?string
+    {
+        if ($a === null || $a === '') {
+            return $b;
+        }
+        if ($b === null || $b === '') {
+            return $a;
+        }
+        return $this->timelineSortKey($a) <= $this->timelineSortKey($b) ? $a : $b;
+    }
+
+    /** Prefer the chronologically later MM/YYYY (or raw string) value. */
+    private function laterTimeline(?string $a, ?string $b): ?string
+    {
+        if ($a === null || $a === '') {
+            return $b;
+        }
+        if ($b === null || $b === '') {
+            return $a;
+        }
+        return $this->timelineSortKey($a) >= $this->timelineSortKey($b) ? $a : $b;
+    }
+
+    private function timelineSortKey(string $value): string
+    {
+        if (preg_match('/^(\d{1,2})[\/\-](\d{4})$/', trim($value), $m)) {
+            return sprintf('%04d-%02d', (int) $m[2], (int) $m[1]);
+        }
+        return strtolower(trim($value));
+    }
+
     public function getAppSignatory()
     {
         $row = $this->getOrCreateAppSignatory();
@@ -218,24 +412,26 @@ class BacController extends Controller
 
         foreach ($allItems as $item) {
             $isCse = (bool)$item->is_cse;
-            $desc = trim($item->description);
-            $key = $isCse . '|' . strtolower($desc) . '|' . ($item->project_type ?? '') . '|' . ($item->procurement_mode ?? '') . '|' . ($item->fund_source ?? '');
+            $desc = trim((string) ($item->description ?? ''));
+            $normalizedDesc = $this->normalizeProcurementProject($desc);
+            // One APP row per Procurement Project within CSE and within nonCSE.
+            $key = ($isCse ? '1' : '0') . '|' . $normalizedDesc;
+
+            $ppmp = $approvedPpmps->firstWhere('id', $item->ppmp_id);
+            $office = $ppmp ? $offices->get($ppmp->office_id) : null;
+            $officeCode = $office ? ($office->code ?: $office->name) : '';
 
             if (!isset($consolidationMap[$key])) {
-                $ppmp = $approvedPpmps->firstWhere('id', $item->ppmp_id);
-                $office = $ppmp ? $offices->get($ppmp->office_id) : null;
-                $officeCode = $office ? ($office->code ?: $office->name) : '';
-
                 $consolidationMap[$key] = [
-                    'description' => $item->description,
+                    'description' => $item->description ?: $desc,
                     'is_cse' => $isCse,
                     'project_type' => $item->project_type,
-                    'procurement_mode' => $item->procurement_mode ?: 'Competitive Bidding',
-                    'fund_source' => $item->fund_source,
-                    'quantity_size' => $item->quantity_size,
+                    'procurement_mode' => $this->uniqueProcurementModes($item->procurement_mode ?: 'Competitive Bidding'),
+                    'fund_source' => $this->uniqueJoinValues($item->fund_source),
+                    'quantity_size' => $this->uniqueJoinValues($item->quantity_size),
                     'proc_start' => $item->proc_start,
                     'proc_end' => $item->proc_end,
-                    'delivery_period' => $item->delivery_period,
+                    'delivery_period' => $this->uniqueJoinValues($item->delivery_period),
                     'pre_proc_conf' => (bool)$item->pre_proc_conf,
                     'total_estimated_budget' => 0.0,
                     'offices' => [],
@@ -248,10 +444,50 @@ class BacController extends Controller
                     'unit_of_measure' => $item->unit_of_measure,
                     'unit_cost' => $item->unit_cost,
                 ];
-
-                if ($officeCode) {
-                    $consolidationMap[$key]['offices'][] = $officeCode;
+            } else {
+                $group = &$consolidationMap[$key];
+                $group['project_type'] = $this->uniqueJoinValues(
+                    $group['project_type'],
+                    $item->project_type
+                );
+                $group['procurement_mode'] = $this->uniqueProcurementModes(
+                    $group['procurement_mode'],
+                    $item->procurement_mode ?: 'Competitive Bidding'
+                );
+                $group['fund_source'] = $this->uniqueJoinValues(
+                    $group['fund_source'],
+                    $item->fund_source
+                );
+                $group['quantity_size'] = $this->uniqueJoinValues(
+                    $group['quantity_size'],
+                    $item->quantity_size
+                );
+                $group['delivery_period'] = $this->uniqueJoinValues(
+                    $group['delivery_period'],
+                    $item->delivery_period
+                );
+                $group['proc_start'] = $this->earlierTimeline(
+                    $group['proc_start'],
+                    $item->proc_start
+                );
+                $group['proc_end'] = $this->laterTimeline(
+                    $group['proc_end'],
+                    $item->proc_end
+                );
+                if ((bool)$item->pre_proc_conf) {
+                    $group['pre_proc_conf'] = true;
                 }
+                if (empty($group['unit_of_measure']) && !empty($item->unit_of_measure)) {
+                    $group['unit_of_measure'] = $item->unit_of_measure;
+                }
+                if ($group['unit_cost'] === null && $item->unit_cost !== null) {
+                    $group['unit_cost'] = $item->unit_cost;
+                }
+                unset($group);
+            }
+
+            if ($officeCode) {
+                $consolidationMap[$key]['offices'][] = $officeCode;
             }
 
             $consolidationMap[$key]['total_estimated_budget'] += (float)($item->estimated_budget ?? 0);

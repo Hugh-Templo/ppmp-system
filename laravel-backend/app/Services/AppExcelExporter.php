@@ -73,10 +73,114 @@ class AppExcelExporter
         ];
     }
 
+    /**
+     * Merge APP rows that share the same description / Procurement Project name
+     * so Excel export matches the bacadmin preview (one row, deduped modes).
+     *
+     * @param  \Illuminate\Support\Collection|array  $rows
+     * @return array<int, object>
+     */
+    private static function mergeAppRowsByDescription($rows): array
+    {
+        $map = [];
+        foreach ($rows as $row) {
+            $desc = trim((string) ($row->description ?? ''));
+            $key = self::normalizeProcurementProject($desc);
+            if ($key === '') {
+                $map['__empty_' . count($map)] = clone $row;
+                continue;
+            }
+
+            if (!isset($map[$key])) {
+                $merged = clone $row;
+                $merged->project_type = self::uniqueJoinValues($row->project_type ?? null);
+                $merged->procurement_mode = self::uniqueProcurementModes($row->procurement_mode ?? null);
+                $merged->fund_source = self::uniqueJoinValues($row->fund_source ?? null);
+                $merged->quantity_size = self::uniqueJoinValues($row->quantity_size ?? null);
+                $merged->delivery_period = self::uniqueJoinValues($row->delivery_period ?? null);
+                $merged->end_user_offices = self::uniqueJoinValues($row->end_user_offices ?? null);
+                $merged->total_estimated_budget = (float) ($row->total_estimated_budget ?? 0);
+                $merged->total_quantity = (int) ($row->total_quantity ?? 0);
+                $merged->q1_qty = (int) ($row->q1_qty ?? 0);
+                $merged->q2_qty = (int) ($row->q2_qty ?? 0);
+                $merged->q3_qty = (int) ($row->q3_qty ?? 0);
+                $merged->q4_qty = (int) ($row->q4_qty ?? 0);
+                $merged->pre_proc_conf = !empty($row->pre_proc_conf);
+                $map[$key] = $merged;
+                continue;
+            }
+
+            $merged = $map[$key];
+            $merged->project_type = self::uniqueJoinValues(
+                $merged->project_type ?? null,
+                $row->project_type ?? null
+            );
+            $merged->procurement_mode = self::uniqueProcurementModes(
+                $merged->procurement_mode ?? null,
+                $row->procurement_mode ?? null
+            );
+            $merged->fund_source = self::uniqueJoinValues(
+                $merged->fund_source ?? null,
+                $row->fund_source ?? null
+            );
+            $merged->quantity_size = self::uniqueJoinValues(
+                $merged->quantity_size ?? null,
+                $row->quantity_size ?? null
+            );
+            $merged->delivery_period = self::uniqueJoinValues(
+                $merged->delivery_period ?? null,
+                $row->delivery_period ?? null
+            );
+            $merged->end_user_offices = self::uniqueJoinValues(
+                $merged->end_user_offices ?? null,
+                $row->end_user_offices ?? null
+            );
+            $merged->proc_start = self::earlierTimeline(
+                $merged->proc_start ?? null,
+                $row->proc_start ?? null
+            );
+            $merged->proc_end = self::laterTimeline(
+                $merged->proc_end ?? null,
+                $row->proc_end ?? null
+            );
+            if (!empty($row->pre_proc_conf)) {
+                $merged->pre_proc_conf = true;
+            }
+            $merged->total_estimated_budget =
+                (float) ($merged->total_estimated_budget ?? 0)
+                + (float) ($row->total_estimated_budget ?? 0);
+            $merged->total_quantity =
+                (int) ($merged->total_quantity ?? 0)
+                + (int) ($row->total_quantity ?? 0);
+            $merged->q1_qty = (int) ($merged->q1_qty ?? 0) + (int) ($row->q1_qty ?? 0);
+            $merged->q2_qty = (int) ($merged->q2_qty ?? 0) + (int) ($row->q2_qty ?? 0);
+            $merged->q3_qty = (int) ($merged->q3_qty ?? 0) + (int) ($row->q3_qty ?? 0);
+            $merged->q4_qty = (int) ($merged->q4_qty ?? 0) + (int) ($row->q4_qty ?? 0);
+            if (empty($merged->unit_of_measure) && !empty($row->unit_of_measure)) {
+                $merged->unit_of_measure = $row->unit_of_measure;
+            }
+            if (($merged->unit_cost === null || $merged->unit_cost === '') && $row->unit_cost) {
+                $merged->unit_cost = $row->unit_cost;
+            }
+        }
+
+        $mergedRows = array_values($map);
+        usort($mergedRows, function ($a, $b) {
+            return strcasecmp(
+                (string) ($a->description ?? ''),
+                (string) ($b->description ?? '')
+            );
+        });
+
+        return $mergedRows;
+    }
+
     public static function exportCseApp(int $fiscalYear): string
     {
         [, $allRows] = self::getAppAndRows($fiscalYear);
-        $cseRows = $allRows->filter(fn($r) => (bool)$r->is_cse)->values();
+        $cseRows = self::mergeAppRowsByDescription(
+            $allRows->filter(fn($r) => (bool)$r->is_cse)->values()
+        );
 
         $template = self::getCseTemplate();
         if (!file_exists($template)) {
@@ -405,10 +509,199 @@ class AppExcelExporter
         return ['q1' => $q1, 'q2' => $q2, 'q3' => $q3, 'q4' => $q4];
     }
 
+    private static function normalizeProcurementProject(string $description): string
+    {
+        return strtolower(preg_replace('/\s+/', ' ', trim($description)) ?? '');
+    }
+
+    private static function uniqueJoinValues(?string ...$parts): ?string
+    {
+        $seen = [];
+        $out = [];
+        foreach ($parts as $part) {
+            if ($part === null || $part === '') {
+                continue;
+            }
+            foreach (preg_split('/\s*,\s*/', (string) $part) ?: [] as $token) {
+                $token = trim($token);
+                if ($token === '') {
+                    continue;
+                }
+                $key = strtolower($token);
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $out[] = $token;
+            }
+        }
+        return $out ? implode(', ', $out) : null;
+    }
+
+    /** Official Mode of Procurement labels (longest match preferred). */
+    private static function knownProcurementModes(): array
+    {
+        static $modes = null;
+        if ($modes !== null) {
+            return $modes;
+        }
+        $modes = [
+            'Competitive Bidding',
+            'Limited Source Bidding',
+            'Competitive Dialogue',
+            'Unsolicited Offer with Bid Matching',
+            'Direct Contracting',
+            'Direct Acquisition',
+            'Repeat Order',
+            'Small Value Procurement',
+            'Direct Sales',
+            'Direct Procurement for Science, Technology and Innovation',
+            'Direct Procurement for Science, Technology, and Innovation',
+            'Negotiated Procurement',
+            'NP - Two Failed Biddings',
+            'NP - Emergency Cases',
+            'NP - Take-over of Contracts',
+            'NP - Adjacent or Contiguous Projects',
+            'NP - Agency-to-Agency',
+            'NP - Highly Specialized Services',
+            'NP - Lease of Real Property and Venue',
+            'Negotiated Procurement - Two Failed Bidding',
+            'Negotiated Procurement - Emergency Cases',
+            'Negotiated Procurement - Take Over of Contracts',
+            'Negotiated Procurement - Adjacent or Contiguous',
+            'Negotiated Procurement - Agency-to-Agency',
+            'Negotiated Procurement - Scientific, Scholarly or Artistic Work, Exclusive Technology',
+            'Negotiated Procurement - Highly Technical Consultants',
+            'Negotiated Procurement - Defense Cooperation Agreements and Inventory-Based Items',
+            'Negotiated Procurement - Lease of Real Property and Venue',
+            'Negotiated Procurement - Non-Government Organization (NGO) Participation',
+            'Negotiated Procurement - Community Participation',
+            'Negotiated Procurement - United Nations (UN) Agencies, International Organizations',
+            'Negotiated Procurement - Direct Retail Purchase of Petroleum Fuel, Oil and Lubricants',
+        ];
+        usort($modes, fn ($a, $b) => strlen($b) <=> strlen($a));
+        return $modes;
+    }
+
+    /** Collapse "Phrase Phrase Phrase" → "Phrase". */
+    private static function collapseRepeatedPhrase(string $token): string
+    {
+        $text = preg_replace('/\s+/', ' ', trim($token)) ?? '';
+        if ($text === '') {
+            return '';
+        }
+        $words = explode(' ', $text);
+        $count = count($words);
+        for ($len = 1; $len <= intdiv($count, 2); $len++) {
+            if ($count % $len !== 0) {
+                continue;
+            }
+            $phrase = implode(' ', array_slice($words, 0, $len));
+            $phraseKey = strtolower($phrase);
+            $allMatch = true;
+            $repeats = intdiv($count, $len);
+            for ($i = 1; $i < $repeats; $i++) {
+                $chunk = implode(' ', array_slice($words, $i * $len, $len));
+                if (strtolower($chunk) !== $phraseKey) {
+                    $allMatch = false;
+                    break;
+                }
+            }
+            if ($allMatch) {
+                return $phrase;
+            }
+        }
+        return $text;
+    }
+
+    /**
+     * Deduplicate Mode of Procurement values.
+     * Same mode once; different modes stay comma-separated.
+     * Handles space-repeated copies (not only comma-separated).
+     */
+    private static function uniqueProcurementModes(?string ...$parts): ?string
+    {
+        $seen = [];
+        $out = [];
+        $add = function (string $label) use (&$seen, &$out): void {
+            $cleaned = preg_replace('/\s+/', ' ', trim($label)) ?? '';
+            if ($cleaned === '') {
+                return;
+            }
+            $key = strtolower($cleaned);
+            if (isset($seen[$key])) {
+                return;
+            }
+            $seen[$key] = true;
+            $out[] = $cleaned;
+        };
+
+        foreach ($parts as $part) {
+            if ($part === null || $part === '') {
+                continue;
+            }
+            $working = preg_replace('/\s+/', ' ', trim((string) $part)) ?? '';
+            if ($working === '') {
+                continue;
+            }
+
+            foreach (self::knownProcurementModes() as $mode) {
+                $pattern = '/' . preg_quote($mode, '/') . '/i';
+                if (!preg_match($pattern, $working)) {
+                    continue;
+                }
+                $add($mode);
+                $working = preg_replace($pattern, ',', $working) ?? '';
+                $working = preg_replace('/\s+/', ' ', trim($working)) ?? '';
+            }
+
+            foreach (preg_split('/\s*,\s*/', $working) ?: [] as $token) {
+                $collapsed = self::collapseRepeatedPhrase($token);
+                if ($collapsed !== '') {
+                    $add($collapsed);
+                }
+            }
+        }
+
+        return $out ? implode(', ', $out) : null;
+    }
+
+    private static function timelineSortKey(string $value): string
+    {
+        if (preg_match('/^(\d{1,2})[\/\-](\d{4})$/', trim($value), $m)) {
+            return sprintf('%04d-%02d', (int) $m[2], (int) $m[1]);
+        }
+        return strtolower(trim($value));
+    }
+
+    private static function earlierTimeline(?string $a, ?string $b): ?string
+    {
+        if ($a === null || $a === '') {
+            return $b;
+        }
+        if ($b === null || $b === '') {
+            return $a;
+        }
+        return self::timelineSortKey($a) <= self::timelineSortKey($b) ? $a : $b;
+    }
+
+    private static function laterTimeline(?string $a, ?string $b): ?string
+    {
+        if ($a === null || $a === '') {
+            return $b;
+        }
+        if ($b === null || $b === '') {
+            return $a;
+        }
+        return self::timelineSortKey($a) >= self::timelineSortKey($b) ? $a : $b;
+    }
+
     public static function exportNonCseApp(int $fiscalYear): string
     {
         list($app, $allRows) = self::getAppAndRows($fiscalYear);
-        $nonCseRows = $allRows->filter(fn($r) => !(bool)$r->is_cse)->values();
+        $nonCseRows = self::mergeAppRowsByDescription(
+            $allRows->filter(fn($r) => !(bool)$r->is_cse)->values()
+        );
 
         $template = self::getNonCseTemplate();
         if (!file_exists($template)) {

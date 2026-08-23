@@ -67,6 +67,227 @@ const formatMonthYear = (month, year) => {
 const composeQuantitySize = (qty, unit, name) =>
   [qty, (unit || "").trim(), (name || "").trim()].filter(Boolean).join(" ").trim();
 
+/** Normalize Procurement Project for case-insensitive nonCSE merge. */
+const normalizeProcurementProject = (value) =>
+  String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+/** Join comma-separated values without repeating the same token. */
+const uniqueJoinValues = (...parts) => {
+  const seen = new Set();
+  const out = [];
+  parts.forEach((part) => {
+    if (part == null || part === "") return;
+    String(part)
+      .split(/\s*,\s*/)
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .forEach((token) => {
+        const key = token.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        out.push(token);
+      });
+  });
+  return out.length ? out.join(", ") : "";
+};
+
+/** Official Mode of Procurement labels (longest match preferred). */
+const KNOWN_PROCUREMENT_MODES = [
+  ...PPMP_PROCUREMENT_MODES,
+  ...PPMP_NP_SUBTYPES,
+  "Negotiated Procurement - Two Failed Bidding",
+  "Negotiated Procurement - Emergency Cases",
+  "Negotiated Procurement - Take Over of Contracts",
+  "Negotiated Procurement - Adjacent or Contiguous",
+  "Negotiated Procurement - Agency-to-Agency",
+  "Negotiated Procurement - Scientific, Scholarly or Artistic Work, Exclusive Technology",
+  "Negotiated Procurement - Highly Technical Consultants",
+  "Negotiated Procurement - Defense Cooperation Agreements and Inventory-Based Items",
+  "Negotiated Procurement - Lease of Real Property and Venue",
+  "Negotiated Procurement - Non-Government Organization (NGO) Participation",
+  "Negotiated Procurement - Community Participation",
+  "Negotiated Procurement - United Nations (UN) Agencies, International Organizations",
+  "Negotiated Procurement - Direct Retail Purchase of Petroleum Fuel, Oil and Lubricants",
+  "Direct Procurement for Science, Technology, and Innovation",
+]
+  .filter((v, i, arr) => arr.findIndex((x) => x.toLowerCase() === v.toLowerCase()) === i)
+  .sort((a, b) => b.length - a.length);
+
+const escapeRegExp = (value) =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Collapse "Phrase Phrase Phrase" → "Phrase". */
+const collapseRepeatedPhrase = (token) => {
+  const text = String(token || "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!text) return "";
+  const words = text.split(" ");
+  for (let len = 1; len <= Math.floor(words.length / 2); len++) {
+    if (words.length % len !== 0) continue;
+    const phrase = words.slice(0, len).join(" ");
+    const phraseKey = phrase.toLowerCase();
+    let allMatch = true;
+    for (let i = 1; i < words.length / len; i++) {
+      if (
+        words
+          .slice(i * len, (i + 1) * len)
+          .join(" ")
+          .toLowerCase() !== phraseKey
+      ) {
+        allMatch = false;
+        break;
+      }
+    }
+    if (allMatch) return phrase;
+  }
+  return text;
+};
+
+/**
+ * Deduplicate Mode of Procurement values.
+ * Same mode once; different modes stay comma-separated.
+ * Handles space-repeated copies (not only comma-separated).
+ */
+const uniqueProcurementModes = (...parts) => {
+  const seen = new Set();
+  const out = [];
+  const add = (label) => {
+    const cleaned = String(label || "")
+      .trim()
+      .replace(/\s+/g, " ");
+    if (!cleaned) return;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(cleaned);
+  };
+
+  parts.forEach((part) => {
+    if (part == null || part === "") return;
+    let working = String(part).replace(/\s+/g, " ").trim();
+    if (!working) return;
+
+    KNOWN_PROCUREMENT_MODES.forEach((mode) => {
+      const re = new RegExp(escapeRegExp(mode), "gi");
+      if (!re.test(working)) return;
+      add(mode);
+      // Fresh regex: avoid lastIndex leftover from .test() skipping matches.
+      working = working
+        .replace(new RegExp(escapeRegExp(mode), "gi"), ",")
+        .replace(/\s+/g, " ")
+        .trim();
+    });
+
+    working
+      .split(/\s*,\s*/)
+      .map((t) => collapseRepeatedPhrase(t))
+      .filter(Boolean)
+      .forEach(add);
+  });
+
+  return out.length ? out.join(", ") : "";
+};
+
+const timelineSortKey = (value) => {
+  const text = String(value || "").trim();
+  const m = text.match(/^(\d{1,2})[\/\-](\d{4})$/);
+  if (m) return `${m[2].padStart(4, "0")}-${m[1].padStart(2, "0")}`;
+  return text.toLowerCase();
+};
+
+const earlierTimeline = (a, b) => {
+  if (!a) return b || "";
+  if (!b) return a;
+  return timelineSortKey(a) <= timelineSortKey(b) ? a : b;
+};
+
+const laterTimeline = (a, b) => {
+  if (!a) return b || "";
+  if (!b) return a;
+  return timelineSortKey(a) >= timelineSortKey(b) ? a : b;
+};
+
+/**
+ * Merge APP rows that share the same Procurement Project / description name.
+ * Mode of Procurement and other text columns keep each value only once.
+ */
+const mergeAppRowsByDescription = (rows) => {
+  const map = new Map();
+  (rows || []).forEach((row) => {
+    if (!row) return;
+    const key = normalizeProcurementProject(row.description);
+    if (!key) {
+      map.set(`__empty_${map.size}`, { ...row });
+      return;
+    }
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, {
+        ...row,
+        project_type: uniqueJoinValues(row.project_type),
+        procurement_mode: uniqueProcurementModes(row.procurement_mode),
+        fund_source: uniqueJoinValues(row.fund_source),
+        quantity_size: uniqueJoinValues(row.quantity_size),
+        delivery_period: uniqueJoinValues(row.delivery_period),
+        end_user_offices: uniqueJoinValues(row.end_user_offices),
+        total_estimated_budget: Number(row.total_estimated_budget || 0),
+        total_quantity: Number(row.total_quantity || 0),
+        q1_qty: Number(row.q1_qty || 0),
+        q2_qty: Number(row.q2_qty || 0),
+        q3_qty: Number(row.q3_qty || 0),
+        q4_qty: Number(row.q4_qty || 0),
+        pre_proc_conf: !!row.pre_proc_conf,
+      });
+      return;
+    }
+    existing.project_type = uniqueJoinValues(
+      existing.project_type,
+      row.project_type
+    );
+    existing.procurement_mode = uniqueProcurementModes(
+      existing.procurement_mode,
+      row.procurement_mode
+    );
+    existing.fund_source = uniqueJoinValues(
+      existing.fund_source,
+      row.fund_source
+    );
+    existing.quantity_size = uniqueJoinValues(
+      existing.quantity_size,
+      row.quantity_size
+    );
+    existing.delivery_period = uniqueJoinValues(
+      existing.delivery_period,
+      row.delivery_period
+    );
+    existing.end_user_offices = uniqueJoinValues(
+      existing.end_user_offices,
+      row.end_user_offices
+    );
+    existing.proc_start = earlierTimeline(existing.proc_start, row.proc_start);
+    existing.proc_end = laterTimeline(existing.proc_end, row.proc_end);
+    existing.pre_proc_conf = existing.pre_proc_conf || !!row.pre_proc_conf;
+    existing.total_estimated_budget += Number(row.total_estimated_budget || 0);
+    existing.total_quantity += Number(row.total_quantity || 0);
+    existing.q1_qty += Number(row.q1_qty || 0);
+    existing.q2_qty += Number(row.q2_qty || 0);
+    existing.q3_qty += Number(row.q3_qty || 0);
+    existing.q4_qty += Number(row.q4_qty || 0);
+  });
+
+  return Array.from(map.values()).sort((a, b) =>
+    String(a.description || "").localeCompare(
+      String(b.description || ""),
+      undefined,
+      { sensitivity: "base" }
+    )
+  );
+};
+
 function Dashboard({ token, user, onLogout }) {
   const [activeTab, setActiveTab] = useState(
     user.role === "super_admin" ? "monitor" : "dashboard"
@@ -1935,25 +2156,32 @@ function Dashboard({ token, user, onLogout }) {
         </div>
         <div className="ngpa-app-form__table-wrapper">
           <table className="ngpa-app-table ngpa-app-table--noncse">
+            <colgroup>
+              <col className="ngpa-app-table__col-code" />
+              <col className="ngpa-app-table__col-project" />
+              <col className="ngpa-app-table__col-user" />
+              <col className="ngpa-app-table__col-early" />
+              <col className="ngpa-app-table__col-mode" />
+              <col className="ngpa-app-table__col-schedule" />
+              <col className="ngpa-app-table__col-schedule" />
+              <col className="ngpa-app-table__col-schedule" />
+              <col className="ngpa-app-table__col-schedule" />
+              <col className="ngpa-app-table__col-funds" />
+              <col className="ngpa-app-table__col-budget" />
+              <col className="ngpa-app-table__col-budget" />
+              <col className="ngpa-app-table__col-budget" />
+              <col className="ngpa-app-table__col-remarks" />
+            </colgroup>
             <thead>
               <tr>
+                <th rowSpan={2}>Code (PAP)</th>
                 <th rowSpan={2}>
-                  Code (PAP)
-                  <span className="ngpa-app-table__th-note">
-                    PAP Code / internal numbering system
-                  </span>
+                  Procurement<br />
+                  Project
                 </th>
                 <th rowSpan={2}>
-                  Procurement Project
-                  <span className="ngpa-app-table__th-note">
-                    Align with budget documents
-                  </span>
-                </th>
-                <th rowSpan={2}>
-                  PMO/End-User
-                  <span className="ngpa-app-table__th-note">
-                    Implementing / utilizing unit
-                  </span>
+                  PMO/<br />
+                  End-User
                 </th>
                 <th rowSpan={2}>
                   Is this an Early Procurement Activity? (Yes/No)
@@ -1962,20 +2190,13 @@ function Dashboard({ token, user, onLogout }) {
                 <th colSpan={4} className="ngpa-app-table__group">
                   Schedule for Each Procurement Activity
                 </th>
-                <th rowSpan={2}>
-                  Source of Funds
-                  <span className="ngpa-app-table__th-note">
-                    If Others, specify under Remarks
-                  </span>
-                </th>
+                <th rowSpan={2}>Source of Funds</th>
                 <th colSpan={3} className="ngpa-app-table__group">
                   Estimated Budget (PhP)
                 </th>
                 <th rowSpan={2}>
-                  Remarks
-                  <span className="ngpa-app-table__th-note">
-                    (brief description of Project)
-                  </span>
+                  Remarks<br />
+                  (brief description of Project)
                 </th>
               </tr>
               <tr>
@@ -1995,19 +2216,17 @@ function Dashboard({ token, user, onLogout }) {
                 const amount = row ? Number(row.total_estimated_budget || 0) : null;
                 return (
                   <tr key={row ? row.id : `noncse-blank-${idx}`}>
-                    <td>{row?.project_type || ""}</td>
+                    <td className="ngpa-app-table__center">{row?.project_type || ""}</td>
                     <td>{row?.description || ""}</td>
                     <td>{row?.end_user_offices || ""}</td>
                     <td className="ngpa-app-table__center">
                       {row ? ngpaYesNo(row.pre_proc_conf) : ""}
                     </td>
                     <td>{row?.procurement_mode || ""}</td>
-                    <td className="ngpa-app-table__center">{row?.proc_start || ""}</td>
-                    <td className="ngpa-app-table__center">{row?.proc_start || ""}</td>
-                    <td className="ngpa-app-table__center">{row?.proc_end || ""}</td>
-                    <td className="ngpa-app-table__center">
-                      {row?.delivery_period || ""}
-                    </td>
+                    <td>{row?.proc_start || ""}</td>
+                    <td>{row?.proc_start || ""}</td>
+                    <td>{row?.proc_end || ""}</td>
+                    <td>{row?.delivery_period || ""}</td>
                     <td>{row?.fund_source || ""}</td>
                     <td className="ngpa-app-table__amount">
                       {amount == null ? "" : ngpaMoney(amount)}
@@ -2022,7 +2241,8 @@ function Dashboard({ token, user, onLogout }) {
               })}
               <tr className="ngpa-app-table__total">
                 <td className="ngpa-app-table__total-label">Total</td>
-                <td colSpan={9}></td>
+                <td className="ngpa-app-table__total-count">{list.length}</td>
+                <td colSpan={8}></td>
                 <td className="ngpa-app-table__amount ngpa-app-table__total-value">
                   {ngpaMoney(total)}
                 </td>
@@ -2079,7 +2299,9 @@ function Dashboard({ token, user, onLogout }) {
   const renderAppWorkspace = (kind) => {
     const isCse = kind === "cse";
     const label = isCse ? "CSE" : "nonCSE";
-    const rows = kindAppPayload.rows || [];
+    const rawRows = kindAppPayload.rows || [];
+    // Collapse duplicate Procurement Project / description names before paging/preview.
+    const rows = mergeAppRowsByDescription(rawRows);
     const sourceTotal = approvedAppPpmps.reduce(
       (sum, p) => sum + Number(p.total_estimated_budget || 0),
       0

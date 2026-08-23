@@ -2940,6 +2940,23 @@ pre.json-block {
   padding: 0.85rem 1rem 1rem;
 }
 
+.ngpa-app-form--noncse {
+  --ngpa-noncse-ink: #000000;
+  --ngpa-noncse-surface: #ffffff;
+  --ngpa-noncse-row-fill: #ff6600;
+  --ngpa-border: var(--ngpa-noncse-ink);
+  --ngpa-header-bg: var(--ngpa-noncse-surface);
+  --ngpa-total-bg: var(--ngpa-noncse-surface);
+  color: var(--ngpa-noncse-ink);
+  font-family: Arial, sans-serif;
+  background: var(--ngpa-noncse-surface);
+  border-color: var(--ngpa-noncse-ink);
+}
+
+.ngpa-app-form--noncse .ngpa-app-form__doc-title {
+  text-transform: none;
+}
+
 .ngpa-app-form__header {
   text-align: center;
   border-bottom: 2px solid var(--ngpa-border);
@@ -3044,6 +3061,18 @@ pre.json-block {
   background: #fbfdff;
 }
 
+.ngpa-app-form--noncse .ngpa-app-table tbody tr:nth-child(even) td {
+  background: var(--ngpa-noncse-surface);
+}
+
+.ngpa-app-form--noncse .ngpa-app-table tbody tr:not(.ngpa-app-table__total) td {
+  background: var(--ngpa-noncse-row-fill);
+}
+
+.ngpa-app-form--noncse .ngpa-app-table tbody tr:not(.ngpa-app-table__total) td:nth-child(11) {
+  background: var(--ngpa-noncse-surface);
+}
+
 .ngpa-app-table__center {
   text-align: center;
 }
@@ -3054,14 +3083,35 @@ pre.json-block {
   white-space: nowrap;
 }
 
+.ngpa-app-form--noncse .ngpa-app-table__amount {
+  text-align: center;
+}
+
 .ngpa-app-table__total td {
   background: var(--ngpa-total-bg);
   font-weight: 700;
 }
 
+.ngpa-app-form--noncse .ngpa-app-table__total td {
+  background: var(--ngpa-noncse-surface);
+  font-weight: 400;
+  border-top: 3px double var(--ngpa-noncse-ink);
+}
+
 .ngpa-app-table__total-label {
   text-align: right;
   letter-spacing: 0.02em;
+}
+
+.ngpa-app-table__total-count {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.ngpa-app-form--noncse .ngpa-app-table__total-label,
+.ngpa-app-form--noncse .ngpa-app-table__total-count,
+.ngpa-app-form--noncse .ngpa-app-table__total-value {
+  text-align: center;
 }
 
 .ngpa-app-table__total-value {
@@ -3074,17 +3124,43 @@ pre.json-block {
 
 .ngpa-app-table--noncse {
   min-width: 1400px;
+  table-layout: fixed;
 }
 
-.ngpa-app-table__th-note {
-  display: block;
-  font-weight: 400;
-  font-size: 0.62rem;
-  line-height: 1.2;
-  color: var(--text-secondary);
-  text-transform: none;
-  letter-spacing: 0;
-  margin-top: 0.15rem;
+.ngpa-app-table--noncse .ngpa-app-table__col-code {
+  width: 7.5%;
+}
+
+.ngpa-app-table--noncse .ngpa-app-table__col-project {
+  width: 14%;
+}
+
+.ngpa-app-table--noncse .ngpa-app-table__col-user {
+  width: 9%;
+}
+
+.ngpa-app-table--noncse .ngpa-app-table__col-early {
+  width: 7%;
+}
+
+.ngpa-app-table--noncse .ngpa-app-table__col-mode {
+  width: 8%;
+}
+
+.ngpa-app-table--noncse .ngpa-app-table__col-schedule {
+  width: 4.5%;
+}
+
+.ngpa-app-table--noncse .ngpa-app-table__col-funds {
+  width: 8%;
+}
+
+.ngpa-app-table--noncse .ngpa-app-table__col-budget {
+  width: 7.5%;
+}
+
+.ngpa-app-table--noncse .ngpa-app-table__col-remarks {
+  width: 6%;
 }
 
 .ngpa-app-table__col-no {
@@ -3153,6 +3229,12 @@ pre.json-block {
 .ngpa-app-form__sig-date {
   font-size: 0.72rem;
   color: var(--text-secondary);
+}
+
+.ngpa-app-form--noncse .ngpa-app-form__sig-line,
+.ngpa-app-form--noncse .ngpa-app-form__sig-caption,
+.ngpa-app-form--noncse .ngpa-app-form__sig-date {
+  color: var(--ngpa-noncse-ink);
 }
 
 @media (max-width: 900px) {
