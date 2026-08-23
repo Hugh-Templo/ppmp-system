@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\App as AppModel;
 use App\Models\AppRow;
 use App\Models\AppSignatory;
-use PhpOffice\PhpSpreadsheet\IOFactory;
 use Exception;
 use ZipArchive;
 
@@ -317,6 +316,7 @@ class AppExcelExporter
         return response()->download($tmp, $filename, [
             'Content-Type' => $mime,
             'Cache-Control' => 'no-store, no-cache, must-revalidate',
+            'Access-Control-Expose-Headers' => 'Content-Disposition, Content-Type',
         ])->deleteFileAfterSend(true);
     }
 
@@ -426,7 +426,7 @@ class AppExcelExporter
         $n = is_int($value) || (is_numeric($value) && floor((float) $value) == $value)
             ? (string) (int) $value
             : rtrim(rtrim(sprintf('%.10F', (float) $value), '0'), '.');
-        self::replaceSheetCell($xml, $ref, function (string $attrs) use ($ref, $n) {
+        self::upsertSheetCell($xml, $ref, function (string $attrs) use ($ref, $n) {
             $attrs = preg_replace('/\s+t="[^"]*"/', '', $attrs) ?? $attrs;
             return '<c r="' . $ref . '"' . $attrs . '><v>' . $n . '</v></c>';
         });
@@ -435,20 +435,77 @@ class AppExcelExporter
     private static function writeSheetTextCell(string &$xml, string $ref, string $text): void
     {
         $escaped = htmlspecialchars($text, ENT_XML1 | ENT_QUOTES, 'UTF-8');
-        self::replaceSheetCell($xml, $ref, function (string $attrs) use ($ref, $escaped) {
+        self::upsertSheetCell($xml, $ref, function (string $attrs) use ($ref, $escaped) {
             $attrs = preg_replace('/\s+t="[^"]*"/', '', $attrs) ?? $attrs;
             return '<c r="' . $ref . '"' . $attrs . ' t="inlineStr"><is><t xml:space="preserve">' . $escaped . '</t></is></c>';
         });
     }
 
-    private static function replaceSheetCell(string &$xml, string $ref, callable $builder): void
+    private static function excelNumberString($value): string
+    {
+        return is_int($value) || (is_numeric($value) && floor((float) $value) == $value)
+            ? (string) (int) $value
+            : rtrim(rtrim(sprintf('%.10F', (float) $value), '0'), '.');
+    }
+
+    private static function writeSheetFormulaCell(string &$xml, string $ref, string $formula, $cached = null): void
+    {
+        $escaped = htmlspecialchars($formula, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+        $cachedXml = $cached === null || $cached === ''
+            ? '<v/>'
+            : '<v>' . self::excelNumberString($cached) . '</v>';
+        self::upsertSheetCell($xml, $ref, function (string $attrs) use ($ref, $escaped, $cachedXml) {
+            $attrs = preg_replace('/\s+t="[^"]*"/', '', $attrs) ?? $attrs;
+            return '<c r="' . $ref . '"' . $attrs . '><f>' . $escaped . '</f>' . $cachedXml . '</c>';
+        });
+    }
+
+    private static function replaceSheetCell(string &$xml, string $ref, callable $builder): int
     {
         $quoted = preg_quote($ref, '/');
         $pattern = '/<c r="' . $quoted . '"([^>]*)\/>|<c r="' . $quoted . '"([^>]*)>.*?<\/c>/s';
+        $count = 0;
         $xml = preg_replace_callback($pattern, function ($m) use ($builder) {
             $attrs = ($m[1] ?? '') !== '' ? $m[1] : ($m[2] ?? '');
             return $builder($attrs);
-        }, $xml, 1);
+        }, $xml, 1, $count);
+        return (int) $count;
+    }
+
+    private static function upsertSheetCell(string &$xml, string $ref, callable $builder): void
+    {
+        if (self::replaceSheetCell($xml, $ref, $builder) > 0) {
+            return;
+        }
+        if (!preg_match('/^([A-Z]+)(\d+)$/', $ref, $m)) {
+            return;
+        }
+        $rowNum = (int) $m[2];
+        $cellXml = $builder(' s="16"');
+        if (preg_match('/<row r="' . $rowNum . '"[^>]*>/', $xml)) {
+            $xml = preg_replace(
+                '/(<row r="' . $rowNum . '"[^>]*>)([\s\S]*?)(<\/row>)/',
+                '$1$2' . $cellXml . '$3',
+                $xml,
+                1
+            );
+            return;
+        }
+        $rowXml = '<row r="' . $rowNum . '" ht="15" customHeight="1">' . $cellXml . '</row>';
+        if (preg_match_all('/<row r="(\d+)"/', $xml, $rows)) {
+            foreach ($rows[1] as $existing) {
+                if ((int) $existing > $rowNum) {
+                    $xml = preg_replace(
+                        '/<row r="' . $existing . '"/',
+                        $rowXml . '<row r="' . $existing . '"',
+                        $xml,
+                        1
+                    );
+                    return;
+                }
+            }
+        }
+        $xml = str_replace('</sheetData>', $rowXml . '</sheetData>', $xml);
     }
 
     private static function normalizeCseKey(?string $value): string
@@ -696,9 +753,108 @@ class AppExcelExporter
         return self::timelineSortKey($a) >= self::timelineSortKey($b) ? $a : $b;
     }
 
+    private static function paintNonCseDataRowsOrange(string &$stylesXml): void
+    {
+        if (!preg_match('/<fills count="(\d+)">/', $stylesXml, $m)) {
+            return;
+        }
+        $count = (int) $m[1];
+        $orange = '<fill><patternFill patternType="solid"><fgColor rgb="FFF4B083"/><bgColor rgb="FFF4B083"/></patternFill></fill>';
+        $stylesXml = preg_replace(
+            '/<fills count="' . $count . '">/',
+            '<fills count="' . ($count + 1) . '">',
+            $stylesXml,
+            1
+        );
+        $stylesXml = str_replace('</fills>', $orange . '</fills>', $stylesXml);
+        $orangeId = $count;
+        // Keep Total column styles (xf 25/26) white — template guide: Total ABC is not editable.
+        $stylesXml = preg_replace_callback(
+            '/(<cellXfs\b[^>]*>)([\s\S]*?)(<\/cellXfs>)/',
+            function ($block) use ($orangeId) {
+                $i = -1;
+                $body = preg_replace_callback('/<xf\b([^>]*?)>/', function ($match) use ($orangeId, &$i) {
+                    $i++;
+                    $attrs = $match[1];
+                    if (in_array($i, [25, 26], true)) {
+                        return $match[0];
+                    }
+                    if (!preg_match('/fontId="8"/', $attrs) || !preg_match('/fillId="2"/', $attrs)) {
+                        return $match[0];
+                    }
+                    $attrs = preg_replace('/fillId="2"/', 'fillId="' . $orangeId . '"', $attrs, 1);
+                    return '<xf' . $attrs . '>';
+                }, $block[2]);
+                return $block[1] . $body . $block[3];
+            },
+            $stylesXml
+        ) ?? $stylesXml;
+    }
+
+    private static function expandNonCseTemplateRows(string &$xml, int $copyRow, int $insertBefore, int $extra): void
+    {
+        if ($extra <= 0) {
+            return;
+        }
+        if (!preg_match('/<row r="' . $copyRow . '"[\s\S]*?<\/row>/', $xml, $m)) {
+            return;
+        }
+        $templateRowXml = $m[0];
+
+        $rowNums = [];
+        if (preg_match_all('/<row r="(\d+)"/', $xml, $rowMatches)) {
+            $rowNums = array_map('intval', $rowMatches[1]);
+        }
+        $max = $rowNums ? max($rowNums) : ($insertBefore + 40);
+        for ($r = $max; $r >= $insertBefore; $r--) {
+            $n = $r + $extra;
+            $xml = preg_replace('/(?<![0-9A-Z])([A-Z]{1,3})' . $r . '(?![0-9])/', '${1}' . $n, $xml) ?? $xml;
+            $xml = preg_replace('/<row r="' . $r . '"/', '<row r="' . $n . '"', $xml) ?? $xml;
+        }
+
+        $dataEnd = $copyRow + $extra;
+        $replacements = [
+            'A5:E23' => "A5:E{$dataEnd}",
+            'J5:J23' => "J5:J{$dataEnd}",
+            'L5:N23' => "L5:N{$dataEnd}",
+            'F5:I23' => "F5:I{$dataEnd}",
+            'D5:D23' => "D5:D{$dataEnd}",
+            'N5:N23' => "N5:N{$dataEnd}",
+            'A5:A23' => "A5:A{$dataEnd}",
+        ];
+        $xml = str_replace(array_keys($replacements), array_values($replacements), $xml);
+
+        $clones = '';
+        for ($i = 0; $i < $extra; $i++) {
+            $newR = $insertBefore + $i;
+            $clone = preg_replace('/<row r="' . $copyRow . '"/', '<row r="' . $newR . '"', $templateRowXml) ?? $templateRowXml;
+            $clone = preg_replace(
+                '/(?<![0-9A-Z])([A-Z]{1,3})' . $copyRow . '(?![0-9])/',
+                '${1}' . $newR,
+                $clone
+            ) ?? $clone;
+            $clones .= $clone;
+        }
+        $shiftedTotal = $insertBefore + $extra;
+        $xml = preg_replace(
+            '/<row r="' . $shiftedTotal . '"/',
+            $clones . '<row r="' . $shiftedTotal . '"',
+            $xml,
+            1
+        ) ?? $xml;
+
+        if (preg_match('/<dimension ref="A1:N(\d+)"/', $xml, $dim)) {
+            $xml = str_replace(
+                $dim[0],
+                '<dimension ref="A1:N' . ((int) $dim[1] + $extra) . '"',
+                $xml
+            );
+        }
+    }
+
     public static function exportNonCseApp(int $fiscalYear): string
     {
-        list($app, $allRows) = self::getAppAndRows($fiscalYear);
+        [, $allRows] = self::getAppAndRows($fiscalYear);
         $nonCseRows = self::mergeAppRowsByDescription(
             $allRows->filter(fn($r) => !(bool)$r->is_cse)->values()
         );
@@ -708,56 +864,123 @@ class AppExcelExporter
             throw new Exception("Template missing: " . $template);
         }
 
-        $spreadsheet = IOFactory::load($template);
-        $ws = $spreadsheet->getActiveSheet();
+        $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'noncse_app_' . uniqid('', true) . '.xlsx';
+        if (!@copy($template, $tmp)) {
+            throw new Exception('Could not copy Non-CSE APP template.');
+        }
 
-        $ws->setCellValue('C1', "(Ormoc City Government) Annual Procurement Plan for FY {$fiscalYear}");
+        $zip = new ZipArchive();
+        if ($zip->open($tmp) !== true) {
+            @unlink($tmp);
+            throw new Exception('Could not open Non-CSE APP template.');
+        }
+
+        $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
+        $stylesXml = $zip->getFromName('xl/styles.xml');
+        if ($sheetXml === false) {
+            $zip->close();
+            @unlink($tmp);
+            throw new Exception('Non-CSE APP template is missing worksheet data.');
+        }
 
         $dataStart = 5;
+        $templateSlots = 19;
         $itemsCount = count($nonCseRows);
+        $extra = max(0, $itemsCount - $templateSlots);
 
-        if ($itemsCount > 0) {
-            $ws->insertNewRowBefore($dataStart, $itemsCount);
+        if ($stylesXml !== false) {
+            self::paintNonCseDataRowsOrange($stylesXml);
+            $zip->deleteName('xl/styles.xml');
+            $zip->addFromString('xl/styles.xml', $stylesXml);
+        }
 
-            foreach ($nonCseRows as $i => $row) {
-                $r = $dataStart + $i;
-                $ws->setCellValue("A{$r}", $row->project_type ?? '');
-                $ws->setCellValue("B{$r}", $row->description ?? '');
-                $ws->setCellValue("C{$r}", $row->end_user_offices ?? '');
-                $ws->setCellValue("D{$r}", !empty($row->pre_proc_conf) ? 'Yes' : 'No');
-                $ws->setCellValue("E{$r}", $row->procurement_mode ?? '');
-                $ws->setCellValue("F{$r}", $row->proc_start ?? '');
-                $ws->setCellValue("G{$r}", $row->proc_start ?? '');
-                $ws->setCellValue("H{$r}", $row->proc_end ?? '');
-                $ws->setCellValue("I{$r}", $row->delivery_period ?? '');
-                $ws->setCellValue("J{$r}", $row->fund_source ?? '');
-                $ws->setCellValue("K{$r}", "=IF(AND(L{$r}=\"\",M{$r}=\"\"),\"\",SUM(L{$r},M{$r}))");
+        self::expandNonCseTemplateRows($sheetXml, 23, 24, $extra);
 
-                $mooe = (float)($row->total_estimated_budget ?? 0);
-                $ws->setCellValue("L{$r}", $mooe);
-                $ws->getStyle("L{$r}")->getNumberFormat()->setFormatCode('#,##0.00');
+        self::writeSheetTextCell(
+            $sheetXml,
+            'C1',
+            "(Ormoc City Government) Annual Procurement Plan for FY {$fiscalYear}"
+        );
 
-                $ws->setCellValue("M{$r}", null);
-                $ws->setCellValue("N{$r}", $row->quantity_size ?? '');
+        $budgetTotal = 0.0;
+        foreach ($nonCseRows as $i => $row) {
+            $r = $dataStart + $i;
+            self::writeSheetTextCell($sheetXml, "A{$r}", (string) ($row->project_type ?? ''));
+            self::writeSheetTextCell($sheetXml, "B{$r}", (string) ($row->description ?? ''));
+            self::writeSheetTextCell($sheetXml, "C{$r}", (string) ($row->end_user_offices ?? ''));
+            self::writeSheetTextCell($sheetXml, "D{$r}", !empty($row->pre_proc_conf) ? 'Yes' : 'No');
+            self::writeSheetTextCell($sheetXml, "E{$r}", (string) ($row->procurement_mode ?? ''));
+            self::writeSheetTextCell($sheetXml, "F{$r}", (string) ($row->proc_start ?? ''));
+            self::writeSheetTextCell($sheetXml, "G{$r}", (string) ($row->proc_start ?? ''));
+            self::writeSheetTextCell($sheetXml, "H{$r}", (string) ($row->proc_end ?? ''));
+            self::writeSheetTextCell($sheetXml, "I{$r}", (string) ($row->delivery_period ?? ''));
+            self::writeSheetTextCell($sheetXml, "J{$r}", (string) ($row->fund_source ?? ''));
+            $mooe = (float) ($row->total_estimated_budget ?? 0);
+            $budgetTotal += $mooe;
+            if ($mooe != 0.0) {
+                self::writeSheetNumericCell($sheetXml, "L{$r}", $mooe);
+            }
+            $qty = trim((string) ($row->quantity_size ?? ''));
+            if ($qty !== '') {
+                self::writeSheetTextCell($sheetXml, "N{$r}", $qty);
+            }
+            // Guide STEP 6: Total ABC auto-computes MOOE + CO and is not editable.
+            self::writeSheetFormulaCell(
+                $sheetXml,
+                "K{$r}",
+                "IF(AND(L{$r}=\"\",M{$r}=\"\"),\"\",SUM(L{$r},M{$r}))",
+                $mooe != 0.0 ? $mooe : null
+            );
+        }
+
+        $footerRow = 24 + $extra;
+        if ($budgetTotal != 0.0) {
+            $n = self::excelNumberString($budgetTotal);
+            foreach (['K', 'L'] as $col) {
+                $sheetXml = preg_replace(
+                    '/(<c r="' . $col . $footerRow . '"[^>]*>[\s\S]*?<v>)[^<]*/',
+                    '${1}' . $n,
+                    $sheetXml,
+                    1
+                ) ?? $sheetXml;
             }
         }
 
         $sig = self::loadAppSignatory();
-        $preparedRow = 15 + $itemsCount;
-        if (!empty($sig['prepared_by'])) $ws->setCellValue("B{$preparedRow}", $sig['prepared_by']);
-        if (!empty($sig['prepared_by_designation'])) $ws->setCellValue("B" . ($preparedRow + 1), $sig['prepared_by_designation']);
-        if (!empty($sig['recommended_by'])) $ws->setCellValue("E{$preparedRow}", $sig['recommended_by']);
-        if (!empty($sig['recommended_by_designation'])) $ws->setCellValue("E" . ($preparedRow + 1), $sig['recommended_by_designation']);
-        if (!empty($sig['approved_by_name'])) $ws->setCellValue("K{$preparedRow}", $sig['approved_by_name']);
-        if (!empty($sig['approved_by_designation'])) $ws->setCellValue("K" . ($preparedRow + 1), $sig['approved_by_designation']);
+        $nameRow = 29 + $extra;
+        $desigRow = 30 + $extra;
+        if (!empty($sig['prepared_by'])) {
+            self::writeSheetTextCell($sheetXml, "B{$nameRow}", $sig['prepared_by']);
+        }
+        if (!empty($sig['prepared_by_designation'])) {
+            self::writeSheetTextCell($sheetXml, "B{$desigRow}", $sig['prepared_by_designation']);
+        }
+        if (!empty($sig['recommended_by'])) {
+            self::writeSheetTextCell($sheetXml, "E{$nameRow}", $sig['recommended_by']);
+        }
+        if (!empty($sig['recommended_by_designation'])) {
+            self::writeSheetTextCell($sheetXml, "E{$desigRow}", $sig['recommended_by_designation']);
+        }
+        if (!empty($sig['approved_by_name'])) {
+            self::writeSheetTextCell($sheetXml, "K{$nameRow}", $sig['approved_by_name']);
+        }
+        if (!empty($sig['approved_by_designation'])) {
+            self::writeSheetTextCell($sheetXml, "K{$desigRow}", $sig['approved_by_designation']);
+        }
 
-        $tempFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'noncse_app_' . uniqid('', true) . '.xlsx';
-        $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
-        $writer->setPreCalculateFormulas(false);
-        $writer->save($tempFile);
+        $zip->deleteName('xl/worksheets/sheet1.xml');
+        $zip->addFromString('xl/worksheets/sheet1.xml', $sheetXml);
+        if ($zip->close() !== true) {
+            @unlink($tmp);
+            throw new Exception('Could not save Non-CSE APP Excel file.');
+        }
 
-        $content = file_get_contents($tempFile);
-        @unlink($tempFile);
+        $content = file_get_contents($tmp);
+        @unlink($tmp);
+
+        if ($content === false || !self::isExcelBinary($content)) {
+            throw new Exception('Failed to build a valid Non-CSE APP Excel file.');
+        }
 
         return $content;
     }

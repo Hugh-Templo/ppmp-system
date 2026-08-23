@@ -1271,13 +1271,40 @@ function Dashboard({ token, user, onLogout }) {
       showNotification(detail, "danger");
       return false;
     }
-    const blob = new Blob([buf], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
+    const cd = res.headers.get("content-disposition") || "";
+    const star = cd.match(/filename\*=(?:UTF-8'')?([^;]+)/i);
+    const plain = cd.match(/filename=(?:["']?)([^";]+)/i);
+    let serverName = "";
+    if (star) {
+      try {
+        serverName = decodeURIComponent(star[1].trim().replace(/^["']|["']$/g, ""));
+      } catch (_) {
+        serverName = star[1].trim().replace(/^["']|["']$/g, "");
+      }
+    } else if (plain) {
+      serverName = plain[1].trim().replace(/["']/g, "");
+    }
+    let finalName = serverName || filename;
+    if (isOle) {
+      finalName = finalName.replace(/\.xlsx$/i, ".xls").replace(/\.xlsm$/i, ".xls");
+      if (!/\.xls$/i.test(finalName)) finalName += ".xls";
+    } else if (isZip) {
+      if (/\.xls$/i.test(finalName) && !/\.xlsx$/i.test(finalName) && !/\.xlsm$/i.test(finalName)) {
+        finalName = finalName.replace(/\.xls$/i, ".xlsx");
+      } else if (!/\.xls/i.test(finalName)) {
+        finalName += ".xlsx";
+      }
+    }
+    const mime = isOle
+      ? "application/vnd.ms-excel"
+      : /\.xlsm$/i.test(finalName)
+        ? "application/vnd.ms-excel.sheet.macroEnabled.12"
+        : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    const blob = new Blob([buf], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = filename;
+    a.download = finalName;
     document.body.appendChild(a);
     a.click();
     a.remove();

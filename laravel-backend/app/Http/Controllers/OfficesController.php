@@ -587,14 +587,13 @@ class OfficesController extends Controller
 
         // Prefer original uploaded file: disk path first, then MySQL LONGBLOB
         $diskPath = $ppmp->absoluteExcelPath();
-        if ($diskPath && is_file($diskPath)) {
-            $diskBytes = file_get_contents($diskPath);
-            if ($diskBytes !== false && AppExcelExporter::isExcelBinary($diskBytes)) {
-                return response()->download($diskPath, $filename, [
-                    'Content-Type' => $mime,
-                    'Cache-Control' => 'no-store, no-cache, must-revalidate',
-                ]);
-            }
+        $diskBytes = ($diskPath && is_file($diskPath)) ? file_get_contents($diskPath) : false;
+        if ($diskBytes !== false && AppExcelExporter::isExcelBinary($diskBytes)) {
+            return response()->download($diskPath, $filename, [
+                'Content-Type' => $mime,
+                'Cache-Control' => 'no-store, no-cache, must-revalidate',
+                'Access-Control-Expose-Headers' => 'Content-Disposition, Content-Type',
+            ]);
         }
 
         $blobRow = \Illuminate\Support\Facades\DB::table('ppmp')
