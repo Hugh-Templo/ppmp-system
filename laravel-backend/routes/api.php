@@ -9,6 +9,7 @@ use App\Http\Controllers\DbmController;
 use App\Http\Controllers\SuperadminController;
 use App\Http\Controllers\OfficeNotificationController;
 use App\Http\Controllers\MaintenanceController;
+use App\Http\Controllers\PpmpUploadGraceController;
 
 // Health check (no throttle — used to diagnose Hostinger / API outages)
 Route::get('/health', function () {
@@ -62,6 +63,7 @@ Route::prefix('offices')->group(function () {
         Route::put('/budget/{office_id}', [OfficesController::class, 'updateOfficeBudget']);
 
         Route::get('/notifications/active', [OfficeNotificationController::class, 'active']);
+        Route::get('/ppmp-upload-grace', [PpmpUploadGraceController::class, 'status']);
 
         Route::get('/ppmps', [OfficesController::class, 'listPpmps']);
         Route::post('/ppmps/upload', [OfficesController::class, 'uploadPpmp'])
@@ -122,6 +124,9 @@ Route::prefix('bac')->middleware(['jwt', 'role:bac_admin'])->group(function () {
 
     Route::get('/maintenance', [MaintenanceController::class, 'show']);
     Route::put('/maintenance', [MaintenanceController::class, 'update']);
+
+    Route::get('/ppmp-upload-grace', [PpmpUploadGraceController::class, 'show']);
+    Route::put('/ppmp-upload-grace', [PpmpUploadGraceController::class, 'update']);
 });
 
 // Superadmin monitoring

@@ -49,6 +49,9 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
   const [maintenance, setMaintenance] = useState({ is_enabled: false, message: "" });
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
   const [maintenanceSaving, setMaintenanceSaving] = useState(false);
+  const [grace, setGrace] = useState({ is_enabled: false, expires_at: "" });
+  const [graceLoading, setGraceLoading] = useState(false);
+  const [graceSaving, setGraceSaving] = useState(false);
 
   const yearOptions = useMemo(() => {
     const base = defaultFiscalYear();
@@ -145,6 +148,112 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
     });
   };
 
+  const toDatetimeLocalValue = (iso) => {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "";
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    } catch {
+      return "";
+    }
+  };
+
+  const loadGrace = async () => {
+    setGraceLoading(true);
+    try {
+      const res = await apiFetch("/api/bac/ppmp-upload-grace", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setGrace({
+          is_enabled: Boolean(data.is_enabled || data.is_active),
+          expires_at: toDatetimeLocalValue(data.expires_at) || "",
+        });
+      }
+    } catch {
+      // non-fatal
+    } finally {
+      setGraceLoading(false);
+    }
+  };
+
+  const saveGrace = async (next) => {
+    setGraceSaving(true);
+    try {
+      const expiresIso = next.expires_at
+        ? new Date(next.expires_at).toISOString()
+        : null;
+      const res = await apiFetch("/api/bac/ppmp-upload-grace", {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          is_enabled: Boolean(next.is_enabled),
+          expires_at: expiresIso,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showNotification(data.detail || data.message || "Failed to update PPMP upload grace period", "error");
+        return false;
+      }
+      setGrace({
+        is_enabled: Boolean(data.is_enabled || data.is_active),
+        expires_at: toDatetimeLocalValue(data.expires_at) || next.expires_at || "",
+      });
+      showNotification(
+        data.is_enabled || data.is_active
+          ? "PPMP upload grace period enabled"
+          : "PPMP upload grace period disabled",
+        "success"
+      );
+      return true;
+    } catch {
+      showNotification("Failed to update PPMP upload grace period", "error");
+      return false;
+    } finally {
+      setGraceSaving(false);
+    }
+  };
+
+  const handleToggleGrace = () => {
+    if (grace.is_enabled) {
+      saveGrace({
+        is_enabled: false,
+        expires_at: grace.expires_at,
+      });
+      return;
+    }
+
+    if (!grace.expires_at) {
+      showNotification("Set a turn-off date and time before enabling the grace period.", "error");
+      return;
+    }
+    const expiresDate = new Date(grace.expires_at);
+    if (Number.isNaN(expiresDate.getTime()) || expiresDate.getTime() <= Date.now()) {
+      showNotification("Turn-off date and time must be in the future.", "error");
+      return;
+    }
+
+    showConfirm({
+      title: "Enable PPMP upload grace period?",
+      message:
+        "All offices — including those already submitted or verified — will be able to upload a new PPMP until the turn-off time you set. Verified plans stay until Budget verifies a replacement.",
+      confirmLabel: "Enable",
+      onConfirm: async () => {
+        await saveGrace({
+          is_enabled: true,
+          expires_at: grace.expires_at,
+        });
+      },
+    });
+  };
+
   const loadMailQuota = async () => {
     try {
       const res = await apiFetch("/api/bac/office-notifications/mail-quota", {
@@ -182,6 +291,7 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
   useEffect(() => {
     loadItems();
     loadMaintenance();
+    loadGrace();
   }, [token]);
 
   const resetForm = () => {
@@ -436,6 +546,7 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
 
   return (
     <div className="office-notification-page">
+      <div className="office-admin-toggles">
       <div
         className={`office-maintenance-card${maintenance.is_enabled ? " is-on" : ""}`}
         role="status"
@@ -489,6 +600,63 @@ function OfficeNotificationPanel({ token, showNotification, showConfirm }) {
             {maintenance.is_enabled ? "Disable maintenance" : "Enable maintenance"}
           </button>
         </div>
+      </div>
+
+      <div
+        className={`office-maintenance-card office-grace-card${grace.is_enabled ? " is-on" : ""}`}
+        role="status"
+      >
+        <div className="office-maintenance-card__header">
+          <div className="office-maintenance-card__title">
+            <i className="fas fa-upload" aria-hidden="true" />
+            PPMP upload grace period
+          </div>
+          <span
+            className={`office-maintenance-chip${grace.is_enabled ? " is-on" : ""}`}
+          >
+            {graceLoading ? "…" : grace.is_enabled ? "On" : "Off"}
+          </span>
+        </div>
+        <p className="office-maintenance-card__help">
+          When enabled, <strong>all offices</strong> can upload a new PPMP — including those already
+          submitted or verified. Verified plans are kept until Budget verifies a replacement.
+          Set when the window should turn off automatically.
+        </p>
+        <div className="form-group" style={{ marginBottom: "0.75rem" }}>
+          <label className="form-label" htmlFor="grace-expires-at">
+            Turn off at {grace.is_enabled ? "" : "(required to enable)"}
+          </label>
+          <input
+            id="grace-expires-at"
+            type="datetime-local"
+            className="form-input"
+            value={grace.expires_at}
+            onChange={(e) =>
+              setGrace((prev) => ({ ...prev, expires_at: e.target.value }))
+            }
+            disabled={graceLoading || graceSaving}
+          />
+          {grace.is_enabled && grace.expires_at && (
+            <p className="form-help" style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)" }}>
+              Turns off at {formatDateTime(new Date(grace.expires_at).toISOString())}.
+            </p>
+          )}
+        </div>
+        <div className="office-maintenance-card__actions">
+          <button
+            type="button"
+            className={grace.is_enabled ? "btn btn-success" : "btn btn-danger"}
+            onClick={handleToggleGrace}
+            disabled={graceLoading || graceSaving}
+          >
+            {graceSaving
+              ? "Saving..."
+              : grace.is_enabled
+                ? "Disable grace period"
+                : "Enable grace period"}
+          </button>
+        </div>
+      </div>
       </div>
 
       {mailQuota && (

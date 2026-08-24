@@ -40,6 +40,7 @@ class BudgetController extends Controller
         $ppmps = Ppmp::query()
             ->where('fiscal_year', $fiscalYear)
             ->whereIn('office_id', $offices->pluck('id'))
+            ->whereNull('superseded_at')
             ->select([
                 'id', 'title', 'fiscal_year', 'office_id', 'status',
                 'created_at', 'updated_at',
@@ -113,6 +114,7 @@ class BudgetController extends Controller
         $rows = Ppmp::query()
             ->join('office', 'office.id', '=', 'ppmp.office_id')
             ->where('ppmp.status', 'Approved')
+            ->whereNull('ppmp.superseded_at')
             ->orderByDesc('ppmp.fiscal_year')
             ->orderBy('office.name')
             ->orderByDesc('ppmp.is_cse')
@@ -279,14 +281,23 @@ class BudgetController extends Controller
 
         if ($action === 'approve') {
             $ppmp->status = 'Approved';
+            $ppmp->superseded_at = null;
+            $ppmp->save();
+
+            // Newer verification supersedes any other Approved PPMP for same office + year.
+            Ppmp::where('office_id', $ppmp->office_id)
+                ->where('fiscal_year', $ppmp->fiscal_year)
+                ->where('status', 'Approved')
+                ->where('id', '!=', $ppmp->id)
+                ->whereNull('superseded_at')
+                ->update(['superseded_at' => now()]);
         } elseif ($action === 'return') {
             $ppmp->status = 'Returned';
             $ppmp->remarks = $remarks;
+            $ppmp->save();
         } else {
             return response()->json(['detail' => "Invalid action. Use 'approve' or 'return'"], 400);
         }
-
-        $ppmp->save();
 
         return response()->json([
             'message' => "PPMP has been successfully {$ppmp->status}",

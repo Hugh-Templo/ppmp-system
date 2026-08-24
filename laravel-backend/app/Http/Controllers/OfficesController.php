@@ -9,6 +9,7 @@ use App\Models\Office;
 use App\Models\Ppmp;
 use App\Models\PpmpItem;
 use App\Models\CseCatalogItem;
+use App\Models\PpmpUploadGrace;
 use App\Services\PpmpExcelParser;
 use App\Services\PpmpExcelExporter;
 use App\Services\AppExcelExporter;
@@ -202,7 +203,7 @@ class OfficesController extends Controller
             Ppmp::where('office_id', $office->id)
                 ->select([
                     'id', 'title', 'fiscal_year', 'office_id', 'status', 'type', 'is_cse',
-                    'remarks', 'excel_path', 'excel_filename', 'excel_mime', 'excel_size',
+                    'remarks', 'superseded_at', 'excel_path', 'excel_filename', 'excel_mime', 'excel_size',
                     'created_at', 'updated_at',
                 ])
                 ->orderByDesc('fiscal_year')
@@ -265,6 +266,29 @@ class OfficesController extends Controller
             return response()->json(['detail' => 'No PPMP line items found in the uploaded Excel file'], 400);
         }
 
+        $graceActive = PpmpUploadGrace::isActive();
+        $existingForYear = Ppmp::where('office_id', $office->id)
+            ->where('fiscal_year', $fiscalYear)
+            ->whereNull('superseded_at')
+            ->get();
+
+        // Without grace: block upload when office only has Pending/Approved (no Draft/Returned to replace).
+        // With grace: allow a new Draft beside Approved; Pending is still replaced below.
+        if (!$graceActive) {
+            $blocked = $existingForYear->isNotEmpty()
+                && !$existingForYear->contains(
+                    fn ($p) => in_array($p->status, ['Draft', 'Returned'], true)
+                );
+            if ($blocked) {
+                $pending = $existingForYear->contains(fn ($p) => $p->status === 'Pending Budget Review');
+                return response()->json([
+                    'detail' => $pending
+                        ? 'Upload is unavailable while your PPMP is Pending Budget Review. You can upload again if Budget returns it for revision, or when the PPMP upload grace period is enabled.'
+                        : 'Upload is unavailable because your PPMP has been Approved / validated. No further action is needed unless the PPMP upload grace period is enabled.',
+                ], 400);
+            }
+        }
+
         // Persist signatories from the Excel footer onto the office record.
         // Labels move with item count, so values come from parser meta (not fixed rows).
         $signatoryTouched = false;
@@ -321,10 +345,11 @@ class OfficesController extends Controller
 
         $ppmpTitle = mb_convert_encoding($expectedStem, 'UTF-8', 'UTF-8');
 
-        // Replace all Draft / Returned for same office + year (mixed CSE/NONCSE in one file)
+        // Replace Draft / Returned / Pending for same office + year.
+        // Approved is never deleted on upload (grace creates a new Draft beside it).
         $oldPpmps = Ppmp::where('office_id', $office->id)
             ->where('fiscal_year', $fiscalYear)
-            ->whereIn('status', ['Draft', 'Returned'])
+            ->whereIn('status', ['Draft', 'Returned', 'Pending Budget Review'])
             ->get();
 
         foreach ($oldPpmps as $old) {
@@ -426,7 +451,7 @@ class OfficesController extends Controller
         $ppmpPayload = Ppmp::query()
             ->select([
                 'id', 'title', 'fiscal_year', 'office_id', 'status', 'type', 'is_cse',
-                'remarks', 'excel_path', 'excel_filename', 'excel_mime', 'excel_size',
+                'remarks', 'superseded_at', 'excel_path', 'excel_filename', 'excel_mime', 'excel_size',
                 'created_at', 'updated_at',
             ])
             ->find($newPpmp->id);
@@ -526,7 +551,7 @@ class OfficesController extends Controller
         $ppmp = Ppmp::with('items')
             ->select([
                 'id', 'title', 'fiscal_year', 'office_id', 'status', 'type', 'is_cse',
-                'remarks', 'excel_path', 'excel_filename', 'excel_mime', 'excel_size',
+                'remarks', 'superseded_at', 'excel_path', 'excel_filename', 'excel_mime', 'excel_size',
                 'created_at', 'updated_at',
             ])
             ->find($id);

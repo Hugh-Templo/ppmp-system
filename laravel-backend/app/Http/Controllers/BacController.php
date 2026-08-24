@@ -383,7 +383,10 @@ class BacController extends Controller
 
     public function consolidatePpmps(int $fiscal_year)
     {
-        $approvedPpmps = Ppmp::where('fiscal_year', $fiscal_year)->where('status', 'Approved')->get();
+        $approvedPpmps = Ppmp::where('fiscal_year', $fiscal_year)
+            ->where('status', 'Approved')
+            ->whereNull('superseded_at')
+            ->get();
 
         $app = AppModel::where('fiscal_year', $fiscal_year)->first();
 
@@ -588,7 +591,10 @@ class BacController extends Controller
         $kind = strtolower(trim($request->query('kind', 'cse')));
         $wantCse = $kind === 'cse';
 
-        $approved = Ppmp::where('fiscal_year', $fy)->where('status', 'Approved')->get();
+        $approved = Ppmp::where('fiscal_year', $fy)
+            ->where('status', 'Approved')
+            ->whereNull('superseded_at')
+            ->get();
         if ($approved->isEmpty()) return response()->json([]);
 
         $offices = Office::all()->keyBy('id');

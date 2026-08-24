@@ -22,6 +22,7 @@ class Ppmp extends Model
         'type',
         'is_cse',
         'remarks',
+        'superseded_at',
         'excel_path',
         'excel_filename',
         'excel_mime',
@@ -43,6 +44,7 @@ class Ppmp extends Model
         'posted_at' => 'datetime',
         'posted_by' => 'integer',
         'excel_size' => 'integer',
+        'superseded_at' => 'datetime',
     ];
 
     protected $appends = [

@@ -55,7 +55,7 @@ const PPMP_MONTHS = [
 const PPMP_UPLOAD_STEPS = [
   "Reading the Excel workbook…",
   "Validating PPMP line items…",
-  "Saving your procurement plan…",
+  "Saving your PPMP…",
 ];
 
 const formatMonthYear = (month, year) => {
@@ -416,6 +416,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const [notification, setNotification] = useState({ message: "", type: "" });
   const [activeOfficeNotice, setActiveOfficeNotice] = useState(null);
+  const [ppmpUploadGrace, setPpmpUploadGrace] = useState({ is_active: false, expires_at: null });
   const [confirmDialog, setConfirmDialog] = useState({
     open: false,
     title: "",
@@ -506,6 +507,7 @@ function Dashboard({ token, user, onLogout }) {
       fetchOfficePpmps();
       fetchOffices();
       fetchActiveOfficeNotice();
+      fetchPpmpUploadGrace();
       return;
     }
     if (user.role === "budget_office") {
@@ -629,6 +631,23 @@ function Dashboard({ token, user, onLogout }) {
       if (res.ok) {
         const data = await res.json();
         setActiveOfficeNotice(data || null);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchPpmpUploadGrace = async () => {
+    try {
+      const res = await apiFetch("/api/offices/ppmp-upload-grace", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPpmpUploadGrace({
+          is_active: Boolean(data.is_active || data.is_enabled),
+          expires_at: data.expires_at || null,
+        });
       }
     } catch (err) {
       console.error(err);
@@ -1096,7 +1115,7 @@ function Dashboard({ token, user, onLogout }) {
 
   const handleCreatePpmp = async (e) => {
     e.preventDefault();
-    showNotification("Upload an Excel PPMP file instead of creating a blank plan", "danger");
+    showNotification("Upload an Excel PPMP file instead of creating a blank PPMP", "danger");
   };
 
   const handleAddPpmpItem = async (e) => {
@@ -2738,7 +2757,7 @@ function Dashboard({ token, user, onLogout }) {
                 "{selectedPpmp.ppmp.remarks}"
               </div>
               <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "1rem" }}>
-                Budget returned or unposted this plan. Upload a revised Excel PPMP from the Dashboard, then submit again for validation.
+                Budget returned or unposted this PPMP. Upload a revised Excel PPMP from the Dashboard, then submit again for validation.
               </p>
             </div>
           )}
@@ -2925,173 +2944,450 @@ function Dashboard({ token, user, onLogout }) {
             <div>
               {/* --- END-USER VIEW --- */}
               {user.role === "end_user" && (() => {
-                const hasReturnedPpmp = ppmps.some((p) => p.status === "Returned");
+                const activePpmps = ppmps.filter((p) => !p.superseded_at);
+                const returnedPpmp = activePpmps.find((p) => p.status === "Returned");
+                const pendingPpmp = activePpmps.find((p) => p.status === "Pending Budget Review");
+                const approvedPpmp = activePpmps.find((p) => p.status === "Approved");
+                const primaryPpmp = pendingPpmp || returnedPpmp || approvedPpmp || activePpmps[0] || null;
+                const graceActive = Boolean(ppmpUploadGrace.is_active);
                 const canUpload =
+                  graceActive ||
                   ppmps.length === 0 ||
-                  ppmps.some((p) => p.status === "Draft" || p.status === "Returned");
-                const uploadLockedByPending = !canUpload && ppmps.some((p) => p.status === "Pending Budget Review");
-                const uploadLockMessage = uploadLockedByPending
-                  ? "Upload is unavailable while your PPMP is Pending Budget Review. You can upload again if Budget returns it for revision."
-                  : "Upload is unavailable because your PPMP has been Approved / validated. No further action is needed.";
+                  ppmps.some((p) => !p.superseded_at && (p.status === "Draft" || p.status === "Returned"));
+                const uploadLockedByPending = !canUpload && Boolean(pendingPpmp);
+                const lockedPpmp = pendingPpmp || approvedPpmp || null;
+                const hasReturnedPpmp = Boolean(returnedPpmp);
+                const hasActiveOfficeNotice = Boolean(
+                  activeOfficeNotice &&
+                    ["title", "message", "deadline_at", "fiscal_year"].some((key) =>
+                      String(activeOfficeNotice[key] || "").trim()
+                    )
+                );
+                const userOffice = offices.find((o) => o.id === user.office_id);
+                const expectedUploadName = userOffice?.code
+                  ? `${String(userOffice.code).trim()} (IND PPMP).xlsx`
+                  : "OFFICE_CODE (IND PPMP).xlsx";
+                const graceExpiresLabel = (() => {
+                  if (!ppmpUploadGrace.expires_at) return null;
+                  try {
+                    const expiresAt = new Date(ppmpUploadGrace.expires_at);
+                    if (Number.isNaN(expiresAt.getTime())) return null;
+                    return expiresAt.toLocaleString(undefined, {
+                      year: "numeric",
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    });
+                  } catch {
+                    return null;
+                  }
+                })();
+
+                const getStatusBadgeClass = (status) => {
+                  if (status === "Approved") return "badge-success";
+                  if (status === "Pending Budget Review") return "badge-warning";
+                  if (status === "Returned") return "badge-danger";
+                  return "badge-secondary";
+                };
+
+                const formatEndUserStatus = (status) =>
+                  status === "Approved" ? "Verified" : status;
+
+                const statusNextStep = (status) => {
+                  if (!status) return "Upload the official office workbook to create your first Draft.";
+                  if (status === "Draft") return "Review the Draft below, then submit it for Budget review.";
+                  if (status === "Returned") return "Review the returned remarks, update the workbook, and resubmit it for Budget review.";
+                  if (status === "Pending Budget Review") return "Budget review is in progress. No action is needed right now.";
+                  if (status === "Approved") {
+                    return graceActive
+                      ? "Your verified PPMP remains active while any new Draft waits for Budget review."
+                      : "This PPMP is verified. No further upload is required.";
+                  }
+                  return "Review the latest PPMP for its current next step.";
+                };
+
+                const handleWorkbookDrop = (event) => {
+                  event.preventDefault();
+                  event.currentTarget.removeAttribute("data-dragging");
+                  if (!canUpload || uploadBusy) return;
+                  const file = event.dataTransfer?.files?.[0];
+                  if (file) setUploadFile(file);
+                };
+
+                const uploadTaskLabel = !canUpload
+                  ? "Upload paused"
+                  : hasReturnedPpmp
+                    ? "Revision requested"
+                    : graceActive
+                      ? "Grace window open"
+                      : "Ready to upload";
 
                 return (
-                <div className="end-user-dashboard">
-                  {activeOfficeNotice && (
-                    <div className="end-user-deadline-slot">
-                      <OfficeDeadlineBanner notice={activeOfficeNotice} />
-                    </div>
-                  )}
-                  <div className={`dashboard-card end-user-upload-card${canUpload ? "" : " is-locked"}`}>
-                    {!canUpload && (
-                      <div className="end-user-upload-lock" role="status" aria-live="polite">
-                        <div className="end-user-upload-lock__message">
-                          <i className={`fas ${uploadLockedByPending ? "fa-hourglass-half" : "fa-lock"}`} aria-hidden="true"></i>
-                          <p>{uploadLockMessage}</p>
-                        </div>
+                  <div className="end-user-dashboard">
+                    {(hasActiveOfficeNotice || graceActive) && (
+                      <div className="end-user-status-lane">
+                        {hasActiveOfficeNotice && <OfficeDeadlineBanner notice={activeOfficeNotice} />}
+                        {graceActive && (
+                          <div className="ppmp-grace-banner" role="status">
+                            <div className="ppmp-grace-banner__icon" aria-hidden="true">
+                              <i className="fas fa-unlock" />
+                            </div>
+                            <div className="ppmp-grace-banner__body">
+                              <div className="ppmp-grace-banner__top">
+                                <strong>PPMP upload grace period is open</strong>
+                                <span className="ppmp-grace-banner__chip">Uploads enabled</span>
+                              </div>
+                              <p>
+                                Upload a new Draft without replacing an existing verified PPMP. Budget must
+                                verify the new file before it becomes the active PPMP.
+                              </p>
+                              {graceExpiresLabel && (
+                                <div className="ppmp-grace-banner__meta">
+                                  <span>
+                                    <i className="fas fa-hourglass-half" aria-hidden="true" />
+                                    Window closes <strong>{graceExpiresLabel}</strong>
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
-                    <h2 className="card-title">
-                      {hasReturnedPpmp ? "Upload Revised PPMP Excel" : "Upload PPMP Excel"}
-                    </h2>
-                    <div style={{
-                      backgroundColor: "var(--neuro-bg)",
-                      border: "1px solid transparent",
-                      borderLeft: `4px solid ${hasReturnedPpmp ? "var(--danger-color)" : "var(--primary-color)"}`,
-                      borderRadius: "12px",
-                      padding: "12px",
-                      marginBottom: "10px",
-                      fontSize: "13px",
-                      boxShadow: "var(--shadow-inset)",
-                      color: "var(--text-secondary)"
-                    }}>
-                      {(() => {
-                        const userOffice = offices.find((o) => o.id === user.office_id);
-                        const expectedUploadName = userOffice?.code
-                          ? `${String(userOffice.code).trim()} (IND PPMP).xlsx`
-                          : "OFFICE_CODE (IND PPMP).xlsx";
-                        return hasReturnedPpmp ? (
-                          <>
-                            <strong>Revision required:</strong> Budget returned your PPMP.
-                            Upload a revised NGPA Excel named <strong>{expectedUploadName}</strong>{" "}
-                            (column M must be CSE or NON-CSE per item) to replace the Returned plan,
-                            then submit again for review.
-                          </>
-                        ) : (
-                          <>
-                            <strong>Note:</strong> Filename must be{" "}
-                            <strong>{expectedUploadName}</strong>. Include{" "}
-                            <strong>column M</strong> with CSE or NON-CSE for each item.
-                            Uploads create or replace a <strong>Draft</strong> for the same fiscal year.
-                            Use <strong>Preview</strong> anytime for a view-only form (no editing).
-                          </>
-                        );
-                      })()}
-                    </div>
-                    <form
-                      onSubmit={canUpload ? handleUploadPpmp : (e) => e.preventDefault()}
-                      style={{ display: "flex", flexDirection: "column", gap: "10px" }}
-                      aria-disabled={!canUpload}
-                    >
-                      <input
-                        type="file"
-                        className="form-input"
-                        accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                        required
-                        disabled={!canUpload || uploadBusy}
-                      />
-                      <button type="submit" className="btn" disabled={!canUpload || uploadBusy}>
-                        {uploadBusy ? (
-                          <>
-                            <i className="fas fa-spinner fa-spin" aria-hidden="true"></i>
-                            Uploading…
-                          </>
-                        ) : hasReturnedPpmp ? (
-                          "Upload Revised PPMP"
-                        ) : (
-                          "Upload PPMP"
-                        )}
-                      </button>
-                    </form>
-                  </div>
 
-                  <div className="dashboard-card">
-                    <h2 className="card-title">My Office PPMPs</h2>
-                    <table className="custom-table">
-                      <thead>
-                        <tr>
-                          <th>Title</th>
-                          <th>Year</th>
-                          <th>Status</th>
-                          <th>Remarks</th>
-                          <th>Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {ppmps.length === 0 ? (
-                          <tr>
-                            <td colSpan="5">No PPMPs uploaded yet.</td>
-                          </tr>
-                        ) : (
-                          ppmps.map((p) => (
-                            <tr key={p.id}>
-                              <td>{p.title}</td>
-                              <td>{p.fiscal_year}</td>
-                              <td>
-                                <span className={`badge ${p.status === "Approved" ? "badge-success" : p.status === "Pending Budget Review" ? "badge-warning" : p.status === "Returned" ? "badge-danger" : "badge-secondary"}`}>
-                                  {p.status}
+                    <div className="end-user-task-grid">
+                      <section
+                        className={`dashboard-card end-user-upload-card${canUpload ? "" : " is-locked"}`}
+                        aria-labelledby="end-user-upload-title"
+                      >
+                        <div className="end-user-card-heading">
+                          <div>
+                            <span className="end-user-section-kicker">Upload</span>
+                            <h2 id="end-user-upload-title" className="card-title">
+                              {hasReturnedPpmp
+                                ? "Upload Revised PPMP Excel"
+                                : graceActive
+                                  ? "Upload New PPMP Excel"
+                                  : "Upload PPMP Excel"}
+                            </h2>
+                          </div>
+                          <span
+                            className={`end-user-task-status ${canUpload ? "is-ready" : "is-paused"}`}
+                          >
+                            {uploadTaskLabel}
+                          </span>
+                        </div>
+
+                        {canUpload ? (
+                          <>
+                            <div
+                              className="end-user-upload-requirements"
+                              id="end-user-upload-requirements"
+                            >
+                              <div className="end-user-upload-requirement">
+                                <i className="fas fa-file-signature" aria-hidden="true" />
+                                <span>
+                                  <span className="end-user-upload-requirement__label">Required filename</span>
+                                  <strong>{expectedUploadName}</strong>
                                 </span>
-                              </td>
-                              <td>
-                                {p.status === "Returned" && p.remarks ? (
-                                  <div style={{ fontSize: "12px", color: "#d32f2f" }}>
-                                    <strong>Remarks:</strong> {p.remarks}
-                                  </div>
+                              </div>
+                              <div className="end-user-upload-requirement">
+                                <i className="fas fa-columns" aria-hidden="true" />
+                                <span>
+                                  <span className="end-user-upload-requirement__label">Required column</span>
+                                  <strong>Column M: CSE or NON-CSE for each item</strong>
+                                </span>
+                              </div>
+                              <p className="end-user-upload-next-step">
+                                <i className="fas fa-arrow-right" aria-hidden="true" />
+                                {hasReturnedPpmp
+                                  ? "After upload, review the revised Draft below and resubmit it for Budget review."
+                                  : "After upload, review the Draft below and submit it for Budget review."}
+                              </p>
+                            </div>
+
+                            <form
+                              className="end-user-upload-form"
+                              onSubmit={handleUploadPpmp}
+                              aria-describedby="end-user-upload-requirements"
+                            >
+                              <label
+                                htmlFor="end-user-ppmp-file"
+                                className="end-user-file-picker"
+                                aria-disabled={uploadBusy}
+                                onDragEnter={(event) => {
+                                  if (!uploadBusy) event.currentTarget.dataset.dragging = "true";
+                                }}
+                                onDragOver={(event) => {
+                                  event.preventDefault();
+                                  if (!uploadBusy) event.dataTransfer.dropEffect = "copy";
+                                }}
+                                onDragLeave={(event) => {
+                                  event.currentTarget.removeAttribute("data-dragging");
+                                }}
+                                onDrop={handleWorkbookDrop}
+                              >
+                                <input
+                                  key={uploadFile?.name || "empty"}
+                                  id="end-user-ppmp-file"
+                                  type="file"
+                                  className="end-user-file-picker__input"
+                                  accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                  onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
+                                  aria-describedby="end-user-upload-requirements"
+                                  required
+                                  disabled={uploadBusy}
+                                />
+                                <span className="end-user-file-picker__icon" aria-hidden="true">
+                                  <i className={`fas ${uploadFile ? "fa-file-excel" : "fa-cloud-upload-alt"}`} />
+                                </span>
+                                <span className="end-user-file-picker__content">
+                                  <strong>
+                                    {uploadFile?.name || "Drop an Excel workbook here or browse"}
+                                  </strong>
+                                  <span>
+                                    {uploadFile
+                                      ? "Workbook selected and ready to upload"
+                                      : "Excel workbook · .xls, .xlsx, or .xlsm"}
+                                  </span>
+                                </span>
+                                <span className="end-user-file-picker__action">Browse files</span>
+                              </label>
+                              <button type="submit" className="btn end-user-upload-submit" disabled={uploadBusy}>
+                                {uploadBusy ? (
+                                  <>
+                                    <i className="fas fa-spinner fa-spin" aria-hidden="true"></i>
+                                    Uploading…
+                                  </>
+                                ) : hasReturnedPpmp ? (
+                                  "Upload Revised PPMP"
+                                ) : graceActive ? (
+                                  "Upload New PPMP"
                                 ) : (
-                                  <span style={{ color: "var(--text-muted)" }}>—</span>
+                                  "Upload PPMP"
                                 )}
-                              </td>
-                              <td>
-                                <div className="ppmp-row-actions">
-                                  <button
-                                    type="button"
-                                    className="btn"
-                                    onClick={() => handleSelectPpmp(p.id)}
-                                    title="View-only NGPA PPMP preview"
-                                  >
-                                    Preview
-                                  </button>
-                                  {(p.status === "Draft" || p.status === "Returned") && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-success btn-sm"
-                                      onClick={() => handleSubmitPpmp(p.id)}
-                                    >
-                                      Submit
-                                    </button>
-                                  )}
-                                  {p.status === "Draft" && (
-                                    <button
-                                      className="btn btn-danger btn-sm"
-                                      onClick={() => handleDeletePpmp(p.id, p.title)}
-                                    >
-                                      Delete
-                                    </button>
-                                  )}
-                                  {p.status === "Pending Budget Review" && (
-                                    <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                                      Awaiting Budget
-                                    </span>
-                                  )}
+                              </button>
+                            </form>
+                          </>
+                        ) : (
+                          <div
+                            className={`end-user-upload-card__locked ${uploadLockedByPending ? "is-pending" : "is-approved"}`}
+                            role="status"
+                            aria-live="polite"
+                          >
+                            <div className="end-user-upload-card__locked-icon" aria-hidden="true">
+                              <i className={`fas ${uploadLockedByPending ? "fa-hourglass-half" : "fa-lock"}`} />
+                            </div>
+                            <div className="end-user-upload-card__locked-copy">
+                              <span className="end-user-section-kicker">Upload paused</span>
+                              <h3>
+                                {uploadLockedByPending
+                                  ? "Budget review is in progress"
+                                  : "Your current PPMP is already verified"}
+                              </h3>
+                              <p>
+                                {uploadLockedByPending
+                                  ? "Your submitted PPMP is being reviewed by Budget. Upload will reopen if this PPMP is returned for revision."
+                                  : "No further upload is required for this verified PPMP. Upload becomes available again during an active grace period."}
+                              </p>
+                              {lockedPpmp && (
+                                <div className="end-user-upload-card__locked-plan">
+                                  <span>Current plan</span>
+                                  <strong>{lockedPpmp.title}</strong>
+                                  <span className={`badge ${getStatusBadgeClass(lockedPpmp.status)}`}>
+                                    {formatEndUserStatus(lockedPpmp.status)}
+                                  </span>
                                 </div>
-                              </td>
-                            </tr>
-                          ))
+                              )}
+                              {lockedPpmp && (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm end-user-locked-preview"
+                                  onClick={() => handleSelectPpmp(lockedPpmp.id)}
+                                >
+                                  <i className="fas fa-eye" aria-hidden="true" />
+                                  Preview current PPMP
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         )}
-                      </tbody>
-                    </table>
+                      </section>
+
+                      <section className="dashboard-card end-user-status-card" aria-labelledby="end-user-status-title">
+                        <div className="end-user-status-card__top">
+                          <div>
+                            <span className="end-user-section-kicker">Current plan</span>
+                            <h2 id="end-user-status-title" className="end-user-status-card__title">
+                              {primaryPpmp?.title || "No active PPMP yet"}
+                            </h2>
+                          </div>
+                          <span className={`badge ${getStatusBadgeClass(primaryPpmp?.status)}`}>
+                            {formatEndUserStatus(primaryPpmp?.status) || "Not started"}
+                          </span>
+                        </div>
+                        <div className="end-user-status-card__facts">
+                          <div>
+                            <span>Fiscal year</span>
+                            <strong>{primaryPpmp?.fiscal_year || "—"}</strong>
+                          </div>
+                          <div>
+                            <span>Active PPMPs</span>
+                            <strong>{activePpmps.length}</strong>
+                          </div>
+                        </div>
+                        <div className="end-user-status-card__next-step">
+                          <span>Next step</span>
+                          <p>{statusNextStep(primaryPpmp?.status)}</p>
+                        </div>
+                        {primaryPpmp && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary end-user-status-card__preview"
+                            onClick={() => handleSelectPpmp(primaryPpmp.id)}
+                          >
+                            <i className="fas fa-eye" aria-hidden="true" />
+                            Preview current PPMP
+                          </button>
+                        )}
+                      </section>
+                    </div>
+
+                    <section className="dashboard-card end-user-records-card" aria-labelledby="end-user-records-title">
+                      <div className="end-user-records-card__header">
+                        <div>
+                          <span className="end-user-section-kicker">Uploads</span>
+                          <h2 id="end-user-records-title" className="card-title">My Office PPMPs</h2>
+                          <p className="end-user-records-card__description">
+                            Track every uploaded PPMP and the action needed to move it through Budget review.
+                          </p>
+                        </div>
+                        <span className="end-user-records-card__count">
+                          {ppmps.length} PPMP file{ppmps.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+
+                      {ppmps.length === 0 ? (
+                        <div className="end-user-empty-state">
+                          <div className="end-user-empty-state__icon" aria-hidden="true">
+                            <i className="fas fa-file-upload" />
+                          </div>
+                          <h3>No PPMP uploaded yet</h3>
+                          <p>Start by uploading the official office workbook in the upload card above.</p>
+                          <span>After upload, the new Draft will appear here for review and submission.</span>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="end-user-scroll-hint" id="end-user-table-scroll-hint">
+                            <i className="fas fa-arrows-alt-h" aria-hidden="true" />
+                            Scroll horizontally to view all PPMP details and actions.
+                          </p>
+                          <div
+                            className="table-wrapper end-user-table-wrapper"
+                            role="region"
+                            tabIndex={0}
+                            aria-label="My Office PPMP files"
+                            aria-describedby="end-user-table-scroll-hint"
+                          >
+                            <table className="custom-table">
+                              <caption className="end-user-table-caption">
+                                PPMP files uploaded by this office
+                              </caption>
+                              <thead>
+                                <tr>
+                                  <th scope="col">Title</th>
+                                  <th scope="col">Year</th>
+                                  <th scope="col">Status</th>
+                                  <th scope="col">Remarks</th>
+                                  <th scope="col">Action</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {ppmps.map((p) => {
+                                  const status = p.status || "Draft";
+                                  return (
+                                    <tr key={p.id}>
+                                      <td className="end-user-record-title">{p.title}</td>
+                                      <td className="end-user-record-year">{p.fiscal_year}</td>
+                                      <td>
+                                        <span className={`badge ${p.superseded_at ? "badge-secondary" : getStatusBadgeClass(status)}`}>
+                                          {p.superseded_at ? "Superseded" : formatEndUserStatus(status)}
+                                        </span>
+                                      </td>
+                                      <td>
+                                        {status === "Returned" && p.remarks && !p.superseded_at ? (
+                                          <div className="end-user-remarks">
+                                            <strong>Remarks:</strong> {p.remarks}
+                                          </div>
+                                        ) : (
+                                          <span className="end-user-no-remarks">—</span>
+                                        )}
+                                      </td>
+                                      <td>
+                                        <div className="ppmp-row-actions end-user-row-actions">
+                                          <button
+                                            type="button"
+                                            className="btn btn-secondary btn-sm end-user-row-action"
+                                            onClick={() => handleSelectPpmp(p.id)}
+                                            title="View-only NGPA PPMP preview"
+                                            aria-label={`Preview PPMP ${p.title}`}
+                                          >
+                                            <i className="fas fa-eye" aria-hidden="true" />
+                                            Preview PPMP
+                                          </button>
+                                          {!p.superseded_at && (status === "Draft" || status === "Returned") && (
+                                            <button
+                                              type="button"
+                                              className="btn btn-success btn-sm end-user-row-action"
+                                              onClick={() => handleSubmitPpmp(p.id)}
+                                              aria-label={`${status === "Returned" ? "Resubmit" : "Submit"} ${p.title} for Budget review`}
+                                            >
+                                              <i className="fas fa-paper-plane" aria-hidden="true" />
+                                              {status === "Returned" ? "Resubmit for Budget Review" : "Submit for Budget Review"}
+                                            </button>
+                                          )}
+                                          {!p.superseded_at && status === "Draft" && (
+                                            <button
+                                              type="button"
+                                              className="btn btn-danger btn-sm end-user-row-action"
+                                              onClick={() => handleDeletePpmp(p.id, p.title)}
+                                              aria-label={`Delete draft ${p.title}`}
+                                            >
+                                              <i className="fas fa-trash-alt" aria-hidden="true" />
+                                              Delete draft
+                                            </button>
+                                          )}
+                                          {p.superseded_at && (
+                                            <span className="end-user-row-next-step">
+                                              <i className="fas fa-history" aria-hidden="true" />
+                                              Replaced by a newer verified PPMP
+                                            </span>
+                                          )}
+                                          {!p.superseded_at && status === "Pending Budget Review" && (
+                                            <span className="end-user-row-next-step is-pending">
+                                              <i className="fas fa-hourglass-half" aria-hidden="true" />
+                                              Budget review in progress
+                                            </span>
+                                          )}
+                                          {!p.superseded_at && status === "Approved" && (
+                                            <span className="end-user-row-next-step is-approved">
+                                              <i className="fas fa-check-circle" aria-hidden="true" />
+                                              Verified — no action needed
+                                            </span>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </>
+                      )}
+                    </section>
                   </div>
-                </div>
                 );
               })()}
 
