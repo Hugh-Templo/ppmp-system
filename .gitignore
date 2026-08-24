@@ -12,6 +12,10 @@ __pycache__/
 !laravel-backend/.env.hostinger.example
 !frontend/.env.electron.example
 
+# Google service account keys (never commit)
+credentials/*.json
+!credentials/.gitkeep
+
 # Local database & data
 data/
 *.sqlite

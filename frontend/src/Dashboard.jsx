@@ -1386,8 +1386,26 @@ function Dashboard({ token, user, onLogout }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
-        const actionLabel = action === "approve" ? "verified" : "returned for revision";
-        showNotification(`PPMP successfully ${actionLabel}!`);
+        const data = await res.json().catch(() => ({}));
+        if (action === "approve") {
+          const drive = data.drive_sync;
+          if (drive?.ok) {
+            showNotification("PPMP successfully verified and uploaded to Google Drive");
+          } else if (drive?.skipped) {
+            showNotification(
+              "PPMP successfully verified. Sync to Drive later via BAC Admin → Download for rclone."
+            );
+          } else if (drive && !drive.ok) {
+            showNotification(
+              `PPMP successfully verified, but Drive upload failed: ${drive.error || drive.errors?.[0]?.error || "unknown error"}`,
+              "danger"
+            );
+          } else {
+            showNotification("PPMP successfully verified!");
+          }
+        } else {
+          showNotification("PPMP successfully returned for revision!");
+        }
         setSelectedPpmp(null);
         setAuditDetails(null);
         setRemarks("");
@@ -1872,24 +1890,53 @@ function Dashboard({ token, user, onLogout }) {
           headers: { Authorization: `Bearer ${token}` },
         }
       );
-      const data = await res.json().catch(() => ({}));
-      const uploadedCount = Array.isArray(data.uploaded) ? data.uploaded.length : 0;
-      const errorCount = Array.isArray(data.errors) ? data.errors.length : 0;
-      if (res.ok || (res.status === 207 && uploadedCount > 0)) {
-        const msg =
-          errorCount > 0
-            ? `Uploaded ${uploadedCount} file(s) to APP SYSTEM FILES / ${consolidationYear}; ${errorCount} issue(s).`
-            : `Uploaded ${uploadedCount} file(s) to Drive APP SYSTEM FILES / ${consolidationYear}.`;
-        showNotification(msg, errorCount > 0 ? "danger" : undefined);
-      } else {
-        const firstErr =
-          data.detail ||
-          data.errors?.[0]?.error ||
-          "Upload to Google Drive failed";
-        showNotification(firstErr, "danger");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showNotification(
+          data.detail || data.errors?.[0]?.error || `Drive package failed (HTTP ${res.status})`,
+          "danger"
+        );
+        return;
       }
+      const buf = await res.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      const isZip = bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b;
+      if (!isZip) {
+        let detail = "Drive package download failed";
+        try {
+          const parsed = JSON.parse(new TextDecoder().decode(bytes));
+          detail = parsed.detail || parsed.message || detail;
+        } catch (_) {
+          // keep default
+        }
+        showNotification(detail, "danger");
+        return;
+      }
+      const cd = res.headers.get("content-disposition") || "";
+      const plain = cd.match(/filename=(?:["']?)([^";]+)/i);
+      const filename =
+        (plain && plain[1].trim().replace(/["']/g, "")) ||
+        `APP-SYSTEM-FILES-FY${consolidationYear}-rclone.zip`;
+      const blob = new Blob([buf], { type: "application/zip" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      const fileCount = res.headers.get("X-Appbac-Drive-Files");
+      showNotification(
+        fileCount
+          ? `Downloaded ${fileCount} file(s) for rclone. Extract the ZIP, then run scripts/rclone/sync-app-system-files.bat`
+          : `Downloaded Drive package for rclone. Extract the ZIP, then run scripts/rclone/sync-app-system-files.bat`
+      );
     } catch (err) {
-      showNotification("Upload to Google Drive failed", "danger");
+      showNotification(
+        err?.message ? `Drive package failed: ${err.message}` : "Drive package failed",
+        "danger"
+      );
     } finally {
       setAppDriveUploading(false);
     }
@@ -2413,10 +2460,10 @@ function Dashboard({ token, user, onLogout }) {
               className="btn btn-secondary"
               onClick={handleUploadToDrive}
               disabled={appWorkspaceLoading || appDriveUploading}
-              title={`Upload verified PPMPs and APP Excels to Drive APP SYSTEM FILES / ${consolidationYear}`}
+              title={`Download ZIP for rclone: APP SYSTEM FILES / ${consolidationYear} / PPMP / {office}`}
             >
               <i className="fas fa-cloud-upload-alt" aria-hidden="true"></i>
-              {appDriveUploading ? "Uploading…" : "Upload to Drive"}
+              {appDriveUploading ? "Preparing…" : "Download for rclone"}
             </button>
             <button
               type="button"
@@ -2431,8 +2478,9 @@ function Dashboard({ token, user, onLogout }) {
         </div>
 
         <p className="page-subtitle" style={{ marginBottom: "0.75rem" }}>
-          Upload to Drive sends verified PPMPs and CSE/nonCSE APP Excels to{" "}
-          <code>APP SYSTEM FILES / {consolidationYear} / …</code>.
+          Download for rclone packs verified PPMPs (and APP Excels if consolidated) as{" "}
+          <code>{consolidationYear}/PPMP/{"{office}"}/…</code>. Extract on the PC, then run{" "}
+          <code>scripts/rclone/sync-app-system-files.bat</code>.
         </p>
 
         {isStaleApp && (
@@ -3467,10 +3515,10 @@ function Dashboard({ token, user, onLogout }) {
                         className="btn btn-secondary"
                         onClick={handleUploadToDrive}
                         disabled={appDriveUploading}
-                        title={`Upload verified PPMPs and APP Excels to Drive APP SYSTEM FILES / ${consolidationYear}`}
+                        title={`Download ZIP for rclone: APP SYSTEM FILES / ${consolidationYear} / PPMP / {office}`}
                       >
                         <i className="fas fa-cloud-upload-alt" aria-hidden="true"></i>
-                        {appDriveUploading ? "Uploading…" : "Upload to Drive"}
+                        {appDriveUploading ? "Preparing…" : "Download for rclone"}
                       </button>
                     </div>
                   </div>
@@ -3827,8 +3875,8 @@ function Dashboard({ token, user, onLogout }) {
               <h2 className="card-title">Post to BAC</h2>
               <p className="page-subtitle" style={{ marginBottom: "1rem" }}>
                 After you validate a PPMP (CSE or nonCSE), post it here so BAC can consolidate into the APP.
-                Posted files are stored on Drive <strong>CSE-PPMP</strong> or <strong>nonCSE-PPMP</strong> (per office)
-                for file-based consolidation. Unposting removes the Drive copy and returns the plan to the end user for revision.
+                BAC Admin downloads a Drive package and syncs with rclone on the PC under{" "}
+                <strong>PPMP</strong> / {"{office}"} (one combined workbook per office).
               </p>
               <table className="custom-table">
                 <thead>

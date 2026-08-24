@@ -14,7 +14,7 @@ use App\Models\PpmpItem;
 use App\Models\IndicativePpmp;
 use App\Services\PpmpExcelParser;
 use App\Services\AppExcelExporter;
-use App\Services\GoogleDriveUploader;
+use App\Services\DrivePackageExporter;
 use Exception;
 
 class BacController extends Controller
@@ -745,20 +745,27 @@ class BacController extends Controller
             return response()->json(['detail' => 'Invalid fiscal_year'], 400);
         }
 
+        // Personal Gmail cannot receive service-account file uploads (0 quota).
+        // BAC Admin downloads a ZIP and syncs with rclone on a PC instead.
         try {
-            $uploader = new GoogleDriveUploader();
-            $result = $uploader->uploadFiscalYearArtifacts($fy);
+            $package = (new DrivePackageExporter())->buildZip($fy);
         } catch (Exception $e) {
             return response()->json([
                 'ok' => false,
                 'detail' => $e->getMessage(),
                 'fiscal_year' => $fy,
-                'uploaded' => [],
+                'files' => [],
                 'errors' => [['type' => 'setup', 'error' => $e->getMessage()]],
-            ], 500);
+            ], 400);
         }
 
-        $status = $result['ok'] ? 200 : (count($result['uploaded']) > 0 ? 207 : 400);
-        return response()->json($result, $status);
+        $path = $package['path'];
+        $filename = $package['filename'];
+
+        return response()->download($path, $filename, [
+            'Content-Type' => 'application/zip',
+            'X-Appbac-Drive-Files' => (string) count($package['files']),
+            'X-Appbac-Drive-Errors' => (string) count($package['errors']),
+        ])->deleteFileAfterSend(true);
     }
 }

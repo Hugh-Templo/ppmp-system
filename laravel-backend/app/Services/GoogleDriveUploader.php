@@ -10,17 +10,22 @@ use App\Models\PpmpItem;
 use Google\Client as GoogleClient;
 use Google\Service\Drive as GoogleDrive;
 use Google\Service\Drive\DriveFile;
+use Google\Service\Exception as GoogleServiceException;
 use Illuminate\Support\Facades\DB;
-use App\Services\AppExcelExporter;
+use Illuminate\Support\Facades\Log;
 use Exception;
 
 class GoogleDriveUploader
 {
     private const MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    private const MIME_XLS = 'application/vnd.ms-excel';
     private const MIME_FOLDER = 'application/vnd.google-apps.folder';
+    /** Multipart is unreliable above ~5MB; use resumable for larger payloads. */
+    private const RESUMABLE_THRESHOLD = 5 * 1024 * 1024;
 
     private GoogleDrive $drive;
     private string $rootFolderId;
+    private bool $uploadCapabilityChecked = false;
 
     public function __construct(?GoogleDrive $drive = null, ?string $rootFolderId = null)
     {
@@ -47,7 +52,29 @@ class GoogleDriveUploader
         $client = new GoogleClient();
         $client->setAuthConfig($keyPath);
         $client->setScopes([GoogleDrive::DRIVE]);
+
+        // Optional: domain-wide delegation so uploads use a real user's Drive quota.
+        $impersonate = trim((string) config('google.drive_impersonate_user', ''));
+        if ($impersonate !== '') {
+            $client->setSubject($impersonate);
+        }
+
         $this->drive = new GoogleDrive($client);
+    }
+
+    /**
+     * Cheap check before constructing the uploader (avoids throwing when unset).
+     */
+    public static function isConfigured(): bool
+    {
+        $rootId = trim((string) config('google.drive_root_folder_id', ''));
+        if ($rootId === '') {
+            return false;
+        }
+
+        $keyPath = self::resolveServiceAccountPath();
+
+        return $keyPath !== null && is_file($keyPath);
     }
 
     public static function resolveServiceAccountPath(): ?string
@@ -80,90 +107,124 @@ class GoogleDriveUploader
             return $fromRepo;
         }
 
+        // Fallback: any service-account JSON under repo credentials/
+        $credDir = dirname(base_path()) . DIRECTORY_SEPARATOR . 'credentials';
+        if (is_dir($credDir)) {
+            $preferred = $credDir . DIRECTORY_SEPARATOR . 'google-service-account.json';
+            if (is_file($preferred)) {
+                return $preferred;
+            }
+            $matches = glob($credDir . DIRECTORY_SEPARATOR . '*.json') ?: [];
+            foreach ($matches as $match) {
+                if (is_file($match)) {
+                    return $match;
+                }
+            }
+        }
+
         return null;
+    }
+
+    /**
+     * Upload one verified PPMP Excel into PPMP/{officeCode}/ (combined CSE + non-CSE workbook).
+     *
+     * @return array{ok: bool, uploaded: list<array>, errors: list<array>}
+     */
+    public function uploadVerifiedPpmp(Ppmp $ppmp): array
+    {
+        $uploaded = [];
+        $errors = [];
+
+        $fiscalYear = (int) $ppmp->fiscal_year;
+        $office = Office::find($ppmp->office_id);
+        $officeCode = $office
+            ? trim((string) ($office->code ?: $office->name ?: 'office-' . $ppmp->office_id))
+            : ('office-' . $ppmp->office_id);
+        $officeCode = preg_replace('/[^\w\-]+/', '_', $officeCode) ?: ('office-' . $ppmp->office_id);
+
+        try {
+            $this->assertCanUploadFiles();
+
+            // Resolve Excel BEFORE creating folders so a missing file does not leave empty office dirs.
+            $bytes = $this->resolvePpmpExcelBytes($ppmp, $office);
+            $filename = $this->buildPpmpDriveFilename($ppmp, $officeCode, $bytes);
+            $mime = $this->detectExcelMime($bytes, $ppmp->excel_mime, $filename);
+
+            $fyFolderId = $this->ensureFolderPath($this->rootFolderId, [(string) $fiscalYear]);
+            $ppmpRoot = $this->ensureFolderPath($fyFolderId, ['PPMP']);
+            $folderId = $this->ensureFolderPath($ppmpRoot, [$officeCode]);
+
+            $file = $this->uploadOrReplace($folderId, $filename, $bytes, $mime);
+            $uploaded[] = [
+                'type' => 'ppmp',
+                'kind' => 'combined',
+                'office_code' => $officeCode,
+                'ppmp_id' => $ppmp->id,
+                'name' => $filename,
+                'drive_file_id' => $file->getId(),
+                'path' => "APP SYSTEM FILES/{$fiscalYear}/PPMP/{$officeCode}/{$filename}",
+            ];
+        } catch (Exception $e) {
+            $message = $this->friendlyDriveError($e);
+            Log::warning('Drive PPMP upload failed', [
+                'ppmp_id' => $ppmp->id,
+                'office_code' => $officeCode,
+                'error' => $message,
+                'raw' => $e->getMessage(),
+            ]);
+            $errors[] = [
+                'type' => 'ppmp',
+                'ppmp_id' => $ppmp->id,
+                'office_code' => $officeCode,
+                'error' => $message,
+            ];
+        }
+
+        return [
+            'ok' => count($errors) === 0 && count($uploaded) > 0,
+            'uploaded' => $uploaded,
+            'errors' => $errors,
+        ];
     }
 
     /**
      * Upload verified PPMPs and CSE/nonCSE APP Excels for a fiscal year.
      *
-     * @return array{ok: bool, fiscal_year: int, uploaded: list<array>, errors: list<array>}
+     * @return array{ok: bool, fiscal_year: int, uploaded: list<array>, errors: list<array>, detail?: string}
      */
     public function uploadFiscalYearArtifacts(int $fiscalYear): array
     {
         $uploaded = [];
         $errors = [];
 
+        try {
+            $this->assertCanUploadFiles();
+        } catch (Exception $e) {
+            $message = $this->friendlyDriveError($e);
+            Log::warning('Drive upload blocked by quota/Shared Drive check', ['error' => $message]);
+
+            return [
+                'ok' => false,
+                'fiscal_year' => $fiscalYear,
+                'uploaded' => [],
+                'errors' => [['type' => 'setup', 'error' => $message]],
+                'detail' => $message,
+            ];
+        }
+
         $fyFolderId = $this->ensureFolderPath($this->rootFolderId, [(string) $fiscalYear]);
-        $csePpmpRoot = $this->ensureFolderPath($fyFolderId, ['CSE-PPMP']);
-        $nonCsePpmpRoot = $this->ensureFolderPath($fyFolderId, ['nonCSE-PPMP']);
         $cseAppFolder = $this->ensureFolderPath($fyFolderId, ['CSE-APP']);
         $nonCseAppFolder = $this->ensureFolderPath($fyFolderId, ['nonCSE-APP']);
 
         $approved = Ppmp::where('fiscal_year', $fiscalYear)
             ->where('status', 'Approved')
+            ->whereNull('superseded_at')
             ->get();
 
-        $offices = Office::all()->keyBy('id');
-
         foreach ($approved as $ppmp) {
-            $office = $offices->get($ppmp->office_id);
-            $officeCode = $office
-                ? trim((string) ($office->code ?: $office->name ?: 'office-' . $ppmp->office_id))
-                : ('office-' . $ppmp->office_id);
-            $officeCode = preg_replace('/[^\w\-]+/', '_', $officeCode) ?: ('office-' . $ppmp->office_id);
-
-            $items = PpmpItem::where('ppmp_id', $ppmp->id)->get();
-            $hasCse = $items->contains(fn($it) => (bool) $it->is_cse);
-            $hasNonCse = $items->contains(fn($it) => !(bool) $it->is_cse);
-            // Parent flag fallback when items missing type
-            if (!$hasCse && !$hasNonCse) {
-                if ((bool) $ppmp->is_cse) {
-                    $hasCse = true;
-                } else {
-                    $hasNonCse = true;
-                }
-            }
-
-            try {
-                $bytes = $this->resolvePpmpExcelBytes($ppmp, $office);
-                $filename = $ppmp->excel_filename
-                    ?: sprintf('%s_PPMP_FY%d.xlsx', $officeCode, $fiscalYear);
-
-                if ($hasCse) {
-                    $folderId = $this->ensureFolderPath($csePpmpRoot, [$officeCode]);
-                    $file = $this->uploadOrReplace($folderId, $filename, $bytes, self::MIME_XLSX);
-                    $uploaded[] = [
-                        'type' => 'ppmp',
-                        'kind' => 'cse',
-                        'office_code' => $officeCode,
-                        'ppmp_id' => $ppmp->id,
-                        'name' => $filename,
-                        'drive_file_id' => $file->getId(),
-                        'path' => "APP SYSTEM FILES/{$fiscalYear}/CSE-PPMP/{$officeCode}/{$filename}",
-                    ];
-                }
-
-                if ($hasNonCse) {
-                    $folderId = $this->ensureFolderPath($nonCsePpmpRoot, [$officeCode]);
-                    $file = $this->uploadOrReplace($folderId, $filename, $bytes, self::MIME_XLSX);
-                    $uploaded[] = [
-                        'type' => 'ppmp',
-                        'kind' => 'noncse',
-                        'office_code' => $officeCode,
-                        'ppmp_id' => $ppmp->id,
-                        'name' => $filename,
-                        'drive_file_id' => $file->getId(),
-                        'path' => "APP SYSTEM FILES/{$fiscalYear}/nonCSE-PPMP/{$officeCode}/{$filename}",
-                    ];
-                }
-            } catch (Exception $e) {
-                $errors[] = [
-                    'type' => 'ppmp',
-                    'ppmp_id' => $ppmp->id,
-                    'office_code' => $officeCode,
-                    'error' => $e->getMessage(),
-                ];
-            }
+            $result = $this->uploadVerifiedPpmp($ppmp);
+            $uploaded = array_merge($uploaded, $result['uploaded']);
+            $errors = array_merge($errors, $result['errors']);
         }
 
         // Consolidated APP Excels
@@ -192,10 +253,15 @@ class GoogleDriveUploader
                         'path' => "APP SYSTEM FILES/{$fiscalYear}/CSE-APP/{$name}",
                     ];
                 } catch (Exception $e) {
+                    $message = $this->friendlyDriveError($e);
+                    Log::warning('Drive CSE-APP upload failed', [
+                        'fiscal_year' => $fiscalYear,
+                        'error' => $message,
+                    ]);
                     $errors[] = [
                         'type' => 'app',
                         'kind' => 'cse',
-                        'error' => $e->getMessage(),
+                        'error' => $message,
                     ];
                 }
             }
@@ -213,10 +279,15 @@ class GoogleDriveUploader
                         'path' => "APP SYSTEM FILES/{$fiscalYear}/nonCSE-APP/{$name}",
                     ];
                 } catch (Exception $e) {
+                    $message = $this->friendlyDriveError($e);
+                    Log::warning('Drive nonCSE-APP upload failed', [
+                        'fiscal_year' => $fiscalYear,
+                        'error' => $message,
+                    ]);
                     $errors[] = [
                         'type' => 'app',
                         'kind' => 'noncse',
-                        'error' => $e->getMessage(),
+                        'error' => $message,
                     ];
                 }
             }
@@ -230,12 +301,121 @@ class GoogleDriveUploader
             }
         }
 
+        $detail = null;
+        if (count($errors) > 0) {
+            $detail = $errors[0]['error'] ?? 'Drive upload failed';
+        }
+
         return [
             'ok' => count($errors) === 0,
             'fiscal_year' => $fiscalYear,
             'uploaded' => $uploaded,
             'errors' => $errors,
+            'detail' => $detail,
         ];
+    }
+
+    /**
+     * Service accounts have 0 My Drive quota: folders can be created, but file uploads fail.
+     * Always probe a tiny file upload (do not trust driveId alone — a folder can look shared
+     * while the SA is only an "Editor" on a My Drive folder / shortcut).
+     */
+    private function assertCanUploadFiles(): void
+    {
+        if ($this->uploadCapabilityChecked) {
+            return;
+        }
+        $this->uploadCapabilityChecked = true;
+
+        try {
+            $root = $this->drive->files->get($this->rootFolderId, [
+                'fields' => 'id,name,mimeType,driveId,shortcutDetails',
+                'supportsAllDrives' => true,
+            ]);
+        } catch (Exception $e) {
+            throw new Exception(
+                'Cannot read GOOGLE_DRIVE_ROOT_FOLDER_ID. Open the Shared Drive → Manage members '
+                . 'and add appbac-drive@app-consolidation.iam.gserviceaccount.com as Content manager. '
+                . $this->friendlyDriveError($e),
+                0,
+                $e
+            );
+        }
+
+        $mime = (string) ($root->getMimeType() ?? '');
+        if ($mime === 'application/vnd.google-apps.shortcut') {
+            throw new Exception(
+                'GOOGLE_DRIVE_ROOT_FOLDER_ID points to a shortcut, not a real folder. '
+                . 'Open the Shared Drive itself, open the real "APP SYSTEM FILES" folder, '
+                . 'copy that folder ID from the browser URL, and update .env.'
+            );
+        }
+
+        $hasSharedDriveId = (string) ($root->getDriveId() ?? '') !== '';
+
+        // Always probe a real FILE create. Folder create succeeding does not prove file uploads work.
+        $probeName = '_appbac_quota_probe_' . uniqid('', true) . '.txt';
+        try {
+            $probe = $this->drive->files->create(
+                new DriveFile([
+                    'name' => $probeName,
+                    'mimeType' => 'text/plain',
+                    'parents' => [$this->rootFolderId],
+                ]),
+                [
+                    'data' => 'appbac-quota-probe',
+                    'mimeType' => 'text/plain',
+                    'uploadType' => 'multipart',
+                    'fields' => 'id',
+                    'supportsAllDrives' => true,
+                ]
+            );
+            try {
+                $this->drive->files->delete($probe->getId(), ['supportsAllDrives' => true]);
+            } catch (Exception $cleanup) {
+                Log::warning('Drive quota probe cleanup failed', ['error' => $cleanup->getMessage()]);
+            }
+        } catch (Exception $e) {
+            Log::warning('Drive file probe failed', [
+                'root_id' => $this->rootFolderId,
+                'root_name' => $root->getName(),
+                'drive_id' => $root->getDriveId(),
+                'has_shared_drive_id' => $hasSharedDriveId,
+                'error' => $e->getMessage(),
+            ]);
+            throw new Exception(
+                $this->quotaExceededMessage($hasSharedDriveId, $this->friendlyDriveError($e)),
+                0,
+                $e
+            );
+        }
+
+        if (!$hasSharedDriveId) {
+            // Probe worked on My Drive (rare / legacy SA). Warn in logs; allow continue.
+            Log::warning('Drive root has no driveId (not a Shared Drive), but file probe succeeded', [
+                'root_id' => $this->rootFolderId,
+                'root_name' => $root->getName(),
+            ]);
+        }
+    }
+
+    private function quotaExceededMessage(bool $reportedSharedDrive = false, string $apiError = ''): string
+    {
+        $sa = 'appbac-drive@app-consolidation.iam.gserviceaccount.com';
+        $parts = [
+            'Google Drive rejected the Excel file upload (office folders can still be created).',
+            'Sharing a folder as "Editor" is NOT enough for a service account.',
+            "Do this: drive.google.com → left menu Shared drives (not Shared with me) → open the Shared Drive → Manage members → add {$sa} as Content manager.",
+            'Then put "APP SYSTEM FILES" inside that Shared Drive, copy its folder ID into GOOGLE_DRIVE_ROOT_FOLDER_ID, and retry.',
+        ];
+        if ($reportedSharedDrive) {
+            $parts[] = 'Note: the folder reports a Shared Drive id, but file create still failed — the SA is probably not a Shared Drive member (only folder Editor), or .env points at the wrong folder.';
+        }
+        if ($apiError !== '') {
+            $parts[] = 'API: ' . $apiError;
+        }
+
+        return implode(' ', $parts);
     }
 
     /**
@@ -269,6 +449,7 @@ class GoogleDriveUploader
         $list = $this->drive->files->listFiles([
             'q' => $q,
             'spaces' => 'drive',
+            'corpora' => 'allDrives',
             'fields' => 'files(id, name)',
             'pageSize' => 1,
             'supportsAllDrives' => true,
@@ -280,18 +461,22 @@ class GoogleDriveUploader
             return $files[0]->getId();
         }
 
-        $meta = new DriveFile([
-            'name' => $name,
-            'mimeType' => self::MIME_FOLDER,
-            'parents' => [$parentId],
-        ]);
+        try {
+            $meta = new DriveFile([
+                'name' => $name,
+                'mimeType' => self::MIME_FOLDER,
+                'parents' => [$parentId],
+            ]);
 
-        $created = $this->drive->files->create($meta, [
-            'fields' => 'id',
-            'supportsAllDrives' => true,
-        ]);
+            $created = $this->drive->files->create($meta, [
+                'fields' => 'id',
+                'supportsAllDrives' => true,
+            ]);
 
-        return $created->getId();
+            return $created->getId();
+        } catch (Exception $e) {
+            throw new Exception($this->friendlyDriveError($e), 0, $e);
+        }
     }
 
     public function uploadOrReplace(string $folderId, string $filename, string $bytes, string $mime): DriveFile
@@ -307,39 +492,50 @@ class GoogleDriveUploader
         $list = $this->drive->files->listFiles([
             'q' => $q,
             'spaces' => 'drive',
+            'corpora' => 'allDrives',
             'fields' => 'files(id, name)',
             'pageSize' => 1,
             'supportsAllDrives' => true,
             'includeItemsFromAllDrives' => true,
         ]);
 
-        $existing = $list->getFiles();
-        if ($existing && count($existing) > 0) {
-            return $this->drive->files->update(
-                $existing[0]->getId(),
-                new DriveFile(['name' => $filename]),
-                [
-                    'data' => $bytes,
-                    'mimeType' => $mime,
-                    'uploadType' => 'multipart',
-                    'fields' => 'id, name',
-                    'supportsAllDrives' => true,
-                ]
-            );
+        $uploadType = strlen($bytes) > self::RESUMABLE_THRESHOLD ? 'resumable' : 'multipart';
+
+        try {
+            $existing = $list->getFiles();
+            if ($existing && count($existing) > 0) {
+                return $this->drive->files->update(
+                    $existing[0]->getId(),
+                    new DriveFile([
+                        'name' => $filename,
+                        'mimeType' => $mime,
+                    ]),
+                    [
+                        'data' => $bytes,
+                        'mimeType' => $mime,
+                        'uploadType' => $uploadType,
+                        'fields' => 'id, name',
+                        'supportsAllDrives' => true,
+                    ]
+                );
+            }
+
+            $meta = new DriveFile([
+                'name' => $filename,
+                'mimeType' => $mime,
+                'parents' => [$folderId],
+            ]);
+
+            return $this->drive->files->create($meta, [
+                'data' => $bytes,
+                'mimeType' => $mime,
+                'uploadType' => $uploadType,
+                'fields' => 'id, name',
+                'supportsAllDrives' => true,
+            ]);
+        } catch (Exception $e) {
+            throw new Exception($this->friendlyDriveError($e), 0, $e);
         }
-
-        $meta = new DriveFile([
-            'name' => $filename,
-            'parents' => [$folderId],
-        ]);
-
-        return $this->drive->files->create($meta, [
-            'data' => $bytes,
-            'mimeType' => $mime,
-            'uploadType' => 'multipart',
-            'fields' => 'id, name',
-            'supportsAllDrives' => true,
-        ]);
     }
 
     private function resolvePpmpExcelBytes(Ppmp $ppmp, ?Office $office): string
@@ -364,5 +560,105 @@ class GoogleDriveUploader
 
         $items = PpmpItem::where('ppmp_id', $ppmp->id)->get();
         return PpmpExcelExporter::exportPpmpXlsx($office, $ppmp, $items);
+    }
+
+    /**
+     * Prefer "{CODE} (IND PPMP).{ext}" matching the office upload stem.
+     */
+    private function buildPpmpDriveFilename(Ppmp $ppmp, string $officeCode, string $bytes): string
+    {
+        $ext = $this->detectExcelExtension($bytes, $ppmp->excel_filename, $ppmp->excel_path);
+        $stem = PpmpExcelParser::expectedFilenameStem($officeCode);
+
+        return $stem . '.' . $ext;
+    }
+
+    private function detectExcelExtension(string $bytes, ?string $filename, ?string $path): string
+    {
+        $magic = substr($bytes, 0, 4);
+        if ($magic === "\xD0\xCF\x11\xE0") {
+            return 'xls';
+        }
+        if ($magic === "PK\x03\x04" || $magic === "PK\x05\x06") {
+            return 'xlsx';
+        }
+
+        foreach ([$filename, $path] as $candidate) {
+            if (!$candidate) {
+                continue;
+            }
+            $ext = strtolower(pathinfo((string) $candidate, PATHINFO_EXTENSION));
+            if (in_array($ext, ['xls', 'xlsx'], true)) {
+                return $ext;
+            }
+        }
+
+        return 'xlsx';
+    }
+
+    private function detectExcelMime(string $bytes, ?string $storedMime, string $filename): string
+    {
+        $magic = substr($bytes, 0, 4);
+        if ($magic === "\xD0\xCF\x11\xE0") {
+            return self::MIME_XLS;
+        }
+        if ($magic === "PK\x03\x04" || $magic === "PK\x05\x06") {
+            return self::MIME_XLSX;
+        }
+
+        $stored = trim((string) $storedMime);
+        if ($stored !== '') {
+            return $stored;
+        }
+
+        $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+        return $ext === 'xls' ? self::MIME_XLS : self::MIME_XLSX;
+    }
+
+    /**
+     * Map Drive API errors (especially storageQuotaExceeded) to actionable messages.
+     */
+    private function friendlyDriveError(Exception $e): string
+    {
+        $raw = $e->getMessage();
+        $body = '';
+
+        if ($e instanceof GoogleServiceException) {
+            $body = (string) $e->getMessage();
+        } elseif ($e->getPrevious() instanceof GoogleServiceException) {
+            $body = (string) $e->getPrevious()->getMessage();
+        }
+
+        $haystack = $body !== '' ? $body : $raw;
+
+        if (
+            stripos($haystack, 'storageQuotaExceeded') !== false
+            || stripos($haystack, 'storage quota') !== false
+            || stripos($haystack, '0 My Drive') !== false
+            || stripos($haystack, 'do not have storage quota') !== false
+            || stripos($haystack, 'Service Accounts do not have storage quota') !== false
+        ) {
+            return $this->quotaExceededMessage(false, '');
+        }
+
+        // Prefer structured Google API errors when present
+        if ($e instanceof GoogleServiceException) {
+            $errors = $e->getErrors();
+            if (is_array($errors) && isset($errors[0])) {
+                $reason = (string) ($errors[0]['reason'] ?? '');
+                $message = (string) ($errors[0]['message'] ?? '');
+                if ($reason === 'storageQuotaExceeded' || stripos($message, 'storage quota') !== false) {
+                    return $this->quotaExceededMessage(false, $message !== '' ? $message : $reason);
+                }
+                if ($message !== '') {
+                    return $reason !== '' ? "{$reason}: {$message}" : $message;
+                }
+            }
+        }
+        if ($e->getPrevious() instanceof GoogleServiceException) {
+            return $this->friendlyDriveError($e->getPrevious());
+        }
+
+        return $raw !== '' ? $raw : 'Drive upload failed';
     }
 }

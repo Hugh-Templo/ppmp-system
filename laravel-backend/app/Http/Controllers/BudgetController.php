@@ -4,10 +4,12 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 use App\Models\Ppmp;
 use App\Models\Office;
 use App\Models\IndicativePpmp;
 use App\Models\FinalPpmp;
+use Exception;
 
 class BudgetController extends Controller
 {
@@ -278,6 +280,7 @@ class BudgetController extends Controller
 
         $action = strtolower(trim($request->input('action', '')));
         $remarks = trim($request->input('remarks', ''));
+        $driveSync = null;
 
         if ($action === 'approve') {
             $ppmp->status = 'Approved';
@@ -291,6 +294,8 @@ class BudgetController extends Controller
                 ->where('id', '!=', $ppmp->id)
                 ->whereNull('superseded_at')
                 ->update(['superseded_at' => now()]);
+
+            $driveSync = $this->syncVerifiedPpmpToDrive($ppmp);
         } elseif ($action === 'return') {
             $ppmp->status = 'Returned';
             $ppmp->remarks = $remarks;
@@ -299,10 +304,32 @@ class BudgetController extends Controller
             return response()->json(['detail' => "Invalid action. Use 'approve' or 'return'"], 400);
         }
 
-        return response()->json([
+        $payload = [
             'message' => "PPMP has been successfully {$ppmp->status}",
             'status' => $ppmp->status,
             'remarks' => $remarks,
-        ]);
+        ];
+        if ($driveSync !== null) {
+            $payload['drive_sync'] = $driveSync;
+        }
+
+        return response()->json($payload);
+    }
+
+    /**
+     * Drive sync on verify is disabled for personal Gmail (service accounts have 0 quota).
+     * BAC Admin uses Download for rclone instead.
+     *
+     * @return array{ok: bool, skipped?: bool, error?: string, uploaded?: list<array>, errors?: list<array>}
+     */
+    private function syncVerifiedPpmpToDrive(Ppmp $ppmp): array
+    {
+        return [
+            'ok' => false,
+            'skipped' => true,
+            'error' => 'Drive API upload disabled. Use BAC Admin → Download for rclone, then sync on the PC.',
+            'uploaded' => [],
+            'errors' => [],
+        ];
     }
 }
