@@ -1,5 +1,10 @@
 import React, { useMemo } from "react";
 import catalogData from "./data/appCse2027Catalog.json";
+import {
+  emptyMonthQty,
+  monthQtyFromQuarters,
+  quartersFromMonthQty,
+} from "./cseQtyHelpers";
 
 const INTRODUCTION =
   "This form contains the common-use supplies and equipment (CSE) being carried by the Procurement Service – Department of Budget and Management (PS-DBM) that shall be purchased by government agencies. Consistent with the guidelines in DBM Circulars, GPPB Resolutions, and Republic Act No. 12009 or the New Government Procurement Act (NGPA), the APP-CSE shall serve as the agency’s annual procurement request for all its CSE requirements. Only agencies with uploaded APP-CSE in the Modernized Philippine Government Electronic Procurement System (mPhilGEPS) will be able to purchase CSE from the PS-DBM. Note that the items listed on this form have been arranged in accordance with the United Nations Standard Products and Services Code (UNSPSC)";
@@ -65,16 +70,6 @@ function qtyCell(value) {
   return n ? n.toLocaleString() : "";
 }
 
-function quarterQuantities(row) {
-  let q1 = Number(row?.q1_qty || 0);
-  let q2 = Number(row?.q2_qty || 0);
-  let q3 = Number(row?.q3_qty || 0);
-  let q4 = Number(row?.q4_qty || 0);
-  const total = Number(row?.total_quantity || 0);
-  if (q1 + q2 + q3 + q4 === 0 && total > 0) q1 = total;
-  return { q1, q2, q3, q4 };
-}
-
 function matchCatalogItem(row, items, descIndex, codeIndex) {
   const descKey = normalizeCseKey(row?.description);
   if (!descKey) return null;
@@ -116,47 +111,19 @@ function buildFilledCatalog(rows) {
   });
 
   const qtyByRow = new Map();
-  const unmatchedByKey = new Map();
 
   (rows || []).forEach((row) => {
     const match = matchCatalogItem(row, items, descIndex, codeIndex);
-    const qty = quarterQuantities(row);
-    if (!match) {
-      const unmatchedKey =
-        normalizeCseKey(row?.description) || `__empty_${unmatchedByKey.size}`;
-      const prev = unmatchedByKey.get(unmatchedKey) || {
-        row: { ...row },
-        qty: { q1: 0, q2: 0, q3: 0, q4: 0 },
-        offices: new Set(),
-      };
-      prev.qty.q1 += qty.q1;
-      prev.qty.q2 += qty.q2;
-      prev.qty.q3 += qty.q3;
-      prev.qty.q4 += qty.q4;
-      prev.row.total_estimated_budget =
-        Number(prev.row.total_estimated_budget || 0) +
-        Number(row.total_estimated_budget || 0);
-      prev.row.total_quantity =
-        Number(prev.row.total_quantity || 0) + Number(row.total_quantity || 0);
-      if (!prev.row.unit_cost && row.unit_cost) {
-        prev.row.unit_cost = row.unit_cost;
-      }
-      if (!prev.row.unit_of_measure && row.unit_of_measure) {
-        prev.row.unit_of_measure = row.unit_of_measure;
-      }
-      if (row.end_user_offices) {
-        String(row.end_user_offices)
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .forEach((office) => prev.offices.add(office));
-      }
-      prev.row.end_user_offices = Array.from(prev.offices).join(", ");
-      unmatchedByKey.set(unmatchedKey, prev);
-      return;
-    }
+    // Stock APP-CSE catalog only — skip anything that is not a catalog item.
+    if (!match) return;
+
+    // Preview uses consolidated q1–q4 (placed in Jan/Apr/Jul/Oct for display).
+    // Excel export writes true monthly cells on the template copy.
+    const months = monthQtyFromQuarters(row);
+    const qty = quartersFromMonthQty(months);
     const prev = qtyByRow.get(match.row) || {
       item: match,
+      months: emptyMonthQty(),
       q1: 0,
       q2: 0,
       q3: 0,
@@ -165,6 +132,9 @@ function buildFilledCatalog(rows) {
       unitCost: null,
       offices: new Set(),
     };
+    Object.keys(months).forEach((k) => {
+      prev.months[k] = Number(prev.months[k] || 0) + Number(months[k] || 0);
+    });
     prev.q1 += qty.q1;
     prev.q2 += qty.q2;
     prev.q3 += qty.q3;
@@ -181,10 +151,7 @@ function buildFilledCatalog(rows) {
     qtyByRow.set(match.row, prev);
   });
 
-  const unmatched = Array.from(unmatchedByKey.values()).map((entry) => ({
-    row: entry.row,
-    qty: entry.qty,
-  }));
+  const unmatched = [];
 
   const displayEntries = [];
   let pendingPart = null;
@@ -200,6 +167,7 @@ function buildFilledCatalog(rows) {
       pendingCategory = null;
     }
     const unitPrice = filled.item.unit_price || filled.unitCost || 0;
+    const m = filled.months || emptyMonthQty();
     const q1 = filled.q1;
     const q2 = filled.q2;
     const q3 = filled.q3;
@@ -209,10 +177,18 @@ function buildFilledCatalog(rows) {
     displayEntries.push({
       type: "item",
       ...entry,
-      jan: q1,
-      apr: q2,
-      jul: q3,
-      oct: q4,
+      jan: m.jan,
+      feb: m.feb,
+      mar: m.mar,
+      apr: m.apr,
+      may: m.may,
+      jun: m.jun,
+      jul: m.jul,
+      aug: m.aug,
+      sep: m.sep,
+      oct: m.oct,
+      nov: m.nov,
+      dec: m.dec,
       q1,
       q2,
       q3,
@@ -465,23 +441,23 @@ export default function AppCse2027Form({
                   </td>
                   <td className="app-cse-2027__center">{entry.uom}</td>
                   <td className="app-cse-2027__center">{qtyCell(entry.jan)}</td>
-                  <td></td>
-                  <td></td>
+                  <td className="app-cse-2027__center">{qtyCell(entry.feb)}</td>
+                  <td className="app-cse-2027__center">{qtyCell(entry.mar)}</td>
                   <td className="app-cse-2027__center">{qtyCell(entry.q1)}</td>
                   <td className="app-cse-2027__amount">{entry.q1 ? money(entry.q1Amt) : ""}</td>
                   <td className="app-cse-2027__center">{qtyCell(entry.apr)}</td>
-                  <td></td>
-                  <td></td>
+                  <td className="app-cse-2027__center">{qtyCell(entry.may)}</td>
+                  <td className="app-cse-2027__center">{qtyCell(entry.jun)}</td>
                   <td className="app-cse-2027__center">{qtyCell(entry.q2)}</td>
                   <td className="app-cse-2027__amount">{entry.q2 ? money(entry.q2Amt) : ""}</td>
                   <td className="app-cse-2027__center">{qtyCell(entry.jul)}</td>
-                  <td></td>
-                  <td></td>
+                  <td className="app-cse-2027__center">{qtyCell(entry.aug)}</td>
+                  <td className="app-cse-2027__center">{qtyCell(entry.sep)}</td>
                   <td className="app-cse-2027__center">{qtyCell(entry.q3)}</td>
                   <td className="app-cse-2027__amount">{entry.q3 ? money(entry.q3Amt) : ""}</td>
                   <td className="app-cse-2027__center">{qtyCell(entry.oct)}</td>
-                  <td></td>
-                  <td></td>
+                  <td className="app-cse-2027__center">{qtyCell(entry.nov)}</td>
+                  <td className="app-cse-2027__center">{qtyCell(entry.dec)}</td>
                   <td className="app-cse-2027__center">{qtyCell(entry.q4)}</td>
                   <td className="app-cse-2027__amount">{entry.q4 ? money(entry.q4Amt) : ""}</td>
                   <td className="app-cse-2027__center">{qtyCell(entry.yearQty)}</td>
@@ -491,63 +467,7 @@ export default function AppCse2027Form({
               );
             })}
 
-            {unmatched.length > 0 ? (
-              <tr className="app-cse-2027__part-row">
-                <td colSpan={27}>
-                  ITEMS NOT FOUND IN THE APP-CSE 2027 CATALOG ({unmatched.length})
-                </td>
-              </tr>
-            ) : null}
-            {unmatched.map((entry, idx) => {
-              const yearQty = entry.qty.q1 + entry.qty.q2 + entry.qty.q3 + entry.qty.q4;
-              const unitPrice = Number(entry.row.unit_cost || 0);
-              const yearAmt =
-                yearQty && unitPrice
-                  ? yearQty * unitPrice
-                  : Number(entry.row.total_estimated_budget || 0);
-              return (
-                <tr key={`unmatched-${entry.row.id || idx}`} className="app-cse-2027__unmatched">
-                  <td className="app-cse-2027__center">—</td>
-                  <td></td>
-                  <td>
-                    {entry.row.description}
-                    {entry.row.end_user_offices ? (
-                      <span className="app-cse-2027__offices">
-                        {entry.row.end_user_offices}
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className="app-cse-2027__center">
-                    {entry.row.unit_of_measure || ""}
-                  </td>
-                  <td className="app-cse-2027__center">{qtyCell(entry.qty.q1)}</td>
-                  <td></td>
-                  <td></td>
-                  <td className="app-cse-2027__center">{qtyCell(entry.qty.q1)}</td>
-                  <td></td>
-                  <td className="app-cse-2027__center">{qtyCell(entry.qty.q2)}</td>
-                  <td></td>
-                  <td></td>
-                  <td className="app-cse-2027__center">{qtyCell(entry.qty.q2)}</td>
-                  <td></td>
-                  <td className="app-cse-2027__center">{qtyCell(entry.qty.q3)}</td>
-                  <td></td>
-                  <td></td>
-                  <td className="app-cse-2027__center">{qtyCell(entry.qty.q3)}</td>
-                  <td></td>
-                  <td className="app-cse-2027__center">{qtyCell(entry.qty.q4)}</td>
-                  <td></td>
-                  <td></td>
-                  <td className="app-cse-2027__center">{qtyCell(entry.qty.q4)}</td>
-                  <td></td>
-                  <td className="app-cse-2027__center">{qtyCell(yearQty)}</td>
-                  <td className="app-cse-2027__amount">{unitPrice ? money(unitPrice) : ""}</td>
-                  <td className="app-cse-2027__amount">{yearAmt ? money(yearAmt) : ""}</td>
-                </tr>
-              );
-            })}
-
-            {filledCount > 0 || unmatched.length > 0 ? (
+            {filledCount > 0 ? (
               <>
                 <TotalsBlock
                   partLabel="PART I. AVAILABLE AT PS-DBM (MAIN WAREHOUSE AND DEPOTS)"

@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\App as AppModel;
 use App\Models\AppRow;
 use App\Models\AppSignatory;
+use App\Models\Ppmp;
+use App\Models\PpmpItem;
 use Exception;
 use ZipArchive;
 
@@ -176,11 +178,6 @@ class AppExcelExporter
 
     public static function exportCseApp(int $fiscalYear): string
     {
-        [, $allRows] = self::getAppAndRows($fiscalYear);
-        $cseRows = self::mergeAppRowsByDescription(
-            $allRows->filter(fn($r) => (bool)$r->is_cse)->values()
-        );
-
         $template = self::getCseTemplate();
         if (!file_exists($template)) {
             throw new Exception("Template missing: " . $template);
@@ -206,33 +203,8 @@ class AppExcelExporter
         }
 
         $catalogIndex = self::buildCse2027CatalogIndexFromXml($sheetXml, $stringsXml);
-        $qtyByRow = [];
-
-        foreach ($cseRows as $row) {
-            $excelRow = self::matchCse2027CatalogRow($row, $catalogIndex);
-            if ($excelRow === null) {
-                continue;
-            }
-
-            $qty = self::cseQuarterQuantities($row);
-            if (!isset($qtyByRow[$excelRow])) {
-                $qtyByRow[$excelRow] = [
-                    'q1' => 0,
-                    'q2' => 0,
-                    'q3' => 0,
-                    'q4' => 0,
-                    'unit_cost' => null,
-                    'catalog_price' => $catalogIndex['price'][$excelRow] ?? 0,
-                ];
-            }
-            $qtyByRow[$excelRow]['q1'] += $qty['q1'];
-            $qtyByRow[$excelRow]['q2'] += $qty['q2'];
-            $qtyByRow[$excelRow]['q3'] += $qty['q3'];
-            $qtyByRow[$excelRow]['q4'] += $qty['q4'];
-            if ($qtyByRow[$excelRow]['unit_cost'] === null && $row->unit_cost) {
-                $qtyByRow[$excelRow]['unit_cost'] = (float) $row->unit_cost;
-            }
-        }
+        // Month map per catalog Excel row: [excelRow => [1=>qty ... 12=>qty]]
+        $qtyByRow = self::buildCseMonthQtyByCatalogRow($fiscalYear, $catalogIndex);
 
         $writes = [
             'D23' => ['text', 'Ormoc City Government'],
@@ -241,21 +213,17 @@ class AppExcelExporter
             'J24' => ['text', 'LGU'],
         ];
 
-        foreach ($qtyByRow as $r => $qty) {
-            if ($qty['q1'] > 0) {
-                $writes["E{$r}"] = ['number', $qty['q1']];
-            }
-            if ($qty['q2'] > 0) {
-                $writes["J{$r}"] = ['number', $qty['q2']];
-            }
-            if ($qty['q3'] > 0) {
-                $writes["O{$r}"] = ['number', $qty['q3']];
-            }
-            if ($qty['q4'] > 0) {
-                $writes["T{$r}"] = ['number', $qty['q4']];
-            }
-            if (($qty['catalog_price'] ?? 0) <= 0 && $qty['unit_cost']) {
-                $writes["Z{$r}"] = ['number', $qty['unit_cost']];
+        foreach ($qtyByRow as $r => $months) {
+            foreach ($months as $monthNum => $qty) {
+                if ($qty <= 0) {
+                    continue;
+                }
+                $col = CseQtyHelper::MONTH_COLUMNS[(int) $monthNum] ?? null;
+                if ($col === null) {
+                    continue;
+                }
+                // Only unlocked monthly qty cells — never overwrite Q1–Q4 formulas or Z unit price.
+                $writes["{$col}{$r}"] = ['number', (int) $qty];
             }
         }
 
@@ -293,6 +261,74 @@ class AppExcelExporter
         }
 
         return $content;
+    }
+
+    /**
+     * Build monthly qty per APP-CSE catalog row from approved CSE PPMP items
+     * (preferred — correct when the same item spans multiple quarters).
+     * Falls back to consolidated app_rows q1–q4 placed in Jan/Apr/Jul/Oct.
+     *
+     * @return array<int, array<int, int>>
+     */
+    private static function buildCseMonthQtyByCatalogRow(int $fiscalYear, array $catalogIndex): array
+    {
+        $qtyByRow = [];
+
+        $ppmpIds = Ppmp::where('fiscal_year', $fiscalYear)
+            ->where('status', 'Approved')
+            ->whereNull('superseded_at')
+            ->pluck('id');
+
+        $cseItems = $ppmpIds->isEmpty()
+            ? collect()
+            : PpmpItem::whereIn('ppmp_id', $ppmpIds)->where('is_cse', true)->get();
+
+        if ($cseItems->isNotEmpty()) {
+            foreach ($cseItems as $item) {
+                $lines = CseQtyHelper::expandCsePpmpItemLines($item);
+                if (!$lines) {
+                    continue;
+                }
+                foreach ($lines as $line) {
+                    $excelRow = self::matchCse2027CatalogLine($line, $catalogIndex);
+                    if ($excelRow === null) {
+                        continue;
+                    }
+                    if (!isset($qtyByRow[$excelRow])) {
+                        $qtyByRow[$excelRow] = CseQtyHelper::emptyMonthMap();
+                    }
+                    CseQtyHelper::addExpandedLineToMonthMap($qtyByRow[$excelRow], $line);
+                }
+            }
+            return $qtyByRow;
+        }
+
+        // Fallback: consolidated APP rows (quarter totals → first month of quarter).
+        try {
+            [, $allRows] = self::getAppAndRows($fiscalYear);
+        } catch (Exception $e) {
+            return $qtyByRow;
+        }
+
+        $cseRows = self::mergeAppRowsByDescription(
+            $allRows->filter(fn ($r) => (bool) $r->is_cse)->values()
+        );
+
+        foreach ($cseRows as $row) {
+            $excelRow = self::matchCse2027CatalogRow($row, $catalogIndex);
+            if ($excelRow === null) {
+                continue;
+            }
+            if (!isset($qtyByRow[$excelRow])) {
+                $qtyByRow[$excelRow] = CseQtyHelper::emptyMonthMap();
+            }
+            $qtyByRow[$excelRow][1] += (int) ($row->q1_qty ?? 0);
+            $qtyByRow[$excelRow][4] += (int) ($row->q2_qty ?? 0);
+            $qtyByRow[$excelRow][7] += (int) ($row->q3_qty ?? 0);
+            $qtyByRow[$excelRow][10] += (int) ($row->q4_qty ?? 0);
+        }
+
+        return $qtyByRow;
     }
 
     public static function isExcelBinary(string $bytes): bool
@@ -357,7 +393,14 @@ class AppExcelExporter
     }
 
     /**
-     * @return array{by_desc: array<string, int[]>, by_code: array<string, int[]>, items: array<int, array{row:int, desc:string, code:string}>, price: array<int, float>}
+     * @return array{
+     *   by_desc: array<string, int[]>,
+     *   by_code: array<string, int[]>,
+     *   items: array<int, array{row:int, desc:string, code:string}>,
+     *   price: array<int, float>,
+     *   uom: array<int, string>,
+     *   meta: array<int, array{description:string, uom:string, code:string}>
+     * }
      */
     private static function buildCse2027CatalogIndexFromXml(string $sheetXml, string $stringsXml): array
     {
@@ -367,9 +410,18 @@ class AppExcelExporter
         $byCode = [];
         $items = [];
         $price = [];
+        $uom = [];
+        $meta = [];
 
         if (!$sheet) {
-            return ['by_desc' => [], 'by_code' => [], 'items' => [], 'price' => []];
+            return [
+                'by_desc' => [],
+                'by_code' => [],
+                'items' => [],
+                'price' => [],
+                'uom' => [],
+                'meta' => [],
+            ];
         }
 
         foreach ($sheet->sheetData->row as $row) {
@@ -380,6 +432,7 @@ class AppExcelExporter
 
             $code = '';
             $desc = '';
+            $measure = '';
             $unitPrice = 0.0;
             foreach ($row->c as $cell) {
                 $ref = (string) $cell['r'];
@@ -392,6 +445,8 @@ class AppExcelExporter
                     $code = trim($value);
                 } elseif ($col === 'C') {
                     $desc = trim($value);
+                } elseif ($col === 'D') {
+                    $measure = trim($value);
                 } elseif ($col === 'Z') {
                     $unitPrice = is_numeric($value) ? (float) $value : 0.0;
                 }
@@ -411,6 +466,12 @@ class AppExcelExporter
                 'code' => $codeKey,
             ];
             $price[$r] = $unitPrice;
+            $uom[$r] = $measure;
+            $meta[$r] = [
+                'description' => $desc,
+                'uom' => $measure,
+                'code' => $code,
+            ];
         }
 
         return [
@@ -418,6 +479,8 @@ class AppExcelExporter
             'by_code' => $byCode,
             'items' => $items,
             'price' => $price,
+            'uom' => $uom,
+            'meta' => $meta,
         ];
     }
 
@@ -515,55 +578,163 @@ class AppExcelExporter
         return trim(preg_replace('/\s+/', ' ', $value) ?? $value);
     }
 
-    private static function matchCse2027CatalogRow($row, array $index): ?int
+    /**
+     * Match a PPMP quantity_size line (name + unit) to one APP-CSE catalog Excel row.
+     * Never invents catalog rows — unmatched lines are skipped.
+     */
+    private static function matchCse2027CatalogLine(array $line, array $index): ?int
     {
-        $descKey = self::normalizeCseKey($row->description ?? '');
-        if ($descKey === '') {
+        $nameKey = self::normalizeCseKey($line['name'] ?? '');
+        if ($nameKey === '') {
             return null;
         }
+        $unitKey = CseQtyHelper::normalizeUom($line['unit'] ?? '');
 
-        if (isset($index['by_desc'][$descKey]) && count($index['by_desc'][$descKey]) === 1) {
-            return $index['by_desc'][$descKey][0];
+        if (isset($index['by_desc'][$nameKey]) && count($index['by_desc'][$nameKey]) === 1) {
+            return $index['by_desc'][$nameKey][0];
         }
-
-        if (isset($index['by_code'][$descKey]) && count($index['by_code'][$descKey]) === 1) {
-            return $index['by_code'][$descKey][0];
+        if (isset($index['by_code'][$nameKey]) && count($index['by_code'][$nameKey]) === 1) {
+            return $index['by_code'][$nameKey][0];
         }
 
         $hits = [];
         foreach ($index['items'] as $item) {
-            if ($item['desc'] === $descKey || $item['code'] === $descKey) {
-                $hits[$item['row']] = true;
+            $desc = $item['desc'];
+            $code = $item['code'];
+            if ($desc === $nameKey || $code === $nameKey) {
+                $hits[$item['row']] = $item;
                 continue;
             }
-            if ($item['desc'] !== '' && (str_contains($descKey, $item['desc']) || str_contains($item['desc'], $descKey))) {
-                $hits[$item['row']] = true;
+            if ($desc !== '' && (str_contains($nameKey, $desc) || str_contains($desc, $nameKey))) {
+                $hits[$item['row']] = $item;
+                continue;
+            }
+            // Token overlap: require most significant tokens of the shorter name
+            if ($desc !== '' && self::cseNameTokensOverlap($nameKey, $desc)) {
+                $hits[$item['row']] = $item;
             }
         }
 
-        $rows = array_keys($hits);
-        return count($rows) === 1 ? $rows[0] : null;
+        if (count($hits) === 1) {
+            return (int) array_key_first($hits);
+        }
+
+        if (count($hits) > 1 && $unitKey !== '') {
+            $uomHits = [];
+            foreach ($hits as $rowNum => $item) {
+                $catalogUom = CseQtyHelper::normalizeUom($index['uom'][$rowNum] ?? '');
+                if ($catalogUom !== '' && $catalogUom === $unitKey) {
+                    $uomHits[$rowNum] = true;
+                }
+            }
+            if (count($uomHits) === 1) {
+                return (int) array_key_first($uomHits);
+            }
+        }
+
+        return null;
+    }
+
+    private static function cseNameTokensOverlap(string $a, string $b): bool
+    {
+        $stop = ['AND', 'OR', 'THE', 'OF', 'FOR', 'WITH', 'SIZE', 'ML', 'MM', 'CM', 'PCS'];
+        $ta = array_values(array_filter(explode(' ', $a), fn ($t) => strlen($t) > 1 && !in_array($t, $stop, true)));
+        $tb = array_values(array_filter(explode(' ', $b), fn ($t) => strlen($t) > 1 && !in_array($t, $stop, true)));
+        if (!$ta || !$tb) {
+            return false;
+        }
+        $shorter = count($ta) <= count($tb) ? $ta : $tb;
+        $longer = count($ta) <= count($tb) ? $tb : $ta;
+        $need = max(2, (int) ceil(count($shorter) * 0.75));
+        $hit = 0;
+        foreach ($shorter as $tok) {
+            if (in_array($tok, $longer, true)) {
+                $hit++;
+            }
+        }
+        return $hit >= $need;
+    }
+
+    private static function matchCse2027CatalogRow($row, array $index): ?int
+    {
+        return self::matchCse2027CatalogLine([
+            'name' => (string) ($row->description ?? ''),
+            'unit' => (string) ($row->unit_of_measure ?? ''),
+        ], $index);
     }
 
     /**
-     * APP-CSE 2027 uses monthly qty. PPMP data is quarterly, so Q1..Q4
-     * are written to January, April, July, and October.
+     * Build CSE-APP preview rows from approved PPMP quantity_size lines matched
+     * to the stock APP-CSE catalog only (no invented Item & Specs rows).
+     *
+     * @return array<int, object>
+     */
+    public static function buildCsePreviewRows(int $fiscalYear): array
+    {
+        $template = self::getCseTemplate();
+        if (!file_exists($template)) {
+            return [];
+        }
+
+        $zip = new ZipArchive();
+        if ($zip->open($template) !== true) {
+            return [];
+        }
+        $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
+        $stringsXml = $zip->getFromName('xl/sharedStrings.xml');
+        $zip->close();
+        if ($sheetXml === false || $stringsXml === false) {
+            return [];
+        }
+
+        $catalogIndex = self::buildCse2027CatalogIndexFromXml($sheetXml, $stringsXml);
+        $qtyByRow = self::buildCseMonthQtyByCatalogRow($fiscalYear, $catalogIndex);
+        $rows = [];
+
+        foreach ($qtyByRow as $excelRow => $months) {
+            $quarters = CseQtyHelper::quartersFromMonthMap($months);
+            $total = $quarters['q1'] + $quarters['q2'] + $quarters['q3'] + $quarters['q4'];
+            if ($total <= 0) {
+                continue;
+            }
+            $meta = $catalogIndex['meta'][$excelRow] ?? null;
+            $rows[] = (object) [
+                'id' => 'cse-catalog-' . $excelRow,
+                'description' => $meta['description'] ?? '',
+                'is_cse' => true,
+                'unit_of_measure' => $meta['uom'] ?? ($catalogIndex['uom'][$excelRow] ?? null),
+                'unit_cost' => $catalogIndex['price'][$excelRow] ?? null,
+                'total_quantity' => $total,
+                'q1_qty' => $quarters['q1'],
+                'q2_qty' => $quarters['q2'],
+                'q3_qty' => $quarters['q3'],
+                'q4_qty' => $quarters['q4'],
+                'total_estimated_budget' => $total * (float) ($catalogIndex['price'][$excelRow] ?? 0),
+                'end_user_offices' => null,
+                'quantity_size' => null,
+                'proc_start' => null,
+                'proc_end' => null,
+                'delivery_period' => null,
+            ];
+        }
+
+        usort($rows, fn ($a, $b) => strcasecmp((string) $a->description, (string) $b->description));
+        return $rows;
+    }
+
+    /**
+     * Quarters from stored app_row values only (no “dump total into Q1” fallback).
      *
      * @return array{q1:int,q2:int,q3:int,q4:int}
      */
     private static function cseQuarterQuantities($row): array
     {
-        $q1 = (int) ($row->q1_qty ?? 0);
-        $q2 = (int) ($row->q2_qty ?? 0);
-        $q3 = (int) ($row->q3_qty ?? 0);
-        $q4 = (int) ($row->q4_qty ?? 0);
-        $total = (int) ($row->total_quantity ?? 0);
-
-        if ($q1 + $q2 + $q3 + $q4 === 0 && $total > 0) {
-            $q1 = $total;
-        }
-
-        return ['q1' => $q1, 'q2' => $q2, 'q3' => $q3, 'q4' => $q4];
+        return [
+            'q1' => (int) ($row->q1_qty ?? 0),
+            'q2' => (int) ($row->q2_qty ?? 0),
+            'q3' => (int) ($row->q3_qty ?? 0),
+            'q4' => (int) ($row->q4_qty ?? 0),
+        ];
     }
 
     private static function normalizeProcurementProject(string $description): string

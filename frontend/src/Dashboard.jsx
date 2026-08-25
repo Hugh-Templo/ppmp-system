@@ -403,6 +403,7 @@ function Dashboard({ token, user, onLogout }) {
   const [newUserActive, setNewUserActive] = useState(true);
   const [registeredUsers, setRegisteredUsers] = useState([]);
   const [usersPage, setUsersPage] = useState(1);
+  const [usersSearch, setUsersSearch] = useState("");
   const [revealedUserPasswords, setRevealedUserPasswords] = useState({});
   const [passwordRevealModal, setPasswordRevealModal] = useState({
     open: false,
@@ -1989,10 +1990,31 @@ function Dashboard({ token, user, onLogout }) {
     return labels[role] || role.replace(/_/g, " ");
   };
 
-  const usersTotalPages = Math.max(1, Math.ceil(registeredUsers.length / USERS_PAGE_SIZE));
+  const usersSearchQuery = usersSearch.trim().toLowerCase();
+  const filteredRegisteredUsers = !usersSearchQuery
+    ? registeredUsers
+    : registeredUsers.filter((u) => {
+        const office = offices.find((o) => o.id === u.office_id);
+        const officeLabel = getOfficeLabel(u.office_id);
+        const haystack = [
+          u.username,
+          u.email,
+          formatRole(u.role),
+          u.role,
+          officeLabel,
+          office?.name,
+          office?.code,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(usersSearchQuery);
+      });
+
+  const usersTotalPages = Math.max(1, Math.ceil(filteredRegisteredUsers.length / USERS_PAGE_SIZE));
   const safeUsersPage = Math.min(Math.max(1, usersPage), usersTotalPages);
   const usersPageStart = (safeUsersPage - 1) * USERS_PAGE_SIZE;
-  const pagedRegisteredUsers = registeredUsers.slice(
+  const pagedRegisteredUsers = filteredRegisteredUsers.slice(
     usersPageStart,
     usersPageStart + USERS_PAGE_SIZE
   );
@@ -4192,6 +4214,19 @@ function Dashboard({ token, user, onLogout }) {
 
               <div className="dashboard-card">
                 <h2 className="card-title">Registered Users</h2>
+                <div className="budget-tracker-search" style={{ marginBottom: "12px", maxWidth: "100%" }}>
+                  <i className="fas fa-search" aria-hidden="true"></i>
+                  <input
+                    type="search"
+                    placeholder="Search office name, code, or username…"
+                    value={usersSearch}
+                    onChange={(e) => {
+                      setUsersSearch(e.target.value);
+                      setUsersPage(1);
+                    }}
+                    aria-label="Search offices and users"
+                  />
+                </div>
                 <div className="table-wrapper">
                   <table className="custom-table">
                     <thead>
@@ -4210,6 +4245,10 @@ function Dashboard({ token, user, onLogout }) {
                       {registeredUsers.length === 0 ? (
                         <tr>
                           <td colSpan="8">No users registered yet.</td>
+                        </tr>
+                      ) : filteredRegisteredUsers.length === 0 ? (
+                        <tr>
+                          <td colSpan="8">No users or offices match your search.</td>
                         </tr>
                       ) : (
                         pagedRegisteredUsers.map((u) => (
@@ -4308,7 +4347,7 @@ function Dashboard({ token, user, onLogout }) {
                     </tbody>
                   </table>
                 </div>
-                {registeredUsers.length > 0 && (
+                {filteredRegisteredUsers.length > 0 && (
                   <div className="table-pagination" role="navigation" aria-label="Registered users pages">
                     <button
                       type="button"
@@ -4323,7 +4362,7 @@ function Dashboard({ token, user, onLogout }) {
                       </svg>
                     </button>
                     <span className="table-pagination__status">
-                      {usersPageStart + 1}–{usersPageStart + pagedRegisteredUsers.length} of {registeredUsers.length}
+                      {usersPageStart + 1}–{usersPageStart + pagedRegisteredUsers.length} of {filteredRegisteredUsers.length}
                     </span>
                     <button
                       type="button"

@@ -14,6 +14,7 @@ use App\Models\PpmpItem;
 use App\Models\IndicativePpmp;
 use App\Services\PpmpExcelParser;
 use App\Services\AppExcelExporter;
+use App\Services\CseQtyHelper;
 use App\Services\DrivePackageExporter;
 use Exception;
 
@@ -494,11 +495,27 @@ class BacController extends Controller
             }
 
             $consolidationMap[$key]['total_estimated_budget'] += (float)($item->estimated_budget ?? 0);
-            $consolidationMap[$key]['total_quantity'] += (int)($item->quantity ?? 0);
-            $consolidationMap[$key]['q1_qty'] += (int)($item->q1_qty ?? 0);
-            $consolidationMap[$key]['q2_qty'] += (int)($item->q2_qty ?? 0);
-            $consolidationMap[$key]['q3_qty'] += (int)($item->q3_qty ?? 0);
-            $consolidationMap[$key]['q4_qty'] += (int)($item->q4_qty ?? 0);
+
+            if ($isCse) {
+                // Bucket each CSE line by its own PROJECTED TIMELINE month so
+                // merged catalog rows can span multiple quarters correctly.
+                $bucket = CseQtyHelper::quarterBucketFromItem($item);
+                $consolidationMap[$key]['total_quantity'] += $bucket['total'];
+                $consolidationMap[$key]['q1_qty'] += $bucket['q1'];
+                $consolidationMap[$key]['q2_qty'] += $bucket['q2'];
+                $consolidationMap[$key]['q3_qty'] += $bucket['q3'];
+                $consolidationMap[$key]['q4_qty'] += $bucket['q4'];
+            } else {
+                $qty = CseQtyHelper::parsePpmpQuantity($item);
+                if ($qty <= 0) {
+                    $qty = (int) ($item->quantity ?? 0);
+                }
+                $consolidationMap[$key]['total_quantity'] += $qty;
+                $consolidationMap[$key]['q1_qty'] += (int) ($item->q1_qty ?? 0);
+                $consolidationMap[$key]['q2_qty'] += (int) ($item->q2_qty ?? 0);
+                $consolidationMap[$key]['q3_qty'] += (int) ($item->q3_qty ?? 0);
+                $consolidationMap[$key]['q4_qty'] += (int) ($item->q4_qty ?? 0);
+            }
         }
 
         foreach ($consolidationMap as $group) {
@@ -690,12 +707,21 @@ class BacController extends Controller
             return response()->json(['app' => null, 'rows' => []]);
         }
 
-        $rows = AppRow::where('app_id', $app->id)->get();
         $kind = $request->query('kind');
+        $wantCse = $kind && strtolower(trim((string) $kind)) === 'cse';
+
+        // CSE-APP form preview: stock catalog item names only + monthly/quarter qty
+        // from PPMP quantity_size lines. Do not invent Item & Specs from project titles.
+        if ($wantCse) {
+            $rows = AppExcelExporter::buildCsePreviewRows($fiscal_year);
+            return response()->json(['app' => $app, 'rows' => $rows]);
+        }
+
+        $rows = AppRow::where('app_id', $app->id)->get();
 
         if ($kind) {
-            $wantCse = strtolower(trim($kind)) === 'cse';
-            $rows = $rows->filter(fn($r) => (bool)$r->is_cse === $wantCse)->values();
+            $wantCse = strtolower(trim((string) $kind)) === 'cse';
+            $rows = $rows->filter(fn ($r) => (bool) $r->is_cse === $wantCse)->values();
         }
 
         return response()->json(['app' => $app, 'rows' => $rows]);
