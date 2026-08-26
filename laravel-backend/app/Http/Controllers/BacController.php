@@ -702,19 +702,21 @@ class BacController extends Controller
 
     public function getAppByYear(Request $request, int $fiscal_year)
     {
-        $app = AppModel::where('fiscal_year', $fiscal_year)->first();
-        if (!$app) {
-            return response()->json(['app' => null, 'rows' => []]);
-        }
-
         $kind = $request->query('kind');
         $wantCse = $kind && strtolower(trim((string) $kind)) === 'cse';
 
-        // CSE-APP form preview: stock catalog item names only + monthly/quarter qty
-        // from PPMP quantity_size lines. Do not invent Item & Specs from project titles.
+        // CSE-APP form preview: stock catalog SKUs + Q1–Q4 from approved PPMP
+        // quantity_size lines. Does not require an APP header / consolidation first,
+        // and never returns procurement-project approw titles as Item & Specs.
         if ($wantCse) {
+            $app = AppModel::where('fiscal_year', $fiscal_year)->first();
             $rows = AppExcelExporter::buildCsePreviewRows($fiscal_year);
             return response()->json(['app' => $app, 'rows' => $rows]);
+        }
+
+        $app = AppModel::where('fiscal_year', $fiscal_year)->first();
+        if (!$app) {
+            return response()->json(['app' => null, 'rows' => []]);
         }
 
         $rows = AppRow::where('app_id', $app->id)->get();

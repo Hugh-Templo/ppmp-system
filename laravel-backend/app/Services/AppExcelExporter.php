@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\App as AppModel;
 use App\Models\AppRow;
 use App\Models\AppSignatory;
+use App\Models\Office;
 use App\Models\Ppmp;
 use App\Models\PpmpItem;
 use Exception;
@@ -176,6 +177,13 @@ class AppExcelExporter
         return $mergedRows;
     }
 
+    /**
+     * Export APP-CSE 2027 Excel: always a full copy of the official template
+     * (all ~404 catalog items stay visible). Only unlocked monthly qty cells are
+     * written for matched verified CSE PPMP lines. Empty catalog rows are never
+     * deleted, hidden, or filtered — Q1–Q4 / year qty / year amount remain
+     * Excel formulas on every row.
+     */
     public static function exportCseApp(int $fiscalYear): string
     {
         $template = self::getCseTemplate();
@@ -183,6 +191,7 @@ class AppExcelExporter
             throw new Exception("Template missing: " . $template);
         }
 
+        // Full template copy — do not build a filled-only workbook.
         $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'cse_app_' . uniqid('', true) . '.xlsx';
         if (!@copy($template, $tmp)) {
             throw new Exception('Could not copy APP-CSE 2027 template.');
@@ -213,6 +222,8 @@ class AppExcelExporter
             'J24' => ['text', 'LGU'],
         ];
 
+        // Write qty into matched month cells only. Unmatched catalog rows stay
+        // intact (blank qty; formulas still compute 0). Never remove rows.
         foreach ($qtyByRow as $r => $months) {
             foreach ($months as $monthNum => $qty) {
                 if ($qty <= 0) {
@@ -268,16 +279,36 @@ class AppExcelExporter
      * (preferred — correct when the same item spans multiple quarters).
      * Falls back to consolidated app_rows q1–q4 placed in Jan/Apr/Jul/Oct.
      *
+     * @param  array<int, string[]>|null  $officesByRow  Optional excelRow => office labels
      * @return array<int, array<int, int>>
      */
-    private static function buildCseMonthQtyByCatalogRow(int $fiscalYear, array $catalogIndex): array
-    {
+    private static function buildCseMonthQtyByCatalogRow(
+        int $fiscalYear,
+        array $catalogIndex,
+        ?array &$officesByRow = null
+    ): array {
         $qtyByRow = [];
+        if ($officesByRow !== null) {
+            $officesByRow = [];
+        }
 
-        $ppmpIds = Ppmp::where('fiscal_year', $fiscalYear)
+        $ppmps = Ppmp::where('fiscal_year', $fiscalYear)
             ->where('status', 'Approved')
             ->whereNull('superseded_at')
-            ->pluck('id');
+            ->get(['id', 'office_id']);
+        $ppmpIds = $ppmps->pluck('id');
+        $officeByPpmpId = [];
+        if ($officesByRow !== null && $ppmps->isNotEmpty()) {
+            $offices = Office::whereIn('id', $ppmps->pluck('office_id')->unique()->filter())
+                ->get()
+                ->keyBy('id');
+            foreach ($ppmps as $ppmp) {
+                $office = $offices->get($ppmp->office_id);
+                $officeByPpmpId[$ppmp->id] = $office
+                    ? (string) ($office->code ?: $office->name)
+                    : '';
+            }
+        }
 
         $cseItems = $ppmpIds->isEmpty()
             ? collect()
@@ -289,6 +320,7 @@ class AppExcelExporter
                 if (!$lines) {
                     continue;
                 }
+                $officeLabel = $officeByPpmpId[$item->ppmp_id] ?? '';
                 foreach ($lines as $line) {
                     $excelRow = self::matchCse2027CatalogLine($line, $catalogIndex);
                     if ($excelRow === null) {
@@ -298,6 +330,12 @@ class AppExcelExporter
                         $qtyByRow[$excelRow] = CseQtyHelper::emptyMonthMap();
                     }
                     CseQtyHelper::addExpandedLineToMonthMap($qtyByRow[$excelRow], $line);
+                    if ($officesByRow !== null && $officeLabel !== '') {
+                        if (!isset($officesByRow[$excelRow])) {
+                            $officesByRow[$excelRow] = [];
+                        }
+                        $officesByRow[$excelRow][$officeLabel] = true;
+                    }
                 }
             }
             return $qtyByRow;
@@ -326,6 +364,18 @@ class AppExcelExporter
             $qtyByRow[$excelRow][4] += (int) ($row->q2_qty ?? 0);
             $qtyByRow[$excelRow][7] += (int) ($row->q3_qty ?? 0);
             $qtyByRow[$excelRow][10] += (int) ($row->q4_qty ?? 0);
+            if ($officesByRow !== null && !empty($row->end_user_offices)) {
+                foreach (preg_split('/\s*,\s*/', (string) $row->end_user_offices) ?: [] as $officeLabel) {
+                    $officeLabel = trim($officeLabel);
+                    if ($officeLabel === '') {
+                        continue;
+                    }
+                    if (!isset($officesByRow[$excelRow])) {
+                        $officesByRow[$excelRow] = [];
+                    }
+                    $officesByRow[$excelRow][$officeLabel] = true;
+                }
+            }
         }
 
         return $qtyByRow;
@@ -666,6 +716,7 @@ class AppExcelExporter
     /**
      * Build CSE-APP preview rows from approved PPMP quantity_size lines matched
      * to the stock APP-CSE catalog only (no invented Item & Specs rows).
+     * Each row is a catalog SKU with stable catalog_row + code for the web form overlay.
      *
      * @return array<int, object>
      */
@@ -688,7 +739,8 @@ class AppExcelExporter
         }
 
         $catalogIndex = self::buildCse2027CatalogIndexFromXml($sheetXml, $stringsXml);
-        $qtyByRow = self::buildCseMonthQtyByCatalogRow($fiscalYear, $catalogIndex);
+        $officesByRow = [];
+        $qtyByRow = self::buildCseMonthQtyByCatalogRow($fiscalYear, $catalogIndex, $officesByRow);
         $rows = [];
 
         foreach ($qtyByRow as $excelRow => $months) {
@@ -698,19 +750,24 @@ class AppExcelExporter
                 continue;
             }
             $meta = $catalogIndex['meta'][$excelRow] ?? null;
+            $unitCost = (float) ($catalogIndex['price'][$excelRow] ?? 0);
+            $officeLabels = array_keys($officesByRow[$excelRow] ?? []);
+            sort($officeLabels, SORT_NATURAL | SORT_FLAG_CASE);
             $rows[] = (object) [
                 'id' => 'cse-catalog-' . $excelRow,
+                'catalog_row' => (int) $excelRow,
+                'code' => $meta['code'] ?? '',
                 'description' => $meta['description'] ?? '',
                 'is_cse' => true,
                 'unit_of_measure' => $meta['uom'] ?? ($catalogIndex['uom'][$excelRow] ?? null),
-                'unit_cost' => $catalogIndex['price'][$excelRow] ?? null,
+                'unit_cost' => $unitCost > 0 ? $unitCost : null,
                 'total_quantity' => $total,
                 'q1_qty' => $quarters['q1'],
                 'q2_qty' => $quarters['q2'],
                 'q3_qty' => $quarters['q3'],
                 'q4_qty' => $quarters['q4'],
-                'total_estimated_budget' => $total * (float) ($catalogIndex['price'][$excelRow] ?? 0),
-                'end_user_offices' => null,
+                'total_estimated_budget' => $total * $unitCost,
+                'end_user_offices' => $officeLabels ? implode(', ', $officeLabels) : null,
                 'quantity_size' => null,
                 'proc_start' => null,
                 'proc_end' => null,
@@ -718,7 +775,8 @@ class AppExcelExporter
             ];
         }
 
-        usort($rows, fn ($a, $b) => strcasecmp((string) $a->description, (string) $b->description));
+        // Keep Excel catalog order (row number) so the web overlay stays aligned.
+        usort($rows, fn ($a, $b) => ((int) $a->catalog_row) <=> ((int) $b->catalog_row));
         return $rows;
     }
 

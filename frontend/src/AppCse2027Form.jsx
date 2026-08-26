@@ -70,7 +70,18 @@ function qtyCell(value) {
   return n ? n.toLocaleString() : "";
 }
 
-function matchCatalogItem(row, items, descIndex, codeIndex) {
+function matchCatalogItem(row, items, descIndex, codeIndex, rowIndex) {
+  // Prefer stable keys from buildCsePreviewRows (catalog_row / code).
+  const catalogRow = Number(row?.catalog_row || 0);
+  if (catalogRow > 0 && rowIndex.has(catalogRow)) {
+    return rowIndex.get(catalogRow);
+  }
+
+  const codeKey = normalizeCseKey(row?.code);
+  if (codeKey && codeIndex.get(codeKey)?.length === 1) {
+    return codeIndex.get(codeKey)[0];
+  }
+
   const descKey = normalizeCseKey(row?.description);
   if (!descKey) return null;
   if (descIndex.get(descKey)?.length === 1) return descIndex.get(descKey)[0];
@@ -103,7 +114,9 @@ function buildFilledCatalog(rows) {
     }));
   const descIndex = new Map();
   const codeIndex = new Map();
+  const rowIndex = new Map();
   items.forEach((item) => {
+    rowIndex.set(Number(item.row), item);
     if (!descIndex.has(item.descKey)) descIndex.set(item.descKey, []);
     descIndex.get(item.descKey).push(item);
     if (!codeIndex.has(item.codeKey)) codeIndex.set(item.codeKey, []);
@@ -113,12 +126,12 @@ function buildFilledCatalog(rows) {
   const qtyByRow = new Map();
 
   (rows || []).forEach((row) => {
-    const match = matchCatalogItem(row, items, descIndex, codeIndex);
+    const match = matchCatalogItem(row, items, descIndex, codeIndex, rowIndex);
     // Stock APP-CSE catalog only — skip anything that is not a catalog item.
     if (!match) return;
 
     // Preview uses consolidated q1–q4 (placed in Jan/Apr/Jul/Oct for display).
-    // Excel export writes true monthly cells on the template copy.
+    // Excel export writes true monthly cells on the full template copy.
     const months = monthQtyFromQuarters(row);
     const qty = quartersFromMonthQty(months);
     const prev = qtyByRow.get(match.row) || {
@@ -150,8 +163,6 @@ function buildFilledCatalog(rows) {
     }
     qtyByRow.set(match.row, prev);
   });
-
-  const unmatched = [];
 
   const displayEntries = [];
   let pendingPart = null;
@@ -205,6 +216,7 @@ function buildFilledCatalog(rows) {
     });
   };
 
+  // On-screen: filled catalog items only (empty SKUs stay in the Excel download).
   entries.forEach((entry) => {
     if (entry.type === "part") {
       pendingPart = entry;
@@ -231,7 +243,6 @@ function buildFilledCatalog(rows) {
 
   return {
     displayEntries,
-    unmatched,
     partITotal,
     partIITotal,
     filledCount: displayEntries.filter((e) => e.type === "item").length,
@@ -295,7 +306,6 @@ export default function AppCse2027Form({
   const view = useMemo(() => buildFilledCatalog(rows), [rows]);
   const {
     displayEntries,
-    unmatched,
     partITotal,
     partIITotal,
     filledCount,
@@ -403,11 +413,11 @@ export default function AppCse2027Form({
             </tr>
           </thead>
           <tbody>
-            {displayEntries.length === 0 && unmatched.length === 0 ? (
+            {displayEntries.length === 0 ? (
               <tr>
                 <td colSpan={27} className="app-cse-2027__empty">
-                  No consolidated CSE quantities to show yet. Run consolidation
-                  after verified CSE PPMPs are available.
+                  No CSE catalog quantities to show yet. Verify CSE PPMPs with
+                  Budget so item quantities can fill this APP-CSE form.
                 </td>
               </tr>
             ) : null}

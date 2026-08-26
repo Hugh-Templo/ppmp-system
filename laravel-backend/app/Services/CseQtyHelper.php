@@ -147,21 +147,37 @@ class CseQtyHelper
             return [];
         }
 
-        // Offices put one item per line in quantity_size; keep names intact
-        // (names often contain digits like 500ml, 80 gsm, #35, 2 ply).
-        $chunks = preg_split('/[\r\n]+/', $text) ?: [];
+        // One item per line; also allow ; or | between items. Do not split on commas —
+        // names often contain them (e.g. "Alcohol, Ethyl, 500 mL").
+        $chunks = preg_split('/[\r\n;|]+/', $text) ?: [];
         $out = [];
         foreach ($chunks as $chunk) {
             $line = trim($chunk);
             if ($line === '') {
                 continue;
             }
+            // Prefer "qty unit-name" or "qty unit name"; unit is optional.
             if (!preg_match('/^\s*(\d+)\s*([A-Za-z.%]+)?\s*[-–]?\s*(.+?)\s*$/u', $line, $m)) {
                 continue;
             }
             $qty = (int) $m[1];
             $unit = trim((string) ($m[2] ?? ''));
             $name = trim((string) ($m[3] ?? ''));
+            // Without a dash, the optional "unit" group may have eaten the first
+            // word of the item name (e.g. "10 ALCOHOL Ethyl"). Keep only known UOMs.
+            if ($unit !== '' && !preg_match('/[-–]/u', $line)) {
+                $unitKey = strtolower(rtrim($unit, '.'));
+                $knownUoms = [
+                    'bot', 'btl', 'bottle', 'gal', 'gallon', 'pc', 'pcs', 'piece',
+                    'pck', 'pk', 'pack', 'ream', 'box', 'can', 'roll', 'pouch',
+                    'unit', 'ctrg', 'crtg', 'cartridge', 'set', 'pad', 'book',
+                    'jar', 'tube', 'pair', 'bundle', 'rim', 'dozen', 'bag',
+                ];
+                if (!in_array($unitKey, $knownUoms, true)) {
+                    $name = trim($unit . ' ' . $name);
+                    $unit = '';
+                }
+            }
             $name = preg_replace('/\s+/', ' ', $name) ?? $name;
             $name = rtrim($name, " \t.,;");
             if ($qty <= 0 || $name === '') {

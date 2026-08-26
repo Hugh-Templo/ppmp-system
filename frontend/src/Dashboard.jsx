@@ -2415,8 +2415,9 @@ function Dashboard({ token, user, onLogout }) {
     const isCse = kind === "cse";
     const label = isCse ? "CSE" : "nonCSE";
     const rawRows = kindAppPayload.rows || [];
-    // Collapse duplicate Procurement Project / description names before paging/preview.
-    const rows = mergeAppRowsByDescription(rawRows);
+    // CSE rows are already unique catalog SKUs from buildCsePreviewRows — do not
+    // merge by description (would collapse distinct items / drop catalog_row).
+    const rows = isCse ? rawRows : mergeAppRowsByDescription(rawRows);
     const sourceTotal = approvedAppPpmps.reduce(
       (sum, p) => sum + Number(p.total_estimated_budget || 0),
       0
